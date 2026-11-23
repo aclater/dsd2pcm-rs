@@ -3,6 +3,9 @@
 //! The reader accepts PCM integer samples of 16, 24 or 32 bits and IEEE float samples of 32
 //! or 64 bits, in plain or `WAVE_FORMAT_EXTENSIBLE` form, 1 to 6 channels. Samples are
 //! returned as `f64` with digital full scale at +-1.0; non-finite float samples read as 0.
+//! A `data` chunk size of 0 or 0xFFFFFFFF (left by streaming writers and by some encoders
+//! past 4 GiB) means the samples run to the end of the file, unless other chunks follow it,
+//! which is an error.
 
 use crate::error::{format_err, unsupported, Result};
 use crate::io::{le_u16, le_u32, read_exact_arr, PcmInfo, PcmRead};
@@ -110,12 +113,19 @@ impl<R: Read + Seek> WavReader<R> {
                     let Some((format, channels, rate)) = fmt else {
                         return format_err("WAV 'data' chunk before 'fmt '");
                     };
-                    // Streamed files may carry a placeholder size; read to the end then.
+                    // Streamed files and some encoders past 4 GiB leave a placeholder
+                    // size of 0 or 0xFFFFFFFF; the samples then run to the end of the file.
+                    // A placeholder followed by other chunks is an error, never 0 frames.
                     let avail = file_len - body;
-                    let len = if size == 0xFFFF_FFFF || size > avail {
+                    let len = if size == 0 || size == 0xFFFF_FFFF {
+                        if chunks_fill(&mut r, body, file_len)? {
+                            return format_err(format!(
+                                "WAV 'data' chunk size is {size:#x} and other chunks follow it"
+                            ));
+                        }
                         avail
                     } else {
-                        size
+                        size.min(avail)
                     };
                     let frame = (usize::from(channels) * format.bytes()) as u64;
                     let frames = len / frame;
@@ -142,6 +152,34 @@ impl<R: Read + Seek> WavReader<R> {
     pub fn format(&self) -> WavFormat {
         self.format
     }
+}
+
+/// Whether `from..file_len` holds one or more RIFF chunks exactly (printable ids, sizes that
+/// end at the end of the file, with or without a final pad byte). Leaves the reader at `from`.
+fn chunks_fill<R: Read + Seek>(r: &mut R, from: u64, file_len: u64) -> Result<bool> {
+    let mut pos = from;
+    let mut chunks = 0;
+    let fill = loop {
+        if chunks > 0 && (pos == file_len || pos == file_len + 1) {
+            break true;
+        }
+        if chunks == 4096 {
+            break true; // that many well-formed chunk headers are not sample data
+        }
+        if pos + 8 > file_len {
+            break false;
+        }
+        r.seek(SeekFrom::Start(pos))?;
+        let ck: [u8; 8] = read_exact_arr(r)?;
+        if !ck[0..4].iter().all(|b| (0x20..=0x7E).contains(b)) {
+            break false;
+        }
+        let size = u64::from(le_u32(&ck, 4));
+        pos += 8 + size + (size & 1);
+        chunks += 1;
+    };
+    r.seek(SeekFrom::Start(from))?;
+    Ok(fill)
 }
 
 fn sample(format: WavFormat, b: &[u8]) -> f64 {

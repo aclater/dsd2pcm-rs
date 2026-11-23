@@ -286,3 +286,68 @@ fn dsd128_input_is_refused_by_every_filter() {
         );
     }
 }
+
+/// A 24-bit stereo WAV made by the crate's writer with `frames` frames.
+fn wav_i24(frames: usize) -> Vec<u8> {
+    let mut w = WavWriter::new(Cursor::new(Vec::new()), WavFormat::I24, 2, 88_200).unwrap();
+    let raw: Vec<u8> = (0..frames * 6).map(|i| (i * 13) as u8).collect();
+    w.write_raw(&raw).unwrap();
+    w.finish().unwrap();
+    w.into_inner().into_inner()
+}
+
+fn wav_samples(b: Vec<u8>) -> dsd2pcm::Result<Vec<Vec<f64>>> {
+    let mut r = WavReader::new(Cursor::new(b))?;
+    let mut out = vec![Vec::new(); usize::from(r.info().channels)];
+    while r.read_frames(7, &mut out)? > 0 {}
+    assert_eq!(out[0].len() as u64, r.info().frames);
+    Ok(out)
+}
+
+/// Sets the `data` chunk size of a file from [`wav_i24`] (and of RIFF, as such encoders do).
+fn set_data_size(mut b: Vec<u8>, size: u32) -> Vec<u8> {
+    assert_eq!(&b[36..40], b"data");
+    b[40..44].copy_from_slice(&size.to_le_bytes());
+    b[4..8].copy_from_slice(&size.to_le_bytes());
+    b
+}
+
+#[test]
+fn wav_data_size_zero_as_last_chunk_reads_to_the_end() {
+    let good = wav_samples(wav_i24(100)).unwrap();
+    assert_eq!(good[0].len(), 100);
+    assert_eq!(wav_samples(set_data_size(wav_i24(100), 0)).unwrap(), good);
+    // A trailing partial frame is dropped.
+    let mut b = set_data_size(wav_i24(100), 0);
+    b.extend_from_slice(&[1, 2, 3, 4, 5]);
+    assert_eq!(wav_samples(b).unwrap(), good);
+}
+
+#[test]
+fn wav_data_size_placeholder_reads_to_the_end() {
+    let good = wav_samples(wav_i24(100)).unwrap();
+    assert_eq!(
+        wav_samples(set_data_size(wav_i24(100), u32::MAX)).unwrap(),
+        good
+    );
+}
+
+#[test]
+fn wav_data_size_zero_followed_by_a_chunk_is_an_error() {
+    for size in [0u32, u32::MAX] {
+        let mut b = set_data_size(wav_i24(0), size);
+        b.extend_from_slice(b"LIST\x05\0\0\0INFOx\0");
+        let r = WavReader::new(Cursor::new(b));
+        assert!(matches!(r, Err(Error::Format(_))), "size {size:#x}: {r:?}");
+    }
+}
+
+#[test]
+fn wav_empty_data_chunk_is_zero_frames() {
+    // Size 0 with nothing after it is a valid empty file.
+    assert!(wav_samples(wav_i24(0)).unwrap()[0].is_empty());
+    // A correct size followed by another chunk reads only the declared samples.
+    let mut b = wav_i24(10);
+    b.extend_from_slice(b"LIST\x04\0\0\0INFO");
+    assert_eq!(wav_samples(b).unwrap()[0].len(), 10);
+}
