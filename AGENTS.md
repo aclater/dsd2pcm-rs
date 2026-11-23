@@ -10,4 +10,7 @@
   tests prove exact from the tables (`decimator/exact.rs`); no `mul_add` in the generic kernels.
 - **Untrusted input.** Parsers are bounds-checked, never panic on bad files, no `unsafe` without review.
   The only `unsafe` is in `decimator/dispatch.rs` (calls into `#[target_feature]` builds).
-- Every change goes through review with green checks; every change updates README and docs where needed.
+- Until the repository is public, changes are committed straight to `main` with fmt, clippy and tests
+  green on every commit; `unsafe`, parsers and untrusted-input handling still get a security review
+  first. Once public, every change goes through a pull request with required checks. Every change
+  updates README and docs where needed.
