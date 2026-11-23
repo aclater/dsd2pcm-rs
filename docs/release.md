@@ -27,7 +27,7 @@ The GitHub release, with these assets:
 | `dsd2pcm-0.1.0-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
 | `dsd2pcm-0.1.0-i686-linux.tar.gz` | Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later |
 | `dsd2pcm-0.1.0-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon; not signed or notarised |
-| `dsd2pcm-0.1.0-x86_64-windows.zip` | Windows 10 and 11, x86_64; C runtime linked in; not code-signed |
+| `dsd2pcm-0.1.0-x86_64-windows.zip` | Windows 10 and 11, x86_64; C runtime linked in; Authenticode-signed only when `WINDOWS_SIGNING` is `required` (below) |
 | `libdsd2pcm-0.1.0-x86_64-linux.tar.gz` | C library, Linux x86_64, glibc 2.17 or later |
 | `libdsd2pcm-0.1.0-aarch64-linux.tar.gz` | C library, Linux aarch64, glibc 2.17 or later |
 | `libdsd2pcm-0.1.0-i686-linux.tar.gz` | C library, Linux 32-bit x86, glibc 2.17 or later |
@@ -58,6 +58,12 @@ all.
    `crates/dsd2pcm-capi/tests/minimal.c` against the packed C library, shared and static
    (through its pkg-config file on Linux and macOS, with MSVC on Windows), checking the
    SONAME (Linux) or install name (macOS).
+   On Windows this is three jobs: `binary (x86_64-windows)` builds and tests with no
+   secrets; `sign (x86_64-windows)` signs `dsd2pcm.exe` and `dsd2pcm.dll` when signing is
+   on (see "Windows code signing") and packs the archives; `check (x86_64-windows)` unpacks
+   them on a fresh runner, verifies the signatures when they are required
+   (`.github/scripts/check-windows-signature.ps1`: `signtool verify /pa /tw` and a valid,
+   timestamped Authenticode signature), and runs the smoke tests.
 3. **same output everywhere**: all ten archives are there and match their `.sha256`, and
    all five binaries made byte-identical output from the test file.
 4. **publish to crates.io** (tag only): in the GitHub environment `release`, so it waits for
@@ -69,7 +75,9 @@ all.
 A pull request that changes the release files, or a manual run (Actions, release, "Run
 workflow"), is a dry run: steps 1 to 3, nothing published.
 
-Permissions: every workflow reads only (`contents: read`). The crates job adds
+Permissions: every workflow reads only (`contents: read`). Only `sign (x86_64-windows)`
+sees the four `ES_*` secrets, in its signing step, and only on a tag with signing
+required. The crates job adds
 `id-token: write` (for crates.io). The release job adds `contents: write` (the release),
 `id-token: write` and `attestations: write` (the attestation). Every action is pinned by
 commit SHA; checkouts keep no credentials.
@@ -93,6 +101,48 @@ commit SHA; checkouts keep no credentials.
 4. **Actions settings**: workflow permissions "Read repository contents" (the default for new
    repositories); "Allow GitHub Actions to create and approve pull requests" off.
 5. **Code scanning** (CodeQL, Scorecard) works once the repository is public.
+
+## Windows code signing
+
+Optional, through SSL.com's eSigner cloud signing (only the files' hashes are sent to
+SSL.com). The repository variable `WINDOWS_SIGNING` (Settings, Secrets and variables,
+Actions, Variables) sets it:
+
+- `off`, or unset: the Windows files are not signed; the release notes say "Not
+  code-signed".
+- `required`: on a `v*` tag, `sign (x86_64-windows)` runs in the environment `release` (one
+  more approval) and signs `dsd2pcm.exe` and `dsd2pcm.dll`. Missing secrets, a failed
+  signing or a failed `signtool verify /pa` stop the release before anything is published.
+  Pull requests and manual runs skip signing with a notice.
+
+Any other value fails the run. Setup (Orchestrator):
+
+1. An SSL.com code signing certificate (OV or EV) enrolled in eSigner, and its eSigner
+   TOTP secret: the base32 text SSL.com shows with the QR code when eSigner's
+   authenticator is set up (see SSL.com's eSigner CodeSignTool guide).
+2. Secrets in the environment `release`:
+
+   | Secret | Content |
+   |---|---|
+   | `ES_USERNAME` | the SSL.com account user name |
+   | `ES_PASSWORD` | its password |
+   | `ES_CREDENTIAL_ID` | the eSigner credential ID of the certificate |
+   | `ES_TOTP_SECRET` | the eSigner TOTP secret (base32) |
+
+   An SSL.com account used only for signing is best: these four values sign as the
+   certificate holder.
+3. A dry run on `main` (Actions, release, Run workflow) still skips signing (no secrets
+   outside tags); the first signed files come from a tag. Set `WINDOWS_SIGNING` to
+   `required` just before that tag.
+4. In the same pull request as the first signed release, change the README's Platforms row
+   for Windows from "Not code-signed" to "Authenticode-signed". If `WINDOWS_SIGNING` goes
+   back to `off`, change it back.
+
+The workflow downloads CodeSignTool (SSL.com's signing client, proprietary, free for their
+certificate holders, not redistributed here) from its GitHub release, pinned by version and
+SHA-256 (`CST_VERSION`, `CST_SHA256` in `release.yml`), and runs it on the runner's Java 17.
+To update it: download the new `CodeSignTool-v<version>-windows.zip`, check it, and change
+both values.
 
 ## First publish to crates.io (Orchestrator, launch morning)
 
@@ -149,8 +199,9 @@ steps 1 to 5 for that crate alone.
    ```
 
    Check first that `git log -1 origin/main` is the approved commit.
-4. Approve the `release` environment when the crates.io job waits (Actions, the run, Review
-   deployments).
+4. Approve the `release` environment when a job waits for it (Actions, the run, Review
+   deployments): `publish to crates.io`, and `sign (x86_64-windows)` when Windows signing
+   is required.
 5. Check: the crates on crates.io, the GitHub release with its 31 files (ten
    archives, their `.sha256` and `.intoto.jsonl` files, and `SHA256SUMS`), and an asset:
 

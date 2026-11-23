@@ -3,7 +3,10 @@
 #   1. build and test the command-line tool `dsd2pcm` and the C library (dsd2pcm-capi) for
 #      Linux x86_64, aarch64 and i686 (glibc 2.17 or later), macOS arm64 and Windows x86_64;
 #      every packed binary converts the same test file, and all five outputs must be
-#      byte-identical; every packed C library builds and runs a C program;
+#      byte-identical; every packed C library builds and runs a C program. The Windows
+#      tool and dsd2pcm.dll are Authenticode-signed through SSL.com eSigner when the
+#      repository variable WINDOWS_SIGNING is `required` (job windows-sign, environment
+#      `release` on a tag; missing secrets or a failed signature fail the release);
 #   2. publish the crates to crates.io with trusted publishing (OIDC, no stored token), in
 #      dependency order: dsd2pcm, then dsd2pcm-capi if it is publishable (not for 0.1.0),
 #      then dsd2pcm-cli (.github/scripts/publish-crates.sh). This job runs in the GitHub
@@ -336,47 +339,131 @@ jobs:
             $deps
             if ($deps -match "(?i)vcruntime|msvcp|api-ms-win-crt") { throw "$f depends on the Visual C++ runtime" }
           }
+      - name: The unsigned files, for the signing job
+        run: |
+          mkdir -p unsigned
+          cp target/release/dsd2pcm.exe target/release/dsd2pcm.dll target/release/dsd2pcm.dll.lib \
+            target/release/dsd2pcm.lib "$RUNNER_TEMP/static-libs" unsigned/
+          ls -l unsigned
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: windows-unsigned
+          path: unsigned/
+          if-no-files-found: error
+          retention-days: 1
+
+  # Authenticode signing of dsd2pcm.exe and dsd2pcm.dll through SSL.com's eSigner (cloud
+  # signing: only the files' hashes leave the runner), then the two archives. Optional, set
+  # by the repository variable WINDOWS_SIGNING:
+  #   off (or unset): never signed; a notice says so;
+  #   required: on a v* tag the job runs in the environment `release` (required reviewers),
+  #     which holds the four ES_* secrets (docs/release.md); missing secrets, a failed
+  #     signing or a failed `signtool verify /pa` fail the release before anything is
+  #     published. Other runs have no environment and no secrets, and skip with a notice.
+  # The secrets are read by one step only, through env:. CodeSignTool is downloaded from
+  # SSL.com's GitHub release, pinned by version and SHA-256, and run on the runner's Java.
+  windows-sign:
+    name: sign (x86_64-windows)
+    needs: [preflight, windows]
+    runs-on: windows-2025
+    timeout-minutes: 30
+    environment: ${{ github.ref_type == 'tag' && vars.WINDOWS_SIGNING == 'required' && 'release' || '' }}
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      NAME: x86_64-windows
+      REF_TYPE: ${{ github.ref_type }}
+      WINDOWS_SIGNING: ${{ vars.WINDOWS_SIGNING }}
+      # Whether every secret is set; the values themselves are read by the signing step only.
+      HAS_SIGNING: ${{ secrets.ES_USERNAME != '' && secrets.ES_PASSWORD != '' && secrets.ES_CREDENTIAL_ID != '' && secrets.ES_TOTP_SECRET != '' }}
+      CST_VERSION: 1.3.2
+      CST_SHA256: 4afc32e8b7f79bbe1de7e4e7049aaad4e0f754357613b9bbec0e3052f06fd36b
+    steps:
+      - name: Signing mode
+        run: |
+          case "${WINDOWS_SIGNING:-off}" in
+            off)
+              echo "::notice::Windows signing is off (repository variable WINDOWS_SIGNING): the Windows files are not code-signed"
+              echo "SIGN=false" >> "$GITHUB_ENV" ;;
+            required)
+              if [[ "$REF_TYPE" != tag ]]; then
+                echo "::notice::dry run: Windows files are not signed (the secrets are only available to tag runs)"
+                echo "SIGN=false" >> "$GITHUB_ENV"
+              elif [[ "$HAS_SIGNING" != true ]]; then
+                echo "::error::WINDOWS_SIGNING is 'required' but the ES_* secrets are missing from the environment 'release' (docs/release.md)"
+                exit 1
+              else
+                echo "SIGN=true" >> "$GITHUB_ENV"
+              fi ;;
+            *)
+              echo "::error::repository variable WINDOWS_SIGNING is '$WINDOWS_SIGNING': use 'off' or 'required'"
+              exit 1 ;;
+          esac
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: windows-unsigned
+          path: ${{ runner.temp }}/out
+      - name: CodeSignTool (SSL.com's release, pinned by version and SHA-256)
+        if: env.SIGN == 'true'
+        run: |
+          zip="$RUNNER_TEMP/codesigntool.zip"
+          curl -sSfL --proto =https --tlsv1.2 -o "$zip" \
+            "https://github.com/SSLcom/CodeSignTool/releases/download/v$CST_VERSION/CodeSignTool-v$CST_VERSION-windows.zip"
+          echo "$CST_SHA256  $zip" | sha256sum -c
+          python -I -m zipfile -e "$zip" "$RUNNER_TEMP/codesigntool"
+          rm -f "$zip"
+          ls "$RUNNER_TEMP/codesigntool/jar"
+          java="$(cygpath -u "$JAVA_HOME_17_X64")/bin/java.exe"
+          "$java" -version
+      - name: Sign (eSigner, Authenticode)
+        if: env.SIGN == 'true'
+        env:
+          ES_USERNAME: ${{ secrets.ES_USERNAME }}
+          ES_PASSWORD: ${{ secrets.ES_PASSWORD }}
+          ES_CREDENTIAL_ID: ${{ secrets.ES_CREDENTIAL_ID }}
+          ES_TOTP_SECRET: ${{ secrets.ES_TOTP_SECRET }}
+        run: |
+          java="$(cygpath -u "$JAVA_HOME_17_X64")/bin/java.exe"
+          signed="$RUNNER_TEMP/signed"
+          mkdir -p "$signed"
+          for f in dsd2pcm.exe dsd2pcm.dll; do
+            # CodeSignTool reads conf/ from its working directory. Its exit status is not
+            # reliable, so the output is checked and signtool verifies the result below.
+            (cd "$RUNNER_TEMP/codesigntool" && "$java" -Xmx1024M -jar "jar/code_sign_tool-$CST_VERSION.jar" sign \
+              -username="$ES_USERNAME" -password="$ES_PASSWORD" -credential_id="$ES_CREDENTIAL_ID" \
+              -totp_secret="$ES_TOTP_SECRET" \
+              -input_file_path="$(cygpath -w "$RUNNER_TEMP/out/$f")" \
+              -output_dir_path="$(cygpath -w "$signed")") 2>&1 | tee "$RUNNER_TEMP/sign-$f.log"
+            if grep -qiE 'error|exception' "$RUNNER_TEMP/sign-$f.log" || [[ ! -s "$signed/$f" ]]; then
+              echo "::error::signing $f failed"
+              exit 1
+            fi
+            cp "$signed/$f" "$RUNNER_TEMP/out/$f"
+          done
+      - name: Delete CodeSignTool and its logs
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/codesigntool" "$RUNNER_TEMP/signed" "$RUNNER_TEMP"/sign-*.log
+      - name: Signed (signtool verify /pa, timestamp required)
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "out"
+          .github\scripts\check-windows-signature.ps1 (Join-Path $out "dsd2pcm.exe") (Join-Path $out "dsd2pcm.dll")
       - name: Package
         run: |
+          out="$RUNNER_TEMP/out"
           pkg="dsd2pcm-$VERSION-$NAME"
           mkdir -p "dist/$pkg"
-          cp target/release/dsd2pcm.exe README.md LICENSE-MIT LICENSE-APACHE "dist/$pkg/"
+          cp "$out/dsd2pcm.exe" README.md LICENSE-MIT LICENSE-APACHE "dist/$pkg/"
           # The C library's archive (.github/scripts/stage-capi.sh).
-          cpkg=$(.github/scripts/stage-capi.sh "$VERSION" "$NAME" target/release dist "$(cat "$RUNNER_TEMP/static-libs")")
+          cpkg=$(.github/scripts/stage-capi.sh "$VERSION" "$NAME" "$out" dist "$(cat "$out/static-libs")")
           for p in "$pkg" "$cpkg"; do
             python -I .github/scripts/pack-zip.py "dist/$p.zip" "dist/$p" "$(git log -1 --format=%ct)"
             rm -rf "dist/$p"
             (cd dist && sha256sum "$p.zip" > "$p.zip.sha256" && cat "$p.zip.sha256")
           done
-          echo "PKG=$pkg" >> "$GITHUB_ENV"
-          echo "CPKG=$cpkg" >> "$GITHUB_ENV"
-      - name: The packed binary converts the test file
-        run: |
-          mkdir -p "$RUNNER_TEMP/check"
-          python -I -m zipfile -e "dist/$PKG.zip" "$RUNNER_TEMP/check"
-          python -I .github/scripts/make-test-dsf.py "$RUNNER_TEMP/test.dsf"
-          "$RUNNER_TEMP/check/$PKG/dsd2pcm.exe" "$RUNNER_TEMP/test.dsf" "$RUNNER_TEMP/test.wav"
-          (cd "$RUNNER_TEMP" && sha256sum test.wav) | tee "dist/smoke-$NAME.sha256"
-      # MSVC, in a copy of the unpacked archive: the example against the DLL's import library,
-      # and against the static library with the system libraries rustc listed.
-      - name: The packed C library builds and runs a C program (MSVC)
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $d = Join-Path $env:RUNNER_TEMP "capi"
-          Expand-Archive "dist\$env:CPKG.zip" $d
-          Set-Location (Join-Path $d $env:CPKG)
-          Get-ChildItem -Recurse | Select-Object -ExpandProperty FullName
-          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
-          $static = (Get-Content (Join-Path $env:RUNNER_TEMP "static-libs")).Trim()
-          $vcvars = Join-Path $vs "VC\Auxiliary\Build\vcvars64.bat"
-          cmd /c "`"$vcvars`" >nul && cl /nologo /W3 /I include examples\minimal.c /Fe:minimal.exe /link lib\dsd2pcm.dll.lib && cl /nologo /W3 /MT /I include examples\minimal.c /Fe:minimal-static.exe /link lib\dsd2pcm.lib $static"
-          if ($LASTEXITCODE -ne 0) { throw "cl: $LASTEXITCODE" }
-          Copy-Item bin\dsd2pcm.dll .
-          .\minimal.exe
-          if ($LASTEXITCODE -ne 0) { throw "minimal.exe: $LASTEXITCODE" }
-          .\minimal-static.exe
-          if ($LASTEXITCODE -ne 0) { throw "minimal-static.exe: $LASTEXITCODE" }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: bin-x86_64-windows
@@ -387,11 +474,86 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The Windows archives as a user gets them, on a fresh runner: signed when signing is
+  # required on a tag; then the tool converts the test file and the C library builds and runs
+  # a C program with MSVC.
+  windows-check:
+    name: check (x86_64-windows)
+    needs: [preflight, windows-sign]
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      NAME: x86_64-windows
+      REF_TYPE: ${{ github.ref_type }}
+      WINDOWS_SIGNING: ${{ vars.WINDOWS_SIGNING }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: bin-x86_64-windows
+          path: dist
+      - name: Unpack
+        run: |
+          (cd dist && sha256sum -c ./*.sha256)
+          mkdir -p "$RUNNER_TEMP/check"
+          for a in dist/*.zip; do python -I -m zipfile -e "$a" "$RUNNER_TEMP/check"; done
+          echo "PKG=dsd2pcm-$VERSION-$NAME" >> "$GITHUB_ENV"
+          echo "CPKG=libdsd2pcm-$VERSION-$NAME" >> "$GITHUB_ENV"
+      - name: Signed (required on a tag when WINDOWS_SIGNING is 'required')
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:RUNNER_TEMP "check\$env:PKG\dsd2pcm.exe"
+          $dll = Join-Path $env:RUNNER_TEMP "check\$env:CPKG\bin\dsd2pcm.dll"
+          if ($env:REF_TYPE -eq "tag" -and $env:WINDOWS_SIGNING -eq "required") {
+            .github\scripts\check-windows-signature.ps1 $exe $dll
+          } else {
+            Write-Output "::notice::Windows files not signed on this run (WINDOWS_SIGNING '$env:WINDOWS_SIGNING', $env:REF_TYPE): signature check skipped"
+            Get-AuthenticodeSignature $exe, $dll | Format-Table -AutoSize Status, Path
+          }
+      - name: The packed binary converts the test file
+        run: |
+          python -I .github/scripts/make-test-dsf.py "$RUNNER_TEMP/test.dsf"
+          "$RUNNER_TEMP/check/$PKG/dsd2pcm.exe" "$RUNNER_TEMP/test.dsf" "$RUNNER_TEMP/test.wav"
+          mkdir -p smoke
+          (cd "$RUNNER_TEMP" && sha256sum test.wav) | tee "smoke/smoke-$NAME.sha256"
+      # MSVC, in the unpacked archive: the example against the DLL's import library, and
+      # against the static library with the system libraries rustc listed (dsd2pcm.pc's list
+      # is not shipped on Windows, so the signing job's input carries it).
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: windows-unsigned
+          path: ${{ runner.temp }}/unsigned
+      - name: The packed C library builds and runs a C program (MSVC)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location (Join-Path $env:RUNNER_TEMP "check\$env:CPKG")
+          Get-ChildItem -Recurse | Select-Object -ExpandProperty FullName
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $static = (Get-Content (Join-Path $env:RUNNER_TEMP "unsigned\static-libs")).Trim()
+          $vcvars = Join-Path $vs "VC\Auxiliary\Build\vcvars64.bat"
+          cmd /c "`"$vcvars`" >nul && cl /nologo /W3 /I include examples\minimal.c /Fe:minimal.exe /link lib\dsd2pcm.dll.lib && cl /nologo /W3 /MT /I include examples\minimal.c /Fe:minimal-static.exe /link lib\dsd2pcm.lib $static"
+          if ($LASTEXITCODE -ne 0) { throw "cl: $LASTEXITCODE" }
+          Copy-Item bin\dsd2pcm.dll .
+          .\minimal.exe
+          if ($LASTEXITCODE -ne 0) { throw "minimal.exe: $LASTEXITCODE" }
+          .\minimal-static.exe
+          if ($LASTEXITCODE -ne 0) { throw "minimal-static.exe: $LASTEXITCODE" }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: bin-x86_64-windows-smoke
+          path: smoke/
+          if-no-files-found: error
+          retention-days: 7
+
   # Every platform's binary made the same bytes from the test file, and every archive matches
   # its .sha256. On a dry run, the list of what a tag would publish.
   check:
     name: same output everywhere
-    needs: [preflight, linux, macos, windows]
+    needs: [preflight, linux, macos, windows-check]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
@@ -470,6 +632,7 @@ jobs:
       VERSION: ${{ needs.preflight.outputs.version }}
       TAG: ${{ github.ref_name }}
       GH_TOKEN: ${{ github.token }}
+      WINDOWS_SIGNING: ${{ vars.WINDOWS_SIGNING }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
@@ -510,7 +673,11 @@ jobs:
             echo "- \`dsd2pcm-$VERSION-aarch64-linux.tar.gz\`: Linux aarch64 (64-bit ARM), glibc 2.17 or later."
             echo "- \`dsd2pcm-$VERSION-i686-linux.tar.gz\`: Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later."
             echo "- \`dsd2pcm-$VERSION-aarch64-macos.tar.gz\`: macOS 11 or later on Apple silicon. Not signed or notarised."
-            echo "- \`dsd2pcm-$VERSION-x86_64-windows.zip\`: Windows 10 or 11, x86_64. Not code-signed."
+            if [[ "$WINDOWS_SIGNING" == required ]]; then
+              echo "- \`dsd2pcm-$VERSION-x86_64-windows.zip\`: Windows 10 or 11, x86_64. Authenticode-signed (the tool and the C library's \`dsd2pcm.dll\`)."
+            else
+              echo "- \`dsd2pcm-$VERSION-x86_64-windows.zip\`: Windows 10 or 11, x86_64. Not code-signed."
+            fi
             echo
             echo "The C library (\`include/dsd2pcm.h\`, shared and static libraries, a pkg-config file; ABI version 1), \`libdsd2pcm-$VERSION-<platform>\` for the same five platforms: \`.tar.gz\`, and \`.zip\` for Windows. See [docs/c-api.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/c-api.md#binary-releases)."
             echo
