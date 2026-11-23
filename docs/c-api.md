@@ -66,14 +66,21 @@ It is called on the calling thread, once before the first block and after each b
 the output samples per channel done and in all; a non-zero return stops the conversion with
 `DSD2PCM_E_CANCELLED`. It must not unwind (C++ exceptions, `longjmp`) into the library.
 
-The input, its rate, the options and the output size are checked before anything is
-written. The WAV is then written to a new temporary file in the output's directory
-(`.NAME.PID-N.tmp`, created exclusively), synced, and renamed over `output_path` only on
-success. On any error, including a cancel, the temporary file is removed and an existing
-output file is left as it was, so a partial WAV never appears under `output_path`. An
-output that is the input file (the same path, a symbolic link to it, or on Unix a hard
-link) is refused with `DSD2PCM_E_INVALID_ARGUMENT`. A symbolic link at `output_path` is
-replaced by the new file, not followed. The output's directory must be writable.
+The input, its rate, the options, the output size and the output path are checked before
+anything is written. Refused with `DSD2PCM_E_INVALID_ARGUMENT`: an output that is the input
+file (the same path, a symbolic link to it, or on Unix a hard link), a directory or a path
+ending in a separator, and an existing device, FIFO or socket. An existing output file that
+is not writable, or an output directory that is not, gives `DSD2PCM_E_IO`.
+
+The WAV is then written to a new temporary file `.dsd2pcm-PID-N.tmp` in the output's
+directory (created exclusively), synced, given the permissions of the file it replaces, and
+renamed over `output_path` only on success; on Unix the directory is then synced too. On
+any error, including a cancel, the temporary file is removed and an existing output file is
+left as it was, so a partial WAV never appears under `output_path`. A symbolic link at
+`output_path` is replaced by the new file, not followed. The owner, ACLs and extended
+attributes of a replaced file are not kept. If the process is killed (SIGKILL, power loss),
+a `.dsd2pcm-PID-N.tmp` file may remain; it is safe to delete. The library installs no
+signal handlers.
 
 `crates/dsd2pcm-capi/examples/convert.c` is a complete program:
 

@@ -395,13 +395,44 @@ run property the bytes equal one call.
 
 Parsers check every size against the file length, cap allocations (DSF metadata 16 MiB,
 block size 1 MiB; FLAC one decoded block) and return errors instead of panicking. Chunk
-walking is bounded whatever reader the caller passes: at most 4096 chunks (DFF chunks and
-`PROP` property chunks, WAV chunks before `data` and after a placeholder `data` size, FLAC
-metadata blocks), and the walkers move with short reads or `Seek::seek_relative`, never a
-plain `seek` per chunk, so a buffered reader such as a large `BufReader<File>` keeps its
-buffer and opening a file costs time linear in its header. The tests
-truncate and corrupt valid files byte by byte, and cargo-fuzz targets cover every reader
-(see [fuzzing.md](fuzzing.md)).
+walking is bounded whatever reader the caller passes. Each reader stops at 4096: DFF
+top-level chunks up to and including `DSD `, DFF property chunks in `PROP`, WAV chunks up to
+and including `data` (and the chunks walked after a placeholder `data` size), FLAC metadata
+blocks including STREAMINFO (and 16 ID3v2 tags before `fLaC`). The walkers move with short
+reads or `Seek::seek_relative`, never a plain `seek` per chunk, so a buffered reader such as
+a large `BufReader<File>` keeps its buffer and opening a file costs time linear in its
+header. The tests truncate and corrupt valid files byte by byte, and cargo-fuzz targets
+cover every reader (see [fuzzing.md](fuzzing.md)).
+
+## Output files
+
+`convert_file` (and so `dsd2pcm_convert_file` and the tool) never writes into an existing
+output in place, because a conversion that fails or is stopped part-way must not destroy the
+file the user had, nor leave a partial WAV that a reader would take as complete.
+
+- Every cheap check runs first: input, rate, options, the 4 GiB estimate, and the output
+  path. A directory or a path ending in a separator, and an existing device, FIFO or socket,
+  are refused (writing a WAV into a device node or a pipe is never what was meant, and
+  replacing one would break the system). An existing regular file must be writable (it is
+  opened for writing, without truncating, as a probe), as in 0.1.1 where it was overwritten.
+- The output is the input if both name the same file: on Unix by device and inode, which
+  also catches hard links; elsewhere by canonical path. Converting a file onto itself is
+  refused rather than left to the rename, which would replace the input.
+- The WAV goes to `.dsd2pcm-PID-N.tmp` in the output's directory, created exclusively (an
+  existing file or symbolic link of that name is never opened). The name does not derive
+  from the output's name, so a 255-byte output name works. Creating it is also the check
+  that the directory is writable, before any conversion work. When it replaces a file it is
+  created owner-only (0600 on Unix) and given the replaced file's permissions before the
+  rename; owner, ACLs and extended attributes are not carried over.
+- On success: flush, `fsync`, rename over the output (atomic on one file system), then a
+  best-effort `fsync` of the directory on Unix. On any error, cancel or panic, the temporary
+  file is removed by its drop guard. A symbolic link at the output path is replaced by the
+  new file, not followed: the rename acts on the directory entry.
+- The command-line tool turns SIGINT and SIGTERM (Ctrl-C and Ctrl-Break on Windows) into a
+  cancel through the progress hook, so the same cleanup runs, and exits with 128 + the
+  signal number; a second signal ends it at once. Only SIGKILL, a crash or a power loss can
+  leave a `.dsd2pcm-PID-N.tmp` behind, which is safe to delete. The library installs no
+  signal handlers: that is the application's choice.
 
 ## Known gaps
 
