@@ -83,6 +83,25 @@ equals scarletbook-pcm's and `dsd64_to_pcm`'s. Buffers are bounded by the block 
 the run length; after the first call nothing is allocated (`tests/frames_alloc.rs`).
 `context_bytes` (the neighbour bytes that matter) equals scarletbook-pcm's.
 
+## Progress and cancel
+
+`dsd64_to_pcm_with` calls its hook on the calling thread before the first block and after
+each block is written (never from the worker threads), with the output samples per channel
+done and the total; `Break` returns `Error::Cancelled` at once. Whole-file conversion
+passes the hook through. The frame-run API needs none: each call is one run.
+
+## C interface (`crates/dsd2pcm-capi`)
+
+A thin layer over the Rust API, described in [c-api.md](c-api.md). All of its `unsafe` code
+is in `src/ffi.rs`: each entry point checks pointers for NULL, lengths against the
+converter, alignment for `int32_t` output, and that no output buffer overlaps another
+buffer, before it makes any Rust reference; the body runs inside `catch_unwind`. A
+converter handle is a `Mutex<Converter>`: a second thread calling it at the same time gets
+`DSD2PCM_E_BUSY`, and a handle whose call panicked reports `DSD2PCM_E_INTERNAL` from then
+on. Runs given as one buffer per frame are converted in groups of 32 frames, each with its
+real neighbours, so the frame references live on the stack and nothing is allocated; by the
+run property the bytes equal one call.
+
 ## Speed
 
 - S1 reads each window as 64-bit words cut into 13-bit chunks, one table per chunk (5

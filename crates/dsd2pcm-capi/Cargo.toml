@@ -1,0 +1,15 @@
+[package]
+name = "dsd2pcm-capi"
+description = "C interface to dsd2pcm: DSD to PCM conversion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+name = "dsd2pcm"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+dsd = { package = "dsd2pcm", path = "../dsd2pcm" }

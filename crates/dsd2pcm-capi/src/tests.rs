@@ -1,0 +1,915 @@
+//! Tests of the exported functions: NULL pointers, bad lengths and values, overlapping
+//! buffers, cancelling from the callback, a busy or poisoned handle, and output bytes
+//! identical to the Rust API.
+
+use crate::ffi::*;
+use crate::*;
+use dsd::dsf::DsfWriter;
+use dsd::frames::{Converter, PcmOut, Run};
+use dsd::io::DsdWrite;
+use std::ffi::{CStr, CString};
+use std::path::PathBuf;
+use std::ptr::{null, null_mut};
+
+const FPC: usize = DSD2PCM_FRAME_BYTES_PER_CHANNEL;
+
+fn last_error() -> String {
+    // SAFETY (test): the library returns a valid NUL-terminated string.
+    unsafe { CStr::from_ptr(dsd2pcm_last_error()) }
+        .to_str()
+        .unwrap()
+        .to_owned()
+}
+
+/// Interleaved test frames: noise, idle and full-scale stretches (which clip at +6 dB).
+fn area(ch: usize, frames: usize, seed: u64) -> Vec<u8> {
+    let mut s = seed | 1;
+    (0..frames * FPC * ch)
+        .map(|i| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            match (i / ch / 2000) % 4 {
+                0 | 1 => s as u8,
+                2 => 0x69,
+                _ => 0xFF,
+            }
+        })
+        .collect()
+}
+
+/// A temporary directory removed on drop.
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(tag: &str) -> TempDir {
+        let p = std::env::temp_dir().join(format!(
+            "dsd2pcm-capi-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        TempDir(p)
+    }
+    fn path(&self, name: &str) -> PathBuf {
+        self.0.join(name)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Writes a DSF file of `frames` frames of `area` data.
+fn write_dsf(path: &std::path::Path, ch: usize, frames: usize) {
+    let a = area(ch, frames, 0x5eed);
+    let chans: Vec<Vec<u8>> = (0..ch)
+        .map(|c| a.iter().skip(c).step_by(ch).copied().collect())
+        .collect();
+    let f = std::fs::File::create(path).unwrap();
+    let mut w = DsfWriter::new(f, ch as u16, 2_822_400, None).unwrap();
+    w.write_bytes(&chans).unwrap();
+    w.finish((frames * FPC * 8) as u64).unwrap();
+}
+
+fn cstr(p: &std::path::Path) -> CString {
+    CString::new(p.to_str().unwrap()).unwrap()
+}
+
+fn file_opts(rate_hz: u32) -> dsd2pcm_file_options {
+    dsd2pcm_file_options {
+        rate_hz,
+        cutoff: 0,
+        filter: 0,
+        threads: 0,
+        gain_db: 0.0,
+        progress: None,
+        user_data: null_mut(),
+    }
+}
+
+#[test]
+fn version_and_status_strings() {
+    // SAFETY (test): static NUL-terminated strings.
+    let v = unsafe { CStr::from_ptr(dsd2pcm_version()) };
+    assert_eq!(v.to_str().unwrap(), env!("CARGO_PKG_VERSION"));
+    for code in 0..=9 {
+        // SAFETY (test): as above.
+        let s = unsafe { CStr::from_ptr(dsd2pcm_status_str(code)) };
+        assert!(!s.to_bytes().is_empty());
+    }
+    // SAFETY (test): as above.
+    let s = unsafe { CStr::from_ptr(dsd2pcm_status_str(DSD2PCM_E_CANCELLED)) };
+    assert_eq!(s.to_str().unwrap(), "cancelled");
+}
+
+#[test]
+fn convert_file_matches_rust_and_reports() {
+    let d = TempDir::new("file");
+    let (inp, ours, theirs) = (d.path("in.dsf"), d.path("c.wav"), d.path("rust.wav"));
+    write_dsf(&inp, 2, 40);
+    for (rate, cutoff, gain, threads) in [
+        (176_400, DSD2PCM_CUTOFF_STANDARD, 6.0, 0),
+        (88_200, DSD2PCM_CUTOFF_LOW, -3.0, 1),
+        (352_800, DSD2PCM_CUTOFF_WIDE, 0.0, 0),
+    ] {
+        let mut o = file_opts(rate);
+        o.cutoff = cutoff;
+        o.gain_db = gain;
+        o.threads = threads;
+        let mut rep = dsd2pcm_file_report::default();
+        // SAFETY (test): valid strings, options and report.
+        let rc = unsafe {
+            dsd2pcm_convert_file(cstr(&inp).as_ptr(), cstr(&ours).as_ptr(), &o, &mut rep)
+        };
+        assert_eq!(rc, DSD2PCM_OK, "{}", last_error());
+        let opts = file_options(&o).ok().unwrap();
+        let want = dsd::convert_file(&inp, &theirs, &opts).unwrap();
+        assert_eq!(
+            std::fs::read(&ours).unwrap(),
+            std::fs::read(&theirs).unwrap()
+        );
+        assert_eq!(rep.in_rate, 2_822_400);
+        assert_eq!(rep.out_rate, rate);
+        assert_eq!(rep.channels, 2);
+        assert_eq!(rep.out_samples, want.out_samples);
+        assert_eq!(&rep.clipped[..2], &want.clipped[..]);
+        assert_eq!(rep.clipped[2..], [0; 4]);
+        assert_eq!(rep.clipped_total, want.clipped.iter().sum::<u64>());
+        if gain > 0.0 {
+            assert!(rep.clipped_total > 0);
+        }
+    }
+    // A NULL report is allowed.
+    let o = file_opts(176_400);
+    // SAFETY (test): valid strings and options; NULL report.
+    let rc =
+        unsafe { dsd2pcm_convert_file(cstr(&inp).as_ptr(), cstr(&ours).as_ptr(), &o, null_mut()) };
+    assert_eq!(rc, DSD2PCM_OK);
+}
+
+#[test]
+fn convert_file_rejects_nulls_and_bad_values() {
+    let d = TempDir::new("bad");
+    let inp = d.path("in.dsf");
+    write_dsf(&inp, 1, 2);
+    let (i, o) = (cstr(&inp), cstr(&d.path("out.wav")));
+    let good = file_opts(176_400);
+    let call = |i: *const c_char, o: *const c_char, opts: *const dsd2pcm_file_options| {
+        // SAFETY (test): every pointer is NULL or valid.
+        unsafe { dsd2pcm_convert_file(i, o, opts, null_mut()) }
+    };
+    assert_eq!(call(null(), o.as_ptr(), &good), DSD2PCM_E_NULL);
+    assert_eq!(last_error(), "input_path is NULL");
+    assert_eq!(call(i.as_ptr(), null(), &good), DSD2PCM_E_NULL);
+    assert_eq!(call(i.as_ptr(), o.as_ptr(), null()), DSD2PCM_E_NULL);
+    assert_eq!(last_error(), "options is NULL");
+    let bad_utf8 = b"\xff\xfe.dsf\0";
+    assert_eq!(
+        call(bad_utf8.as_ptr().cast(), o.as_ptr(), &good),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    assert!(last_error().contains("UTF-8"));
+    let mutate = |f: &dyn Fn(&mut dsd2pcm_file_options)| {
+        let mut x = good;
+        f(&mut x);
+        call(i.as_ptr(), o.as_ptr(), &x)
+    };
+    assert_eq!(mutate(&|x| x.rate_hz = 44_100), DSD2PCM_E_INVALID_ARGUMENT);
+    assert_eq!(mutate(&|x| x.rate_hz = 0), DSD2PCM_E_INVALID_ARGUMENT);
+    assert_eq!(mutate(&|x| x.cutoff = 3), DSD2PCM_E_INVALID_ARGUMENT);
+    assert_eq!(mutate(&|x| x.filter = 2), DSD2PCM_E_INVALID_ARGUMENT);
+    assert_eq!(
+        mutate(&|x| x.filter = DSD2PCM_FILTER_PYSACD),
+        DSD2PCM_E_UNSUPPORTED
+    );
+    assert_eq!(mutate(&|x| x.threads = 2), DSD2PCM_E_INVALID_ARGUMENT);
+    assert_eq!(mutate(&|x| x.gain_db = 25.0), DSD2PCM_E_INVALID_ARGUMENT);
+    assert_eq!(
+        mutate(&|x| x.gain_db = f64::NAN),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    assert_eq!(
+        mutate(&|x| {
+            x.rate_hz = 88_200;
+            x.cutoff = DSD2PCM_CUTOFF_WIDE
+        }),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    let missing = cstr(&d.path("missing.dsf"));
+    assert_eq!(call(missing.as_ptr(), o.as_ptr(), &good), DSD2PCM_E_IO);
+    let junk = d.path("junk.dsf");
+    std::fs::write(&junk, b"not a DSD file at all").unwrap();
+    assert_eq!(
+        call(cstr(&junk).as_ptr(), o.as_ptr(), &good),
+        DSD2PCM_E_FORMAT
+    );
+    assert_eq!(
+        call(i.as_ptr(), i.as_ptr(), &good),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    // A success leaves the last error alone.
+    assert_eq!(call(i.as_ptr(), o.as_ptr(), &good), DSD2PCM_OK);
+    assert!(last_error().contains("same") || last_error().contains("input"));
+}
+
+struct Calls {
+    seen: Vec<(u64, u64)>,
+    stop_after: usize,
+}
+
+unsafe extern "C" fn record(done: u64, total: u64, user: *mut c_void) -> c_int {
+    // SAFETY (test): `user` is the `Calls` passed in the options, alive during the call.
+    let c = unsafe { &mut *user.cast::<Calls>() };
+    c.seen.push((done, total));
+    c_int::from(c.seen.len() > c.stop_after)
+}
+
+#[test]
+fn progress_and_cancel_from_the_callback() {
+    let d = TempDir::new("progress");
+    let (inp, out) = (d.path("in.dsf"), d.path("out.wav"));
+    // About 1.5 MiB per channel: several blocks.
+    write_dsf(&inp, 2, 340);
+    for threads in [0, 1] {
+        let mut calls = Calls {
+            seen: Vec::new(),
+            stop_after: usize::MAX,
+        };
+        let mut o = file_opts(176_400);
+        o.threads = threads;
+        o.progress = Some(record);
+        o.user_data = (&mut calls as *mut Calls).cast();
+        // SAFETY (test): valid pointers; `calls` outlives the call.
+        let rc = unsafe {
+            dsd2pcm_convert_file(cstr(&inp).as_ptr(), cstr(&out).as_ptr(), &o, null_mut())
+        };
+        assert_eq!(rc, DSD2PCM_OK, "{}", last_error());
+        let total = (340 * FPC * 8 / 16) as u64;
+        assert!(calls.seen.len() >= 3, "{:?}", calls.seen);
+        assert_eq!(calls.seen[0], (0, total));
+        assert_eq!(*calls.seen.last().unwrap(), (total, total));
+        assert!(calls
+            .seen
+            .windows(2)
+            .all(|w| w[0].0 < w[1].0 && w[1].1 == total));
+
+        for stop_after in [0, 1] {
+            let mut calls = Calls {
+                seen: Vec::new(),
+                stop_after,
+            };
+            o.user_data = (&mut calls as *mut Calls).cast();
+            // SAFETY (test): as above.
+            let rc = unsafe {
+                dsd2pcm_convert_file(cstr(&inp).as_ptr(), cstr(&out).as_ptr(), &o, null_mut())
+            };
+            assert_eq!(rc, DSD2PCM_E_CANCELLED);
+            assert_eq!(last_error(), "conversion cancelled");
+            assert_eq!(calls.seen.len(), stop_after + 1);
+        }
+    }
+}
+
+fn frames_cfg(rate_hz: u32, channels: u32) -> dsd2pcm_frames_config {
+    dsd2pcm_frames_config {
+        rate_hz,
+        cutoff: 0,
+        filter: 0,
+        channels,
+        gain_db: 0.0,
+    }
+}
+
+fn new_handle(cfg: &dsd2pcm_frames_config) -> *mut dsd2pcm_frames {
+    let mut h = null_mut();
+    // SAFETY (test): valid pointers.
+    let rc = unsafe { dsd2pcm_frames_new(cfg, &mut h) };
+    assert_eq!(rc, DSD2PCM_OK, "{}", last_error());
+    assert!(!h.is_null());
+    h
+}
+
+fn contiguous(before: Option<&[u8]>, frames: &[u8], after: Option<&[u8]>) -> dsd2pcm_run {
+    let (b, bl) = before.map_or((null(), 0), |b| (b.as_ptr(), b.len()));
+    let (a, al) = after.map_or((null(), 0), |a| (a.as_ptr(), a.len()));
+    dsd2pcm_run {
+        before: b,
+        before_len: bl,
+        frames: if frames.is_empty() {
+            null()
+        } else {
+            frames.as_ptr()
+        },
+        frames_len: frames.len(),
+        frame_ptrs: null(),
+        frame_count: 0,
+        after: a,
+        after_len: al,
+        first_frame: 0,
+    }
+}
+
+#[test]
+fn frames_new_rejects_bad_configs() {
+    let mut h: *mut dsd2pcm_frames = 1 as *mut _;
+    // SAFETY (test): `out` valid, config NULL.
+    assert_eq!(
+        unsafe { dsd2pcm_frames_new(null(), &mut h) },
+        DSD2PCM_E_NULL
+    );
+    assert!(h.is_null(), "out is set to NULL on failure");
+    // SAFETY (test): out NULL.
+    assert_eq!(
+        unsafe { dsd2pcm_frames_new(&frames_cfg(176_400, 2), null_mut()) },
+        DSD2PCM_E_NULL
+    );
+    for (cfg, code) in [
+        (frames_cfg(176_400, 0), DSD2PCM_E_INVALID_ARGUMENT),
+        (frames_cfg(176_400, 7), DSD2PCM_E_INVALID_ARGUMENT),
+        (frames_cfg(176_400, 256 + 2), DSD2PCM_E_INVALID_ARGUMENT),
+        (frames_cfg(48_000, 2), DSD2PCM_E_INVALID_ARGUMENT),
+        (
+            dsd2pcm_frames_config {
+                cutoff: 9,
+                ..frames_cfg(176_400, 2)
+            },
+            DSD2PCM_E_INVALID_ARGUMENT,
+        ),
+        (
+            dsd2pcm_frames_config {
+                cutoff: 2,
+                ..frames_cfg(88_200, 2)
+            },
+            DSD2PCM_E_INVALID_ARGUMENT,
+        ),
+        (
+            dsd2pcm_frames_config {
+                filter: 1,
+                ..frames_cfg(176_400, 2)
+            },
+            DSD2PCM_E_UNSUPPORTED,
+        ),
+        (
+            dsd2pcm_frames_config {
+                gain_db: -121.0,
+                ..frames_cfg(176_400, 2)
+            },
+            DSD2PCM_E_INVALID_ARGUMENT,
+        ),
+    ] {
+        // SAFETY (test): valid pointers.
+        assert_eq!(unsafe { dsd2pcm_frames_new(&cfg, &mut h) }, code, "{cfg:?}");
+        assert!(h.is_null());
+    }
+    // NULL handles: queries give 0, free does nothing.
+    // SAFETY (test): NULL is allowed.
+    unsafe {
+        assert_eq!(dsd2pcm_frames_frame_bytes(null()), 0);
+        assert_eq!(dsd2pcm_frames_samples_per_frame(null()), 0);
+        assert_eq!(dsd2pcm_frames_context_bytes(null()), 0);
+        assert_eq!(dsd2pcm_frames_output_bytes(null(), 1, 0), 0);
+        dsd2pcm_frames_free(null_mut());
+    }
+}
+
+#[test]
+fn frames_queries() {
+    let h = new_handle(&frames_cfg(88_200, 6));
+    let r = Converter::new(frames_config(&frames_cfg(88_200, 6)).ok().unwrap()).unwrap();
+    // SAFETY (test): live handle.
+    unsafe {
+        assert_eq!(dsd2pcm_frames_frame_bytes(h), 6 * FPC);
+        assert_eq!(dsd2pcm_frames_samples_per_frame(h), 1176);
+        assert_eq!(dsd2pcm_frames_context_bytes(h), r.context_bytes());
+        assert_eq!(
+            dsd2pcm_frames_output_bytes(h, 5, DSD2PCM_FORMAT_S24LE),
+            5 * 1176 * 6 * 3
+        );
+        assert_eq!(
+            dsd2pcm_frames_output_bytes(h, 5, DSD2PCM_FORMAT_I32),
+            5 * 1176 * 6 * 4
+        );
+        assert_eq!(dsd2pcm_frames_output_bytes(h, 5, 2), 0);
+        assert_eq!(dsd2pcm_frames_output_bytes(h, usize::MAX / 2, 0), 0);
+        dsd2pcm_frames_free(h);
+    }
+}
+
+/// The C converter gives the Rust converter's bytes, per-frame and per-channel clip counts,
+/// for contiguous and per-frame buffers (over several groups), in both formats.
+#[test]
+fn frames_convert_matches_rust() {
+    for (rate, ch, gain) in [(176_400, 2u32, 6.0), (88_200, 1, 0.0), (352_800, 6, 3.0)] {
+        let cfg = dsd2pcm_frames_config {
+            gain_db: gain,
+            ..frames_cfg(rate, ch)
+        };
+        let ch = ch as usize;
+        let n = 70; // 2 groups of 32 and one of 6
+        let a = area(ch, n + 2, rate as u64);
+        let fb = FPC * ch;
+        let (before, run, after) = (&a[..fb], &a[fb..(n + 1) * fb], &a[(n + 1) * fb..]);
+        let mut rust = Converter::new(frames_config(&cfg).ok().unwrap()).unwrap();
+        let spf = rust.samples_per_frame();
+        let mut want = vec![0u8; n * spf * ch * 3];
+        let mut want_fc = vec![0u64; n];
+        let want_st = rust
+            .convert(
+                Run::new(run)
+                    .with_before(Some(before))
+                    .with_after(Some(after)),
+                PcmOut::S24le(&mut want),
+                Some(&mut want_fc),
+            )
+            .unwrap();
+        let mut want_i32 = vec![0i32; n * spf * ch];
+        rust.convert(
+            Run::new(run)
+                .with_before(Some(before))
+                .with_after(Some(after)),
+            PcmOut::I32(&mut want_i32),
+            None,
+        )
+        .unwrap();
+        if gain > 0.0 {
+            assert!(want_st.clipped_total() > 0);
+        }
+
+        let h = new_handle(&cfg);
+        let ptrs: Vec<*const u8> = run.chunks_exact(fb).map(<[u8]>::as_ptr).collect();
+        let mut separate = contiguous(Some(before), &[], Some(after));
+        separate.frame_ptrs = ptrs.as_ptr();
+        separate.frame_count = n;
+        for r in [contiguous(Some(before), run, Some(after)), separate] {
+            let mut got = vec![0u8; want.len()];
+            let mut fc = vec![u64::MAX; n];
+            let mut st = dsd2pcm_stats::default();
+            // SAFETY (test): every buffer valid for its length.
+            let rc = unsafe {
+                dsd2pcm_frames_convert(
+                    h,
+                    &r,
+                    DSD2PCM_FORMAT_S24LE,
+                    got.as_mut_ptr().cast(),
+                    got.len(),
+                    fc.as_mut_ptr(),
+                    n,
+                    &mut st,
+                )
+            };
+            assert_eq!(rc, DSD2PCM_OK, "{}", last_error());
+            assert!(got == want, "S24LE bytes differ");
+            assert_eq!(fc, want_fc);
+            assert_eq!(st.clipped, want_st.clipped);
+            assert_eq!(st.clipped_total, want_st.clipped_total());
+
+            let mut got = vec![0i32; want_i32.len()];
+            // SAFETY (test): as above; no per-frame counts or stats.
+            let rc = unsafe {
+                dsd2pcm_frames_convert(
+                    h,
+                    &r,
+                    DSD2PCM_FORMAT_I32,
+                    got.as_mut_ptr().cast(),
+                    got.len() * 4,
+                    null_mut(),
+                    0,
+                    null_mut(),
+                )
+            };
+            assert_eq!(rc, DSD2PCM_OK, "{}", last_error());
+            assert!(got == want_i32, "I32 samples differ");
+        }
+        // SAFETY (test): live handle, freed once.
+        unsafe { dsd2pcm_frames_free(h) };
+    }
+}
+
+/// A whole area (no neighbours) and an empty run.
+#[test]
+fn frames_edges_and_empty_run() {
+    let h = new_handle(&frames_cfg(176_400, 2));
+    let a = area(2, 3, 9);
+    let mut rust = Converter::new(frames_config(&frames_cfg(176_400, 2)).ok().unwrap()).unwrap();
+    let mut want = vec![0u8; 3 * 2352 * 2 * 3];
+    rust.convert(Run::new(&a[..]), PcmOut::S24le(&mut want), None)
+        .unwrap();
+    let mut got = vec![0u8; want.len()];
+    // SAFETY (test): valid buffers.
+    let rc = unsafe {
+        dsd2pcm_frames_convert(
+            h,
+            &contiguous(None, &a, None),
+            0,
+            got.as_mut_ptr().cast(),
+            got.len(),
+            null_mut(),
+            0,
+            null_mut(),
+        )
+    };
+    assert_eq!(rc, DSD2PCM_OK);
+    assert_eq!(got, want);
+    let mut st = dsd2pcm_stats {
+        clipped_total: 7,
+        ..Default::default()
+    };
+    // SAFETY (test): an empty run with NULL buffers.
+    let rc = unsafe {
+        dsd2pcm_frames_convert(
+            h,
+            &contiguous(None, &[], None),
+            0,
+            null_mut(),
+            0,
+            null_mut(),
+            0,
+            &mut st,
+        )
+    };
+    assert_eq!(rc, DSD2PCM_OK, "{}", last_error());
+    assert_eq!(st.clipped_total, 0);
+    // SAFETY (test): live handle.
+    unsafe { dsd2pcm_frames_free(h) };
+}
+
+#[test]
+fn frames_convert_rejects_bad_arguments() {
+    let h = new_handle(&frames_cfg(176_400, 2));
+    let fb = 2 * FPC;
+    let a = area(2, 4, 3);
+    let (before, run, after) = (&a[..fb], &a[fb..3 * fb], &a[3 * fb..]);
+    let out_len = 2 * 2352 * 2 * 3;
+    let mut out = vec![0u8; out_len + 8];
+    let mut fc = [0u64; 2];
+    let good = contiguous(Some(before), run, Some(after));
+    let call = |r: *const dsd2pcm_run, fmt: u32, o: *mut u8, ol: usize, f: *mut u64, fl: usize| {
+        // SAFETY (test): every non-NULL pointer is valid for its length, or the call is
+        // refused before it is read.
+        unsafe { dsd2pcm_frames_convert(h, r, fmt, o.cast(), ol, f, fl, null_mut()) }
+    };
+    let o = out.as_mut_ptr();
+    let f = fc.as_mut_ptr();
+    assert_eq!(call(&good, 0, o, out_len, f, 2), DSD2PCM_OK);
+    // SAFETY (test): NULL handle.
+    let rc = unsafe {
+        dsd2pcm_frames_convert(
+            null_mut(),
+            &good,
+            0,
+            o.cast(),
+            out_len,
+            null_mut(),
+            0,
+            null_mut(),
+        )
+    };
+    assert_eq!(rc, DSD2PCM_E_NULL);
+    assert_eq!(last_error(), "conv is NULL");
+    assert_eq!(call(null(), 0, o, out_len, f, 2), DSD2PCM_E_NULL);
+    assert_eq!(call(&good, 0, null_mut(), out_len, f, 2), DSD2PCM_E_NULL);
+    assert_eq!(call(&good, 0, o, out_len, null_mut(), 2), DSD2PCM_E_NULL);
+    assert_eq!(
+        call(&good, 0, o, out_len - 1, f, 2),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    assert!(last_error().contains("out_bytes"));
+    assert_eq!(
+        call(&good, 0, o, out_len + 3, f, 2),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    assert_eq!(call(&good, 0, o, out_len, f, 1), DSD2PCM_E_INVALID_ARGUMENT);
+    assert_eq!(call(&good, 7, o, out_len, f, 2), DSD2PCM_E_INVALID_ARGUMENT);
+    // Misaligned int32 output.
+    let i32_len = 2 * 2352 * 2 * 4;
+    let mut buf = vec![0u32; i32_len / 4 + 1];
+    let mis = buf.as_mut_ptr().cast::<u8>().wrapping_add(1);
+    assert_eq!(
+        call(&good, 1, mis, i32_len, f, 2),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    assert!(last_error().contains("aligned"));
+    assert_eq!(
+        call(&good, 1, buf.as_mut_ptr().cast(), i32_len, f, 2),
+        DSD2PCM_OK
+    );
+    // Bad run lengths and pointers.
+    let bad = [
+        dsd2pcm_run {
+            frames_len: run.len() - 1,
+            ..good
+        },
+        dsd2pcm_run {
+            before_len: fb - 1,
+            ..good
+        },
+        dsd2pcm_run {
+            after_len: fb + 1,
+            ..good
+        },
+        dsd2pcm_run {
+            before_len: 0,
+            ..good
+        },
+    ];
+    for r in bad {
+        assert_eq!(
+            call(&r, 0, o, out_len, f, 2),
+            DSD2PCM_E_INVALID_ARGUMENT,
+            "{r:?}"
+        );
+    }
+    for r in [
+        dsd2pcm_run {
+            frames: null(),
+            ..good
+        },
+        dsd2pcm_run {
+            before: null(),
+            ..good
+        },
+        dsd2pcm_run {
+            after: null(),
+            ..good
+        },
+    ] {
+        assert_eq!(call(&r, 0, o, out_len, f, 2), DSD2PCM_E_NULL, "{r:?}");
+    }
+    let ptrs = [run.as_ptr(), null()];
+    let sep = dsd2pcm_run {
+        frames: null(),
+        frames_len: 0,
+        frame_ptrs: ptrs.as_ptr(),
+        frame_count: 2,
+        ..good
+    };
+    assert_eq!(call(&sep, 0, o, out_len, f, 2), DSD2PCM_E_NULL);
+    assert!(last_error().contains("frame_ptrs[1]"));
+    let both = dsd2pcm_run {
+        frame_ptrs: ptrs.as_ptr(),
+        frame_count: 2,
+        ..good
+    };
+    assert_eq!(call(&both, 0, o, out_len, f, 2), DSD2PCM_E_INVALID_ARGUMENT);
+    assert_eq!(
+        call(
+            &dsd2pcm_run {
+                frame_ptrs: null(),
+                ..sep
+            },
+            0,
+            o,
+            out_len,
+            f,
+            2
+        ),
+        DSD2PCM_E_NULL
+    );
+    // Nothing is written on an error.
+    out[..out_len].fill(0xAB);
+    fc = [9, 9];
+    let f = fc.as_mut_ptr();
+    assert_eq!(
+        call(&bad[2], 0, o, out_len, f, 2),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    assert!(out[..out_len].iter().all(|&b| b == 0xAB));
+    assert_eq!(fc, [9, 9]);
+    // SAFETY (test): live handle.
+    unsafe { dsd2pcm_frames_free(h) };
+}
+
+#[test]
+fn frames_convert_rejects_overlapping_buffers() {
+    let h = new_handle(&frames_cfg(352_800, 1));
+    let out_len = 4704 * 3;
+    // Input and output in one allocation.
+    let mut buf = area(1, 1, 5);
+    buf.resize(FPC + out_len, 0);
+    let p = buf.as_mut_ptr();
+    let mut fc = [0u64; 1];
+    let call = |r: &dsd2pcm_run, o: *mut u8, f: *mut u64, st: *mut dsd2pcm_stats| {
+        // SAFETY (test): every pointer valid for its length; aliasing is what is tested,
+        // and the call refuses it before making references.
+        unsafe {
+            dsd2pcm_frames_convert(h, r, 0, o.cast(), out_len, f, usize::from(!f.is_null()), st)
+        }
+    };
+    let r = dsd2pcm_run {
+        frames: p,
+        frames_len: FPC,
+        ..contiguous(None, &[], None)
+    };
+    // Disjoint: fine.
+    assert_eq!(
+        call(&r, p.wrapping_add(FPC), fc.as_mut_ptr(), null_mut()),
+        DSD2PCM_OK
+    );
+    // The output overlaps the frames by one byte.
+    assert_eq!(
+        call(&r, p.wrapping_add(FPC - 1), null_mut(), null_mut()),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    assert!(last_error().contains("overlaps"));
+    // The per-frame counts inside the output.
+    let mut big = vec![0u64; out_len / 8 + 2];
+    let bp = big.as_mut_ptr();
+    assert_eq!(
+        call(&r, bp.cast(), bp.wrapping_add(3), null_mut()),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    // The stats inside the frames.
+    let mut words = vec![0u64; FPC / 8];
+    let wp = words.as_mut_ptr();
+    let r2 = dsd2pcm_run {
+        frames: wp.cast(),
+        ..r
+    };
+    assert_eq!(
+        call(
+            &r2,
+            p.wrapping_add(FPC),
+            null_mut(),
+            wp.wrapping_add(4).cast()
+        ),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    // A per-frame pointer inside the output.
+    let ptrs = [p.wrapping_add(FPC).cast_const()];
+    let sep = dsd2pcm_run {
+        frames: null(),
+        frames_len: 0,
+        frame_ptrs: ptrs.as_ptr(),
+        frame_count: 1,
+        ..r
+    };
+    assert_eq!(
+        call(&sep, p.wrapping_add(FPC), null_mut(), null_mut()),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    // The pointer array inside the output.
+    let mut arr = vec![0u64; out_len / 8 + 2];
+    let ap = arr.as_mut_ptr();
+    // SAFETY (test): `arr` is 8-byte aligned and holds more than one pointer.
+    unsafe { ap.cast::<*const u8>().write(p.cast_const()) };
+    let sep2 = dsd2pcm_run {
+        frame_ptrs: ap.cast(),
+        ..sep
+    };
+    assert_eq!(
+        call(&sep2, ap.cast(), null_mut(), null_mut()),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    // The same, disjoint, is fine.
+    assert_eq!(
+        call(&sep2, p.wrapping_add(FPC), null_mut(), null_mut()),
+        DSD2PCM_OK
+    );
+    drop((words, big, arr));
+    // SAFETY (test): live handle.
+    unsafe { dsd2pcm_frames_free(h) };
+}
+
+#[test]
+fn busy_and_poisoned_handles() {
+    let h = new_handle(&frames_cfg(176_400, 1));
+    let a = area(1, 1, 1);
+    let mut out = vec![0u8; 2352 * 3];
+    let r = contiguous(None, &a, None);
+    let call = |out: &mut [u8]| {
+        // SAFETY (test): valid buffers.
+        unsafe {
+            dsd2pcm_frames_convert(
+                h,
+                &r,
+                0,
+                out.as_mut_ptr().cast(),
+                out.len(),
+                null_mut(),
+                0,
+                null_mut(),
+            )
+        }
+    };
+    // SAFETY (test): live handle; only a shared reference.
+    let handle = unsafe { &*h };
+    {
+        let _held = handle.conv.lock().unwrap();
+        assert_eq!(call(&mut out), DSD2PCM_E_BUSY);
+    }
+    assert_eq!(call(&mut out), DSD2PCM_OK);
+    let poison = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _held = handle.conv.lock().unwrap();
+        panic!("poison the handle");
+    }));
+    assert!(poison.is_err());
+    assert_eq!(call(&mut out), DSD2PCM_E_INTERNAL);
+    assert!(last_error().contains("unusable"));
+    // SAFETY (test): live handle, not in use.
+    unsafe { dsd2pcm_frames_free(h) };
+}
+
+#[test]
+fn panics_become_internal_errors() {
+    let rc = guard(|| panic!("boom"));
+    assert_eq!(rc, DSD2PCM_E_INTERNAL);
+    assert_eq!(last_error(), "internal error: boom");
+    assert_eq!(guard_value(5usize, || panic!("boom")), 5);
+}
+
+#[test]
+fn last_error_is_per_thread() {
+    // SAFETY (test): NULL arguments are refused.
+    assert_eq!(
+        unsafe { dsd2pcm_frames_new(null(), null_mut()) },
+        DSD2PCM_E_NULL
+    );
+    assert_eq!(last_error(), "out is NULL");
+    std::thread::spawn(|| assert_eq!(last_error(), ""))
+        .join()
+        .unwrap();
+    assert_eq!(last_error(), "out is NULL");
+}
+
+/// Counts allocations per thread, so that tests running in parallel do not interfere.
+struct Counting;
+
+thread_local! {
+    static ALLOCS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn count() {
+    let _ = ALLOCS.try_with(|a| a.set(a.get() + 1));
+}
+
+// SAFETY (test): forwards to the system allocator.
+unsafe impl std::alloc::GlobalAlloc for Counting {
+    unsafe fn alloc(&self, l: std::alloc::Layout) -> *mut u8 {
+        count();
+        // SAFETY (test): the caller's contract, forwarded.
+        unsafe { std::alloc::System.alloc(l) }
+    }
+    unsafe fn dealloc(&self, p: *mut u8, l: std::alloc::Layout) {
+        // SAFETY (test): as above.
+        unsafe { std::alloc::System.dealloc(p, l) }
+    }
+    unsafe fn realloc(&self, p: *mut u8, l: std::alloc::Layout, n: usize) -> *mut u8 {
+        count();
+        // SAFETY (test): as above.
+        unsafe { std::alloc::System.realloc(p, l, n) }
+    }
+}
+
+#[global_allocator]
+static COUNTING: Counting = Counting;
+
+/// After the first call, `dsd2pcm_frames_convert` allocates nothing, in either buffer
+/// layout and format.
+#[test]
+fn frames_convert_allocates_nothing_after_warm_up() {
+    let h = new_handle(&frames_cfg(176_400, 6));
+    let fb = 6 * FPC;
+    let n = 40;
+    let a = area(6, n + 2, 11);
+    let (before, run, after) = (&a[..fb], &a[fb..(n + 1) * fb], &a[(n + 1) * fb..]);
+    let ptrs: Vec<*const u8> = run.chunks_exact(fb).map(<[u8]>::as_ptr).collect();
+    let mut sep = contiguous(Some(before), &[], Some(after));
+    sep.frame_ptrs = ptrs.as_ptr();
+    sep.frame_count = n;
+    let cont = contiguous(Some(before), run, Some(after));
+    let mut out = vec![0i32; n * 2352 * 6];
+    let mut fc = vec![0u64; n];
+    let mut st = dsd2pcm_stats::default();
+    let mut go = |r: &dsd2pcm_run, fmt: u32| {
+        let len = if fmt == 0 {
+            n * 2352 * 6 * 3
+        } else {
+            n * 2352 * 6 * 4
+        };
+        // SAFETY (test): valid buffers of the given lengths.
+        unsafe {
+            dsd2pcm_frames_convert(
+                h,
+                r,
+                fmt,
+                out.as_mut_ptr().cast(),
+                len,
+                fc.as_mut_ptr(),
+                n,
+                &mut st,
+            )
+        }
+    };
+    assert_eq!(go(&cont, 0), DSD2PCM_OK);
+    let before_count = ALLOCS.with(|a| a.get());
+    for (r, fmt) in [(&cont, 0), (&sep, 0), (&cont, 1), (&sep, 1)] {
+        assert_eq!(go(r, fmt), DSD2PCM_OK);
+    }
+    assert_eq!(ALLOCS.with(|a| a.get()), before_count);
+    // SAFETY (test): live handle.
+    unsafe { dsd2pcm_frames_free(h) };
+}

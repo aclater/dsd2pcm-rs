@@ -55,7 +55,32 @@ Its interface and output bytes are those of scarletbook-pcm 0.7.0's `Converter::
 any run with its neighbours gives the bytes of that run in a whole-area conversion. One
 converter per thread; after the first call it allocates nothing.
 
+`convert_file_with` and `dsd64_to_pcm_with` take a progress hook: it gets the output
+samples done and the total at each block, on the calling thread, and stops the conversion
+with `Error::Cancelled` when it returns `ControlFlow::Break`. `Error` is `#[non_exhaustive]`.
+
 Limits of this version: DSD64 input only for PCM output; WAV output up to 4 GiB.
+
+## C interface
+
+The crate `crates/dsd2pcm-capi` builds `libdsd2pcm.so` and `libdsd2pcm.a`, with the header
+`crates/dsd2pcm-capi/include/dsd2pcm.h`. It offers whole-file conversion with a progress and
+cancel callback, and a frame-run converter with the semantics of `dsd2pcm::frames`. Every
+function returns a status code, checks its pointers and lengths and never lets a panic
+reach the caller; paths are UTF-8. See [docs/c-api.md](docs/c-api.md).
+
+A minimal program, `crates/dsd2pcm-capi/tests/c/minimal.c`, converts one stereo frame of
+DSD silence. To build and run it on Linux, from the repository root:
+
+```
+cargo build --release -p dsd2pcm-capi
+cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/c/minimal.c target/release/libdsd2pcm.a -lpthread -ldl -lm -o minimal
+./minimal
+```
+
+It prints `dsd2pcm 0.1.0: 2352 samples per channel, first byte 0`. To link the shared
+library instead, use `-L target/release -ldsd2pcm` in place of the `.a` file and the three
+`-l` options, and run it with `LD_LIBRARY_PATH=target/release ./minimal`.
 
 ## Licence
 

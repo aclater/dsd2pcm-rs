@@ -55,6 +55,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dsd2pcm-capi"
+version = "0.1.0"
+dependencies = [
+ "dsd2pcm",
+]
+
+[[package]]
 name = "dsd2pcm-cli"
 version = "0.1.0"
 dependencies = [
