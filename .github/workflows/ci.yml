@@ -1,7 +1,9 @@
 # CI: formatting, clippy, the docs, and the tests on Linux (x86_64, aarch64, i686), macOS
 # (arm64) and Windows (x86_64), each test run once per SIMD level the CPU has
-# (.github/scripts/test-simd-levels.sh), and the C library's header and smoke test once
-# crates/dsd2pcm-capi exists. MSRV, cargo-deny, fuzzing and zizmor have their own workflows.
+# (.github/scripts/test-simd-levels.sh), a short soak test on Linux (tests/soak.rs), and the
+# C library's header and C tests, also under AddressSanitizer and LeakSanitizer. MSRV,
+# cargo-deny, fuzzing, zizmor, Miri and ThreadSanitizer (sanitizers.yml) have their own
+# workflows.
 name: ci
 
 on:
@@ -88,6 +90,10 @@ jobs:
           prefix-key: v0-rust-ubi10
       - name: Tests at every SIMD level
         run: .github/scripts/test-simd-levels.sh
+      - name: Soak test, short (memory levels off, worker threads end; docs/testing.md)
+        run: cargo test --locked -p dsd2pcm --test soak -- --ignored --nocapture
+        env:
+          DSD2PCM_SOAK_ITERATIONS: "1000"
 
   # 32-bit x86: built for i686-unknown-linux-gnu with gcc -m32 and run natively on the x86_64
   # runner. Fedora, pinned by digest: UBI has no 32-bit C libraries.
@@ -155,7 +161,9 @@ jobs:
 
   # The C library (crates/dsd2pcm-capi): the committed header matches cbindgen, compiles as
   # C99 and C11, and C programs link against the static library and run
-  # (.github/scripts/capi-check.sh). Passes with a notice while the crate does not exist.
+  # (.github/scripts/capi-check.sh), then again under clang's AddressSanitizer, LeakSanitizer
+  # and UndefinedBehaviorSanitizer (tests/leakloop.c: create, convert and free many times).
+  # Passes with a notice while the crate does not exist.
   capi:
     name: C library
     runs-on: ubuntu-24.04
@@ -167,7 +175,7 @@ jobs:
         shell: bash
     steps:
       - name: Packages
-        run: dnf -y -q --setopt=install_weak_deps=False install git-core gcc python3 diffutils findutils && dnf clean all
+        run: dnf -y -q --setopt=install_weak_deps=False install git-core gcc clang compiler-rt python3 diffutils findutils && dnf clean all
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
@@ -182,5 +190,8 @@ jobs:
       - name: cbindgen (pinned version, its own lock file)
         if: hashFiles('crates/dsd2pcm-capi/Cargo.toml') != ''
         run: cargo install --locked cbindgen --version "$CBINDGEN_VERSION"
-      - name: Header and C smoke test
+      - name: Header and C tests, also under the sanitizers
         run: .github/scripts/capi-check.sh crates/dsd2pcm-capi
+        env:
+          ASAN_CC: clang
+          LEAKLOOP_ITERATIONS: "100"

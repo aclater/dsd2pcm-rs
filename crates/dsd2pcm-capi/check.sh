@@ -4,11 +4,12 @@
 #   crates/dsd2pcm-capi/check.sh
 # 1. include/dsd2pcm.h is what cbindgen generates from the sources (CBINDGEN names the
 #    cbindgen binary; default: cbindgen on PATH).
-# 2. Every tests/*.c (smoke.c, minimal.c) and examples/convert.c builds against the header
+# 2. Every tests/*.c (smoke.c, minimal.c, leakloop.c) and examples/convert.c builds against the header
 #    and the static library with -Wall -Wextra -Werror under gcc and clang (CCS lists the
 #    compilers), and passes; the C++ compiler accepts the header and its init macros.
-# 3. The same under clang with AddressSanitizer and UndefinedBehaviorSanitizer, unless
-#    ASAN=0. The sanitizer runtime is clang's shared one (-shared-libasan), preloaded.
+# 3. smoke.c and leakloop.c (LEAKLOOP_ITERATIONS times, default 100) under clang with
+#    AddressSanitizer, LeakSanitizer and UndefinedBehaviorSanitizer, unless ASAN=0. The
+#    sanitizer runtime is clang's shared one (-shared-libasan), preloaded.
 set -eu
 
 crate=crates/dsd2pcm-capi
@@ -68,5 +69,11 @@ if [ "${ASAN:-1}" != 0 ]; then
         -I "$crate/include" "$crate/tests/smoke.c" "$lib" $libs -o "$work/smoke-asan"
     env LD_PRELOAD="$rt" ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
         "$work/smoke-asan" "$work"
+    # shellcheck disable=SC2086
+    clang -std=c11 -O1 -g -fno-omit-frame-pointer -Wall -Wextra -Werror \
+        -fsanitize=address,undefined -fno-sanitize-recover=all -shared-libasan \
+        -I "$crate/include" "$crate/tests/leakloop.c" "$lib" $libs -o "$work/leakloop-asan"
+    env LD_PRELOAD="$rt" ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
+        "$work/leakloop-asan" "${LEAKLOOP_ITERATIONS:-100}" "$work"
 fi
 echo "C interface checks passed"

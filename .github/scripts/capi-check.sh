@@ -11,6 +11,10 @@
 # - Every CRATE_DIR/tests/*.c is compiled with the same flags, linked against the static
 #   library and run; a non-zero exit fails the check. Without any, a program that only
 #   includes the header is linked instead.
+# - With ASAN_CC set (clang), every CRATE_DIR/tests/*.c again, built with AddressSanitizer,
+#   LeakSanitizer and UndefinedBehaviorSanitizer and run with detect_leaks=1: any leak,
+#   memory error or undefined behaviour fails the check. leakloop.c runs
+#   LEAKLOOP_ITERATIONS times (default 100).
 # Does nothing (exit 0) when CRATE_DIR does not exist.
 set -euo pipefail
 
@@ -73,3 +77,19 @@ for src in "${programs[@]}"; do
     "$exe"
 done
 echo "C smoke test passed (${#programs[@]} program(s))"
+
+if [[ -n "${ASAN_CC:-}" ]]; then
+    "$ASAN_CC" --version | head -n 1
+    for src in "${programs[@]}"; do
+        exe="$work/asan-$(basename "$src" .c)"
+        "$ASAN_CC" -std=c99 "${flags[@]}" -O1 -g -fno-omit-frame-pointer \
+            -fsanitize=address,undefined -fno-sanitize-recover=all \
+            -o "$exe" "$src" "$archive" -lpthread -ldl -lm
+        args=()
+        [[ $(basename "$src") == leakloop.c ]] && args=("${LEAKLOOP_ITERATIONS:-100}")
+        echo "run (ASan, LSan, UBSan): $src ${args[*]}"
+        ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=print_stacktrace=1 \
+            "$exe" "${args[@]}"
+    done
+    echo "C tests passed under the sanitizers, no leaks"
+fi
