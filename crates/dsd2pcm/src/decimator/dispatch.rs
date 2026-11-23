@@ -9,9 +9,8 @@
 //! AVX2 builds do the same IEEE-754 operations in the same order per output (the compiler
 //! never fuses or reorders floating-point operations on its own), and a fused multiply-add
 //! gives the same result as a product and an addition when both are exact. On x86-64 the
-//! third level runs plans whose every stage is proven exact in lanes ([`super::lanes`]),
-//! which sum each output's terms in another order and grouping: the same integers, because
-//! every partial sum is exact.
+//! third level runs plans whose every stage is proven exact in lanes ([`super::lanes`]):
+//! the same operations per output in the same order, on another data layout.
 //!
 //! This is the only module of the crate with `unsafe`: calling a `#[target_feature]`
 //! function is `unsafe`. Every call is made with an [`Isa`] whose level is at most the one

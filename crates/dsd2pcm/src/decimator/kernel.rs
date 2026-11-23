@@ -259,8 +259,8 @@ pub(super) struct Sym {
     pub odd: Vec<f64>,
     /// 2^-q: from the product scale back to the sample grid.
     pub scale: f64,
-    /// Whether a fused multiply-add, or another summation order (`super::lanes`), may be
-    /// used: set by the plan only when `super::exact` proved every sum of this stage exact.
+    /// Whether a fused multiply-add may be used: set by the plan only when
+    /// `super::exact` proved every sum of this stage exact.
     pub fused: bool,
 }
 

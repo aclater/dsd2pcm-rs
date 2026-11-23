@@ -1,19 +1,15 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! A pass of outputs computed as 4 lanes, for plans whose every stage `super::exact` proved
-//! exact (`Sym::fused`). The stages and their integers are those of the ordered kernels
-//! (`super::kernel`); the terms of each output are added in another order and grouping,
-//! which gives the same sum only because every product and partial sum is an exact integer
-//! below 2^53.
+//! exact (`Sym::fused`, so that the multiply-adds may be fused).
 //!
 //! The pass's outputs are split into 4 runs of consecutive outputs, and each run goes
 //! through S1 and every stage on its own, as `Plan::pass_run` would: lane `w` of every
-//! vector belongs to run `w`. Each stage is then an FIR over vectors, all loads are aligned,
-//! decimation and interpolation are index arithmetic on whole vectors, and nothing is
-//! copied between stages. Within a group of `SV` output vectors, one loaded input vector
-//! serves every (output, tap) pair with the same sum of indices: a group of `U` symmetric
-//! tap pairs loads `U + SV - 1` vectors per side instead of `2 U SV`. Each group's products
-//! go into a partial sum that is added to the output's sum, so that groups do not wait for
-//! each other's multiply-adds.
+//! vector belongs to run `w`. Each stage is then an FIR over vectors with the same
+//! operations per output, in the same order, as the ordered kernels (`super::kernel`), but
+//! all loads are aligned (no load crosses a cache line), decimation and interpolation are
+//! index arithmetic on whole vectors, and nothing is copied between stages. Blocks of 8
+//! output vectors keep 8 independent sums, enough to cover the multiply-add latency. S1
+//! uses paired tables ([`S1Pair`]): one set of lookups for two outputs.
 //!
 //! Used on x86-64 with AVX2 and FMA (`super::dispatch`); elsewhere the ordered kernels run.
 
@@ -30,14 +26,8 @@ pub(super) const W: usize = 4;
 #[repr(align(32))]
 pub(super) struct Lanes(pub(super) [f64; W]);
 
-/// Output vectors per group.
-const SV: usize = 4;
-
-/// Tap pairs per group.
-const U: usize = 4;
-
-/// Input vectors per side of a group.
-const N: usize = U + SV - 1;
+/// Output vectors per block: 8 independent sums, enough to cover the multiply-add latency.
+const SV: usize = 8;
 
 /// The largest tap offset the lane kernels take.
 pub(super) const MAX_M: usize = 128;
@@ -236,54 +226,16 @@ fn pairs<M: Mac, const S: usize>(
     hi: usize,
     lo: usize,
 ) {
-    /// `G` tap pairs from `j`: `up[i]` = `X[hi + j + i]`, `dn[i]` = `X[lo - j - (G - 1) + i]`.
-    #[inline(always)]
-    fn group<M: Mac, const S: usize, const G: usize, const NG: usize>(
-        acc: &mut [[f64; W]; SV],
-        h: &[f64],
-        up: &[Lanes],
-        dn: &[Lanes],
-    ) {
-        let h: &[f64; G] = h[..G].try_into().unwrap();
-        let up: [Lanes; NG] = std::array::from_fn(|i| up[S * i]);
-        let dn: [Lanes; NG] = std::array::from_fn(|i| dn[S * i]);
+    for (j, &hj) in h.iter().enumerate() {
+        // `X[hi + j ..]` and `X[lo - j ..]`, `SV` vectors each.
+        let up = &x[S * (hi + j)..][..S * (SV - 1) + 1];
+        let dn = &x[S * (lo - j)..][..S * (SV - 1) + 1];
         for (g, acc) in acc.iter_mut().enumerate() {
-            let mut p = [0.0; W];
-            for u in 0..G {
-                let (a, b) = (up[u + g].0, dn[g + G - 1 - u].0);
-                for l in 0..W {
-                    p[l] = if u == 0 {
-                        h[0] * (a[l] + b[l])
-                    } else {
-                        M::mac(p[l], h[u], a[l] + b[l])
-                    };
-                }
-            }
+            let (a, b) = (&up[S * g].0, &dn[S * g].0);
             for l in 0..W {
-                acc[l] += p[l];
+                acc[l] = M::mac(acc[l], hj, a[l] + b[l]);
             }
         }
-    }
-    let t = h.len();
-    let mut j = 0;
-    while j + U <= t {
-        let d = lo + 1 - j - U;
-        group::<M, S, U, N>(
-            acc,
-            &h[j..],
-            &x[S * (hi + j)..][..S * (N - 1) + 1],
-            &x[S * d..][..S * (N - 1) + 1],
-        );
-        j += U;
-    }
-    while j < t {
-        group::<M, S, 1, SV>(
-            acc,
-            &h[j..],
-            &x[S * (hi + j)..][..S * (SV - 1) + 1],
-            &x[S * (lo - j)..][..S * (SV - 1) + 1],
-        );
-        j += 1;
     }
 }
 

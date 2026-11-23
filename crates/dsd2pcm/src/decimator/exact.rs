@@ -7,9 +7,7 @@
 //! bound `x` sums products `h (a + b)` with `|a + b| <= 2x`; every partial sum, in any order,
 //! is at most `sum |h| x` (all taps, both sides). If that is below 2^53, every operand,
 //! product and partial sum is an integer that `f64` holds exactly, so a fused multiply-add
-//! (one rounding) and a product and addition (two) give the same sum, and so does any order
-//! or grouping of the terms (`super::lanes` sums groups of taps into partial sums: each is
-//! the sum of a subset of the terms, so within the same bound). The output, rounded
+//! (one rounding) and a product and addition (two) give the same sum. The output, rounded
 //! back to the grid by `2^-q`, is at most `(sum |h| x >> q) + 1`. Interp2 sums only the odd
 //! taps (both sides) and passes its input through as the even outputs.
 //!

@@ -144,25 +144,24 @@ run property the bytes equal one call.
 - The FIR kernels compute blocks of independent outputs (16 generic, 32 with AVX2), so
   the compiler puts them in vector lanes; each output keeps its own sum in tap order.
 - Lanes (`decimator/lanes.rs`; x86-64 with AVX2 and FMA, plans whose every stage is proven
-  exact, passes of at least 256 outputs). The ordered kernels load two unaligned input
-  vectors per tap pair and output vector, so they are bound by loads, many of them across
-  cache lines. A pass in lanes splits its outputs into 4 runs of consecutive outputs (each a
-  whole number of blocks; the last runs move back to end with the padded pass, so runs may
-  overlap) and computes each run as the ordered pass would, with run `w` in lane `w` of
-  every vector. Every stage is then an FIR over aligned vectors; decimation and
-  interpolation are index arithmetic, and nothing is copied between stages. A group of 4
-  tap pairs and 4 output vectors loads 7 vectors per side instead of 32, and sums into a
-  partial sum that is then added to the output's, so that groups do not wait on the FMA
-  latency. S1 runs at every byte with paired tables: the windows of two neighbouring
-  outputs are read as one window one byte longer, cut into 11-bit chunks, and each entry
-  holds both contributions, biased to be non-negative, in the two 32-bit halves of a
-  `u64` (no half of a sum reaches 2^32, so they never carry into each other); one set of
-  lookups (7, or 10 for the wide filter) gives two outputs. Tables: 112 KiB, wide 160
-  KiB. The terms of each output are summed in another order and grouping than the ordered
-  kernels', which gives the same integers only because the stages are proven exact;
-  `lanes_match_ordered` compares the two at every level, and the golden hashes run at
-  every level. 32-bit x86 and the generic level keep the ordered kernels (fewer
-  registers).
+  exact, passes of at least 256 outputs). The ordered kernels load unaligned input
+  vectors, many of them across cache lines. A pass in lanes splits its outputs into 4 runs
+  of consecutive outputs (each a whole number of blocks; the last runs move back to end
+  with the padded pass, so runs may overlap) and computes each run as the ordered pass
+  would, with run `w` in lane `w` of every vector: the same operations per output in the
+  same order, but every load aligned, decimation and interpolation as index arithmetic,
+  and no copies between stages. Blocks of 8 output vectors keep 8 independent sums. S1
+  runs at every byte with paired tables: the windows of two neighbouring outputs are read
+  as one window one byte longer, cut into 11-bit chunks, and each entry holds both
+  contributions, biased to be non-negative, in the two 32-bit halves of a `u64` (no half
+  of a sum reaches 2^32, so they never carry into each other: `sums_are_exact`); one set
+  of lookups (7, or 10 for the wide filter) gives two outputs. Tables: 112 KiB, wide 160
+  KiB. `lanes_match_ordered` compares lanes and ordered passes at every level, and the
+  golden hashes run at every level. 32-bit x86 and the generic level keep the ordered
+  kernels. Reusing loaded vectors across taps (groups of taps and outputs, partial sums)
+  was faster on P-cores and Zen 5 but slower than scarletbook-pcm on Gracemont E-cores,
+  whose 128-bit units make the extra additions and register pressure cost more; a hybrid
+  CPU can move a thread between core types, so one layout serves both.
 - Run-time dispatch (`decimator/dispatch.rs`, the crate's only `unsafe`): generic, AVX2,
   and AVX2 with FMA. FMA is used only in stages that `decimator/exact.rs` proves exact from
   the tables and stage plan (every product and partial sum an integer below 2^53); the
