@@ -17,11 +17,15 @@
 //! the readers truncated files, and every tenth iteration converts a file on disk with
 //! `convert_file_with`. The outputs of the paths are compared with each other.
 //!
-//! On Linux it checks, from `/proc/self`:
-//! - after the warm-up (the first 20 % of iterations), the resident set size (`VmRSS`) of
-//!   the second half of the run stays within 5 % or 16 MiB (whichever is larger) of the
-//!   highest value of the first half (`DSD2PCM_SOAK_RSS_REPORT_ONLY` only reports it, for
-//!   sanitizer builds);
+//! It checks, after the warm-up (the first 20 % of iterations):
+//! - the live heap (bytes allocated and not freed, counted by a global allocator) after
+//!   each iteration of the second half is at most 64 KiB above the highest value of 20 to
+//!   50 % of the run;
+//!
+//! and on Linux, from `/proc/self`:
+//! - the resident set size (`VmRSS`) of the second half stays within 10 % or 32 MiB
+//!   (whichever is larger) of the highest value of 20 to 50 %
+//!   (`DSD2PCM_SOAK_RSS_REPORT_ONLY` only reports it, for sanitizer builds);
 //! - the thread count is back at its value from before the run after every threaded
 //!   conversion.
 
@@ -34,10 +38,54 @@ use dsd2pcm::frames::{
 use dsd2pcm::io::{DsdRead, DsdWrite, PcmRead};
 use dsd2pcm::wav::{WavFormat, WavReader, WavWriter};
 use dsd2pcm::{convert_file_with, Cutoff, Error, Filter, PcmOptions, PcmRate};
+use std::alloc::{GlobalAlloc, Layout, System};
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::ops::ControlFlow;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
+
+/// The system allocator, counting the bytes allocated and not yet freed: the live heap,
+/// which a leak raises whatever the allocator does with freed memory.
+struct Counting;
+
+static LIVE: AtomicUsize = AtomicUsize::new(0);
+
+unsafe impl GlobalAlloc for Counting {
+    unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+        // SAFETY: the caller's contract for `alloc`, passed on unchanged.
+        let p = unsafe { System.alloc(l) };
+        if !p.is_null() {
+            LIVE.fetch_add(l.size(), Ordering::Relaxed);
+        }
+        p
+    }
+    unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
+        // SAFETY: as for `alloc`.
+        let p = unsafe { System.alloc_zeroed(l) };
+        if !p.is_null() {
+            LIVE.fetch_add(l.size(), Ordering::Relaxed);
+        }
+        p
+    }
+    unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+        LIVE.fetch_sub(l.size(), Ordering::Relaxed);
+        // SAFETY: `p` and `l` come from this allocator, per the caller's contract.
+        unsafe { System.dealloc(p, l) }
+    }
+    unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
+        // SAFETY: the caller's contract for `realloc`, passed on unchanged.
+        let q = unsafe { System.realloc(p, l, n) };
+        if !q.is_null() {
+            LIVE.fetch_add(n, Ordering::Relaxed);
+            LIVE.fetch_sub(l.size(), Ordering::Relaxed);
+        }
+        q
+    }
+}
+
+#[global_allocator]
+static A: Counting = Counting;
 
 const RATES: [PcmRate; 3] = [PcmRate::Hz88200, PcmRate::Hz176400, PcmRate::Hz352800];
 const CUTOFFS: [Cutoff; 3] = [Cutoff::Standard, Cutoff::Low, Cutoff::Wide];
@@ -421,18 +469,21 @@ fn soak() {
     let base_threads = threads();
     // Written before the run, so its pages do not add to the resident set on the way.
     let mut rss = vec![0u64; max_iterations];
+    let mut live = vec![0usize; max_iterations];
     let have_rss = rss_kib().is_some();
     let t0 = Instant::now();
     let mut iterations = 0;
-    for (i, r) in rss.iter_mut().enumerate() {
+    for (i, (r, h)) in rss.iter_mut().zip(live.iter_mut()).enumerate() {
         if deadline.is_some_and(|d| Instant::now() >= d) {
             break;
         }
         iteration(i, &mut rng, &mut reused, &tmp, base_threads, &mut st);
         *r = rss_kib().unwrap_or(0);
+        *h = LIVE.load(Ordering::Relaxed);
         iterations += 1;
     }
     rss.truncate(iterations);
+    live.truncate(iterations);
     assert!(iterations >= 50, "at least 50 iterations, ran {iterations}");
     std::fs::remove_dir_all(&tmp).unwrap();
     let secs = t0.elapsed().as_secs_f64();
@@ -452,17 +503,37 @@ fn soak() {
             threads().unwrap_or(0)
         );
     }
+    let warm = iterations / 5;
+    let half = iterations / 2;
+    // The live heap after each iteration: the converters kept for the run and the test's
+    // own state. Once every kept converter has met its longest run it does not move.
+    let deciles: Vec<String> = (1..=10)
+        .map(|d| format!("{}", live[d * iterations / 10 - 1] / 1024))
+        .collect();
+    let live_plateau = *live[warm..half].iter().max().unwrap();
+    let live_late = *live[half..].iter().max().unwrap();
+    println!(
+        "soak: live heap KiB at each tenth of the run: {}; plateau (20-50 %) {} KiB; second-half \
+         max {} KiB",
+        deciles.join(" "),
+        live_plateau / 1024,
+        live_late / 1024
+    );
+    assert!(
+        live_late <= live_plateau + 64 * 1024,
+        "live heap grew: {live_late} bytes in the second half, plateau {live_plateau} bytes"
+    );
     if have_rss {
         let deciles: Vec<String> = (1..=10)
             .map(|d| format!("{}", rss[d * iterations / 10 - 1] / 1024))
             .collect();
-        let warm = iterations / 5;
-        let half = iterations / 2;
         let plateau = *rss[warm..half].iter().max().unwrap();
         let late = *rss[half..].iter().max().unwrap();
         let mut sorted = rss[half..].to_vec();
         sorted.sort_unstable();
-        let bound = plateau + (plateau / 20).max(16 * 1024);
+        // Looser than the live heap's bound: the resident set also holds what the allocator
+        // keeps of freed memory, spread over the worker threads' arenas.
+        let bound = plateau + (plateau / 10).max(32 * 1024);
         println!(
             "soak: RSS MiB at each tenth of the run: {}; plateau (20-50 %) {} MiB; second half \
              min {} median {} max {} MiB; bound {} MiB",
