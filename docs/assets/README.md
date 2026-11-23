@@ -1,3 +1,5 @@
+[dsd2pcm-rs](../../README.md) › [Documentation](../README.md) › Icon
+
 # Icon
 
 The dsd2pcm-rs icon (DSD pulses turned into a PCM wave), © the dsd2pcm-rs project, under the repository's licence, MIT OR Apache-2.0. It is one of the DSD Toolbox icons: a silver disc on a navy rounded square, with the project's motif on an amber panel below it.
@@ -10,3 +12,10 @@ The dsd2pcm-rs icon (DSD pulses turned into a PCM wave), © the dsd2pcm-rs proje
 
 Every file here is exported from `icon.svg`. To change the icon, replace all of them together and
 keep the file names, so links to them keep working.
+
+## See also
+
+- [Documentation](../README.md): the documentation index
+- [DSD Toolbox](https://github.com/aclater/dsd-toolbox): the other projects of the family
+
+Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).

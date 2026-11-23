@@ -1,3 +1,5 @@
+[dsd2pcm-rs](../README.md) › [Documentation](README.md) › Testing for long-lived processes
+
 # Testing for long-lived processes
 
 A program that keeps converters for days (a file system, a player, a server) needs more than
@@ -38,7 +40,7 @@ It asserts, after a warm-up (the first 20 % of iterations):
 - on Linux, after every threaded conversion the thread count (`/proc/self/task`) is back
   at its value before the run.
 
-```
+```sh
 DSD2PCM_SOAK_ITERATIONS=1000 cargo test --release -p dsd2pcm --test soak -- --ignored --nocapture
 DSD2PCM_SOAK_SECONDS=3600 cargo test --release -p dsd2pcm --test soak -- --ignored --nocapture
 ```
@@ -78,14 +80,14 @@ with clang's AddressSanitizer, LeakSanitizer and UndefinedBehaviorSanitizer and 
 iterations with `detect_leaks=1`: one block left allocated fails it. Without a sanitizer it
 also checks the resident set levels off. Locally:
 
-```
+```sh
 CBINDGEN=cbindgen crates/dsd2pcm-capi/check.sh          # LEAKLOOP_ITERATIONS=100 by default
 ASAN_CC=clang .github/scripts/capi-check.sh crates/dsd2pcm-capi
 ```
 
 ## Miri
 
-```
+```sh
 rustup toolchain install nightly-2026-11-01 --component miri,rust-src
 cargo +nightly-2026-11-01 miri test -p dsd2pcm-capi
 .github/scripts/miri-core.sh            # with RUSTUP_TOOLCHAIN=nightly-2026-11-01
@@ -112,7 +114,7 @@ and 12 for the core crate on a Ryzen AI Max+ 395 (one core each):
 
 ## ThreadSanitizer
 
-```
+```sh
 RUSTFLAGS=-Zsanitizer=thread DSD2PCM_SOAK_ITERATIONS=100 DSD2PCM_SOAK_RSS_REPORT_ONLY=1 \
   cargo +nightly-2026-11-01 test -Zbuild-std --target x86_64-unknown-linux-gnu \
   -p dsd2pcm --test progress --test frames --test soak -- --include-ignored
@@ -141,3 +143,11 @@ DSD64 DSF file, under `valgrind --tool=memcheck --leak-check=full --show-leak-ki
 The 64 bytes are the standard library's handle of the main thread (`Thread::new_current`,
 created once when the first scoped thread starts), which lives until exit by design; the
 rest still reachable at exit (under 200 KB) are the standard library's own buffers.
+
+## See also
+
+- [Development](development.md): the checks CI runs
+- [C interface](c-api.md#checks): the C library checks
+- [Fuzzing](fuzzing.md): the readers against bad input
+
+Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).

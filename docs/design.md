@@ -1,4 +1,4 @@
-[dsd2pcm-rs](../README.md) › [Documentation](../README.md#documentation) › Design
+[dsd2pcm-rs](../README.md) › [Documentation](README.md) › Design
 
 # Design
 
@@ -462,7 +462,7 @@ The rows where dsd2pcm is not ahead of scarletbook-pcm 0.7.0 are listed in
 ## See also
 
 - [Performance](performance.md): the measured speed and its gaps
-- [Usage](usage.md): the options these decisions give
+- [User guide](user-guide.md) and [options](options.md): the choices these decisions give
 - [Provenance](../PROVENANCE.md): where the ported code comes from
 - [Fuzzing](fuzzing.md): how the readers are tested against bad input
 

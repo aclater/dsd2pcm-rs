@@ -10,7 +10,7 @@
 [![crates.io](https://img.shields.io/crates/v/dsd2pcm.svg)](https://crates.io/crates/dsd2pcm)
 [![docs.rs](https://docs.rs/dsd2pcm/badge.svg)](https://docs.rs/dsd2pcm)
 
-dsd2pcm converts DSD (DSF and DSDIFF files, or Super Audio CD frames) to 24-bit PCM, as a Rust
+dsd2pcm converts DSD (DSF and DFF files, or SACD frames) to 24-bit PCM, as a Rust
 crate, a C library and a command-line tool. Its output is the same, byte for byte, on every
 CPU (with SSE2 floating point on x86), and on most workloads it is faster than scarletbook-pcm 0.7.0, whose output it
 reproduces ([performance](docs/performance.md)).
@@ -19,9 +19,9 @@ reproduces ([performance](docs/performance.md)).
 
 | System | How | Guide |
 |---|---|---|
-| Linux | Release builds of the tool and the C library for x86_64, aarch64 and 32-bit x86, glibc 2.17 or later; `cargo install dsd2pcm-cli` | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
-| macOS 11 or later | Release builds for Apple silicon (tool and C library), signed and notarised | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
-| Windows 10 and 11, x64 | Release builds (tool and C library, C runtime linked in). Not code-signed | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
+| Linux | Release builds of the tool and the C library for x86_64, aarch64 and 32-bit x86, glibc 2.17 or later; `cargo install dsd2pcm-cli` | [user guide](docs/user-guide.md) · [C interface](docs/c-api.md) |
+| macOS 11 or later | Release builds for Apple silicon (tool and C library), signed and notarised | [user guide](docs/user-guide.md) · [C interface](docs/c-api.md) |
+| Windows 10 and 11, x64 | Release builds (tool and C library, C runtime linked in). Not code-signed | [user guide](docs/user-guide.md) · [C interface](docs/c-api.md) |
 | Any Rust target | The `dsd2pcm` crate | [docs.rs](https://docs.rs/dsd2pcm) |
 
 Every release is tested in CI on all five release platforms; the speed figures come from an
@@ -31,7 +31,7 @@ Intel Core i9-13900H (P- and E-cores) and an AMD Ryzen 9 3950X.
 
 On Linux x86_64, with a DSF file named `01 - Track.dsf` in the current directory:
 
-```
+```sh
 curl -LO https://github.com/aclater/dsd2pcm-rs/releases/download/v0.1.2/dsd2pcm-0.1.2-x86_64-linux.tar.gz
 tar xzf dsd2pcm-0.1.2-x86_64-linux.tar.gz
 ./dsd2pcm-0.1.2-x86_64-linux/dsd2pcm "01 - Track.dsf" "01 - Track.wav"
@@ -39,18 +39,19 @@ tar xzf dsd2pcm-0.1.2-x86_64-linux.tar.gz
 
 This writes a 176.4 kHz, 24-bit WAV and prints the duration, the speed and the number of
 clipped samples. With Rust installed, `cargo install dsd2pcm-cli` installs the same tool.
-Other platforms and options: [docs/usage.md](docs/usage.md).
+Options: [docs/options.md](docs/options.md); more in the [user guide](docs/user-guide.md).
 
 ## Documentation
 
-- [Usage](docs/usage.md): formats, rates, filters, options, the library interface
+The [documentation index](docs/README.md) lists every page.
+
+- [User guide](docs/user-guide.md) · [Options](docs/options.md): converting files, rates, filters, formats
 - [C interface](docs/c-api.md): the C library, its ABI and binary releases
 - [Performance](docs/performance.md): speed against scarletbook-pcm 0.7.0, including the gaps
-- [Design](docs/design.md): how the conversion works and why its output is exact
+- [Design](docs/design.md): the design decisions and their reasons
 - [Changelog](CHANGELOG.md) · [Plan](docs/plan.md)
-- [Development](docs/development.md) · [Fuzzing](docs/fuzzing.md) · [Testing for long-lived processes](docs/testing.md) · [Releases](docs/release.md)
-- [Provenance](PROVENANCE.md) · [Rules for contributors](AGENTS.md)
-- [Security policy](SECURITY.md): supported versions and how to report a vulnerability
+- [Contributing](CONTRIBUTING.md) · [Development](docs/development.md) · [Fuzzing](docs/fuzzing.md) · [Testing for long-lived processes](docs/testing.md) · [Releases](docs/release.md)
+- [Security policy](SECURITY.md) · [Provenance](PROVENANCE.md) · [Rules for contributors](AGENTS.md)
 
 ## Licence and credits
 

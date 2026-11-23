@@ -1,3 +1,5 @@
+[dsd2pcm-rs](../README.md) › [Documentation](README.md) › Performance
+
 # Performance
 
 Speed of DSD64 to 24-bit PCM with the default filter, against scarletbook-pcm 0.7.0, whose
@@ -146,3 +148,11 @@ crates give the same bytes on both platforms.
   writing), not in the filter.
 - aarch64 (above): level with scarletbook-pcm 0.7.0, 2 to 3 % behind at 352.8 kHz `wide`
   and in whole-file conversion at 176.4 kHz.
+
+## See also
+
+- [Design](design.md#speed): why it is fast
+- [Development](development.md): building and testing
+- [Changelog](../CHANGELOG.md): the changes behind each release
+
+Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
