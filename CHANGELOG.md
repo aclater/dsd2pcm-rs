@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- C library: CI, `crates/dsd2pcm-capi/check.sh` and the release archive checks verify that
+  the libraries hold no claxon (FLAC decoder) symbols, by their symbol tables (`nm`), and
+  CI checks that the check catches a library built with `--features flac`
+  ([C interface](docs/c-api.md#checks)).
+
 ## 0.1.2 (2026-11-23)
 
 This release contains security fixes; upgrading is recommended. Versions 0.1.0 and 0.1.1 are

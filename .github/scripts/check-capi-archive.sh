@@ -7,7 +7,9 @@
 #   links against the shared library and runs (CC, default cc; for example "gcc -m32");
 # - the shared library's name is the ABI-versioned one: SONAME libdsd2pcm.so.1 on Linux,
 #   install name @rpath/libdsd2pcm.1.dylib on macOS, and the program depends on that name;
-# - the same program links against the static library with Libs.private and runs.
+# - the same program links against the static library with Libs.private and runs;
+# - the static library holds no claxon symbols (check-capi-no-claxon.sh; the shared library
+#   is stripped in releases, so its symbol table is checked in CI instead).
 set -euo pipefail
 
 dir=$(cd "$1" && pwd)
@@ -51,4 +53,5 @@ esac
 # shellcheck disable=SC2086
 $cc -std=c99 -Wall -Wextra -Werror "${cflags[@]}" -o "$work/minimal-static" "$src" "$dir/lib/libdsd2pcm.a" "${private[@]}"
 "$work/minimal-static"
-echo "C library archive: shared and static programs built and ran"
+"$(dirname "$0")/check-capi-no-claxon.sh" "$dir/lib/libdsd2pcm.a"
+echo "C library archive: shared and static programs built and ran; no claxon code"

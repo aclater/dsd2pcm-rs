@@ -10,6 +10,7 @@
 # 3. smoke.c and leakloop.c (LEAKLOOP_ITERATIONS times, default 100) under clang with
 #    AddressSanitizer, LeakSanitizer and UndefinedBehaviorSanitizer, unless ASAN=0. The
 #    sanitizer runtime is clang's shared one (-shared-libasan), preloaded.
+# Also: the static library holds no claxon symbols (.github/scripts/check-capi-no-claxon.sh).
 set -eu
 
 crate=crates/dsd2pcm-capi
@@ -33,6 +34,9 @@ libs=$(cargo rustc --release -q -p dsd2pcm-capi --lib --crate-type staticlib \
     -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p' | tail -n 1)
 lib="$target/release/libdsd2pcm.a"
 test -f "$lib"
+# Built for this package alone, without the `flac` feature: no claxon code in it. (A
+# workspace build turns the feature on through the command-line tool.)
+.github/scripts/check-capi-no-claxon.sh "$lib"
 
 for cc in $ccs; do
     echo "== $cc"
