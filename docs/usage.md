@@ -21,8 +21,8 @@
   (also `PcmRead::channel_mask`) give the mask a file declares: `dwChannelMask`, or the
   `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` Vorbis comment. `DsfWriter::set_channel_mask` sets the
   DSF type from a mask (the type of the count when no type has that mask). A DSD to WAV
-  conversion still writes the mask of the channel count; it will take the input's layout
-  in 0.2, as that changes output files.
+  conversion writes the input's layout as the WAV channel mask (since 0.2), or the mask of
+  the channel count when the input declares none.
 - Converts DSD64 to 24-bit PCM at 88.2, 176.4 or 352.8 kHz with one of three linear-phase
   filters:
 

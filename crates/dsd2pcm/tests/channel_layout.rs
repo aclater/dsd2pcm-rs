@@ -1,11 +1,11 @@
 //! Channel layouts: the masks of DSF channel types and DSDIFF channel IDs; WAV channel
 //! masks read back; the DSF writer takes its type from a mask. A DSD to WAV conversion
-//! still writes the mask of the channel count (output bytes change only in 0.2).
+//! writes the input's layout (since 0.2).
 
 use dsd2pcm::dff::{DffReader, DffWriter};
 use dsd2pcm::dsf::{channel_mask_for_type, channel_type_for_mask, DsfReader, DsfWriter};
 use dsd2pcm::io::{DsdRead, DsdWrite};
-use dsd2pcm::wav::{channel_mask, WavFormat, WavReader, WavWriter};
+use dsd2pcm::wav::{WavFormat, WavReader, WavWriter};
 use dsd2pcm::{convert_file, PcmOptions, PcmRate};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -104,8 +104,7 @@ fn dsf_channel_types_give_their_masks() {
         let r = DsfReader::new(Cursor::new(&f)).unwrap();
         assert_eq!(r.channel_type(), Some(t));
         assert_eq!(r.channel_mask(), Some(mask), "type {t}");
-        // Conversion keeps the count's mask (changes in 0.2).
-        assert_eq!(wav_mask(&d, &f), Some(channel_mask(ch)), "type {t}");
+        assert_eq!(wav_mask(&d, &f), Some(mask), "type {t}");
     }
     std::fs::remove_dir_all(&d).unwrap();
 }
@@ -132,8 +131,8 @@ fn dsf_type_that_does_not_match_the_count_falls_back_to_the_count() {
 #[test]
 fn dff_channel_ids_give_their_masks() {
     let d = dir("dff");
-    // (IDs, the reader's mask, the mask conversion writes from 0.2)
-    for (ids, mask, _mask_from_0_2) in [
+    // (IDs, the reader's mask, the mask conversion writes)
+    for (ids, mask, wav) in [
         (&[b"MLFT", b"MRGT", b"C   ", b"LFE "][..], Some(0x0F), 0x0F),
         (
             &[b"MLFT", b"MRGT", b"C   ", b"LS  ", b"RS  "][..],
@@ -158,12 +157,7 @@ fn dff_channel_ids_give_their_masks() {
         let f = dff(ids);
         let r = DffReader::new(Cursor::new(&f)).unwrap();
         assert_eq!(r.channel_mask(), mask, "{ids:?}");
-        // Conversion keeps the count's mask (changes in 0.2).
-        assert_eq!(
-            wav_mask(&d, &f),
-            Some(channel_mask(ids.len() as u16)),
-            "{ids:?}"
-        );
+        assert_eq!(wav_mask(&d, &f), Some(wav), "{ids:?}");
     }
     // The writer's own IDs read back.
     for (ch, mask) in [
@@ -246,19 +240,21 @@ fn wav_channel_mask_reads_back() {
     assert!(matches!(bad, Err(dsd2pcm::Error::InvalidArgument(_))));
 }
 
-/// The WAV header of a DSF of type 5 (FL FR C LFE) is the one of 0.1.2: the mask of four
-/// channels (quad, 0x33), byte for byte. Changes in 0.2, which writes the type's mask.
+/// The WAV header of a DSF of type 5 (FL FR C LFE): since 0.2 the type's mask (0x0F); 0.1
+/// wrote the mask of four channels (quad, 0x33). Otherwise the header is unchanged.
 #[test]
-fn type5_dsf_converts_with_the_0_1_2_header() {
+fn type5_dsf_converts_with_its_own_mask() {
     let d = dir("type5-header");
     let (inp, out) = (d.join("in.dsf"), d.join("out.wav"));
     std::fs::write(&inp, dsf(4, Some(5))).unwrap();
     convert_file(&inp, &out, &PcmOptions::new(PcmRate::Hz88200)).unwrap();
     let wav = std::fs::read(&out).unwrap();
-    let mut w = WavWriter::new(Cursor::new(Vec::new()), WavFormat::I24, 4, 88_200).unwrap();
+    let mut w =
+        WavWriter::with_channel_mask(Cursor::new(Vec::new()), WavFormat::I24, 4, 88_200, 0x0F)
+            .unwrap();
     w.write_raw(&wav[68..]).unwrap();
     w.finish().unwrap();
-    assert_eq!(&wav[40..44], &0x33u32.to_le_bytes());
+    assert_eq!(&wav[40..44], &0x0Fu32.to_le_bytes());
     assert_eq!(w.into_inner().into_inner(), wav);
     std::fs::remove_dir_all(&d).unwrap();
 }
