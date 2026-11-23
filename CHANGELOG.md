@@ -35,6 +35,13 @@
   as it was, and the result is put in place without ever replacing a file that appeared
   during the conversion: a hard link, or on file systems without hard links an exclusive
   create then a rename ([design](docs/design.md#output-files)).
+- Channel layouts: `WavReader::channel_mask` and `FlacReader::channel_mask` (and
+  `PcmRead::channel_mask`) give the channel mask a file declares (`WAVE_FORMAT_EXTENSIBLE`,
+  or FLAC's `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` comment); `DsdRead::channel_mask` the
+  layout of a DSF channel type or of DSDIFF channel IDs; `WavWriter::with_channel_mask`,
+  `DsfWriter::set_channel_mask`, `dsf::channel_mask_for_type` and
+  `dsf::channel_type_for_mask` ([usage](docs/usage.md#formats)). DSD to WAV conversion
+  still writes the mask of the channel count, so output files are unchanged.
 
 ## 0.1.2 (2026-11-23)
 

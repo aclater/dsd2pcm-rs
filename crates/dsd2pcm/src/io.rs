@@ -51,6 +51,15 @@ pub trait DsdRead {
     fn channel_type(&self) -> Option<u32> {
         None
     }
+    /// The speakers of the channels as a `WAVE_FORMAT_EXTENSIBLE` channel mask (bit 0 front
+    /// left, 1 front right, 2 front centre, 3 LFE, 4 back left, 5 back right; the channels
+    /// in the order of the bits), if the source declares a layout that maps to one: a DSF
+    /// channel type that matches the channel count, or DSDIFF channel IDs. By default, the
+    /// mask of [`DsdRead::channel_type`] ([`crate::dsf::channel_mask_for_type`]).
+    fn channel_mask(&self) -> Option<u32> {
+        self.channel_type()
+            .and_then(|t| crate::dsf::channel_mask_for_type(t, self.info().channels))
+    }
 }
 
 /// A sink for DSD data.
@@ -68,6 +77,12 @@ pub trait PcmRead {
     fn info(&self) -> PcmInfo;
     /// Appends up to `max_frames` frames to `out[ch]`. Returns frames appended; 0 = end.
     fn read_frames(&mut self, max_frames: usize, out: &mut [Vec<f64>]) -> Result<usize>;
+    /// The channel mask the file declares (`WAVE_FORMAT_EXTENSIBLE`'s `dwChannelMask`,
+    /// FLAC's `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` comment), as it is; `None` if it
+    /// declares none.
+    fn channel_mask(&self) -> Option<u32> {
+        None
+    }
 }
 
 pub(crate) fn read_exact_arr<const N: usize, R: Read>(r: &mut R) -> Result<[u8; N]> {

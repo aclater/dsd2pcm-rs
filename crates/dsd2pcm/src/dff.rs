@@ -18,11 +18,42 @@ fn be_u64(b: &[u8; 12]) -> u64 {
     u64::from_be_bytes(a)
 }
 
+/// The `WAVE_FORMAT_EXTENSIBLE` speaker bit of a DSDIFF channel ID (`CHNL` chunk):
+/// `SLFT`/`MLFT` front left, `SRGT`/`MRGT` front right, `C` centre, `LFE`, `LS` and `RS`
+/// back (surround) left and right. `None` for any other ID (such as `C000`).
+fn speaker_bit(id: &[u8]) -> Option<u32> {
+    Some(match id {
+        b"SLFT" | b"MLFT" => 0x01,
+        b"SRGT" | b"MRGT" => 0x02,
+        b"C   " => 0x04,
+        b"LFE " => 0x08,
+        b"LS  " => 0x10,
+        b"RS  " => 0x20,
+        _ => return None,
+    })
+}
+
+/// The channel mask of a list of DSDIFF channel IDs: every ID a speaker, each speaker once,
+/// in the order of the mask's bits (the order `WAVE_FORMAT_EXTENSIBLE` needs); `None`
+/// otherwise.
+fn channel_mask_of_ids(ids: &[u8]) -> Option<u32> {
+    let mut mask = 0u32;
+    for id in ids.chunks_exact(4) {
+        let bit = speaker_bit(id)?;
+        if bit <= mask {
+            return None; // repeated, or out of order
+        }
+        mask |= bit;
+    }
+    Some(mask)
+}
+
 /// DFF reader over any seekable byte source.
 #[derive(Debug)]
 pub struct DffReader<R> {
     r: R,
     info: DsdInfo,
+    channel_mask: Option<u32>,
     remaining: u64,
     buf: Vec<u8>,
 }
@@ -44,6 +75,7 @@ impl<R: Read + Seek> DffReader<R> {
         let mut pos = 16u64;
         let mut rate = None;
         let mut channels = None;
+        let mut channel_mask = None;
         let mut have_cmpr = false;
         let mut chunks = 0;
         loop {
@@ -84,6 +116,7 @@ impl<R: Read + Seek> DffReader<R> {
                             sample_rate: rate,
                             samples,
                         },
+                        channel_mask,
                         remaining: per_ch,
                         buf: Vec::new(),
                     });
@@ -136,7 +169,11 @@ impl<R: Read + Seek> DffReader<R> {
                                     return format_err("DSDIFF 'CHNL' chunk is too small");
                                 }
                                 channels = Some(n);
-                                skip(&mut r, ssize - 2)?;
+                                let mut ids = [0u8; 4 * 6];
+                                let ids = &mut ids[..4 * usize::from(n)];
+                                r.read_exact(ids)?;
+                                channel_mask = channel_mask_of_ids(ids);
+                                skip(&mut r, ssize - 2 - 4 * u64::from(n))?;
                             }
                             b"CMPR" => {
                                 if ssize < 4 {
@@ -213,6 +250,13 @@ impl<R: Read + Seek> DsdRead for DffReader<R> {
         }
         self.remaining -= n as u64;
         Ok(n)
+    }
+
+    /// The mask of the `CHNL` chunk's channel IDs when each is a speaker (`SLFT`, `SRGT`,
+    /// `MLFT`, `MRGT`, `C`, `LFE`, `LS`, `RS`), none twice, in the mask's bit order; `None`
+    /// otherwise (for example numbered IDs such as `C000`).
+    fn channel_mask(&self) -> Option<u32> {
+        self.channel_mask
     }
 }
 
