@@ -166,11 +166,10 @@ unsafe fn slice_mut<'a, T>(p: *mut T, len: usize) -> &'a mut [T] {
 
 /// Converts a DSF or DFF file (DSD64) to a 24-bit WAV file.
 ///
-/// `input_path` and `output_path` are NUL-terminated UTF-8 paths (on every platform). An
-/// existing output file is replaced; on any error it may be left incomplete. On Unix the
-/// paths are taken as raw bytes (any encoding the file system accepts); elsewhere they
-/// must be UTF-8. `report` may be NULL; it is written on success only. The progress callback in `options`, if any, is
-/// called on this thread.
+/// `input_path` and `output_path` are NUL-terminated paths: on Unix raw bytes (any encoding
+/// the file system accepts), elsewhere UTF-8. An existing output file is replaced; on any
+/// error it may be left incomplete. `report` may be NULL; it is written on success only.
+/// The progress callback in `options`, if any, is called on this thread.
 ///
 /// Returns `DSD2PCM_OK` or a `DSD2PCM_E_*` code; `dsd2pcm_last_error` gives the message.
 ///

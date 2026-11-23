@@ -5,7 +5,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-# Not published for 0.1.0: the C library ships as build artefacts.
+# Not published: the C library ships as release archives (docs/c-api.md).
 publish = false
 build = "build.rs"
 
