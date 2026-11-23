@@ -40,7 +40,7 @@ NFFT = 1 << 22
 
 def parse_tables(path):
     src = open(path).read()
-    out = {}
+    out = {m.group(1): int(m.group(2)) for m in re.finditer(r"const (Q_\w+): i32 = (\d+);", src)}
     for m in re.finditer(r"const (\w+): \[i32; (\d+)\] = \[(.*?)\];", src, re.S):
         out[m.group(1)] = np.array([int(v) for v in re.findall(r"-?\d+", m.group(3))], np.float64)
         assert len(out[m.group(1)]) == int(m.group(2))
@@ -90,6 +90,22 @@ def plans(t):
         p[(352800, cut)] = {"stages": [(s1, 1), (hb, 8), (f, 16)], "interp": hb}
     p[(176400, "wide")] = {"stages": [(s1w, 1), (f80, 8)], "interp": None}
     p[(352800, "wide")] = {"stages": [(s1w, 1), (f40, 8)], "interp": None}
+    return p, dc
+
+
+def precise_plans(t):
+    """The precise filter (`tables_precise.rs`): S1, the prefilter P, the half-band and each
+    sharp filter twice; at 352.8 kHz the interpolation is the half-band and P."""
+    s1, s1w, pf, hb, f40, f30, f80 = (full(t[k]) for k in ("S1", "S1_WIDE", "P", "HB", "F40", "F30", "F80"))
+    dc = {k: float(full(t[k]).sum() / 2 ** t["Q_" + k]) for k in ("S1", "S1_WIDE", "P", "HB", "F40", "F30", "F80")}
+    p = {}
+    for cut, f in (("40", f40), ("30", f30)):
+        st = [(s1, 1), (pf, 8), (hb, 8), (f, 16), (f, 16)]
+        for rate in (88200, 176400):
+            p[(rate, cut)] = {"stages": st, "interp": None}
+        p[(352800, cut)] = {"stages": st, "interp": np.convolve(hb / hb.sum(), pf / pf.sum())}
+    p[(176400, "wide")] = {"stages": [(s1w, 1), (f80, 8), (f80, 8)], "interp": None}
+    p[(352800, "wide")] = {"stages": [(s1w, 1), (f40, 8), (f40, 8)], "interp": None}
     return p, dc
 
 
@@ -194,6 +210,11 @@ def analyse(rate, cut, plan):
     fb = f[:m].reshape(-1, nb).mean(1)
     db_b = dbo[:m].reshape(-1, nb).max(1)
     res["curve"] = {"f": fb.round(1).tolist(), "db": np.maximum(db_b, -200).round(5).tolist()}
+    # The whole range to 1.4112 MHz, the largest response in 400 Hz buckets (600 bins).
+    nb2 = 600
+    m2 = len(f) // nb2 * nb2
+    res["curve_full"] = {"f": f[:m2].reshape(-1, nb2).mean(1).round(0).tolist(),
+                         "db": np.maximum(db[:m2].reshape(-1, nb2).max(1), -200).round(3).tolist()}
     w = int(0.0015 * FS)
     seg = h[max(0, c - w): c + w + 1] / np.abs(h).max()
     res["impulse_2m8"] = {"t0_us": -min(w, c) / FS * 1e6, "dt_us": 1e6 / FS, "v": seg.round(8).tolist()}
@@ -225,15 +246,18 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--tables", required=True, help="dsd2pcm's crates/dsd2pcm/src/decimator/tables.rs")
     ap.add_argument("--pysacd", help="dsd2pcm's crates/dsd2pcm/src/filters/pysacd_taps.rs")
+    ap.add_argument("--precise", help="dsd2pcm's crates/dsd2pcm/src/decimator/tables_precise.rs")
     ap.add_argument("--out", required=True, help="filters.json, or with --apply the output WAV")
     ap.add_argument("--apply", help="a DSF file to filter with the exact composite in floating point")
     ap.add_argument("--rate", type=int, default=176400)
-    ap.add_argument("--cutoff", default="40", help="30, 40, wide or pysacd")
+    ap.add_argument("--cutoff", default="40", help="30, 40, wide or pysacd; precise-30, precise-40 or precise-wide with --precise")
     a = ap.parse_args()
     if a.apply:
         p, _ = plans(parse_tables(a.tables))
         if a.pysacd:
             p.update(pysacd_plans(parse_pysacd(a.pysacd))[0])
+        if a.precise:
+            p.update({(r, "precise-" + c): v for (r, c), v in precise_plans(parse_tables(a.precise))[0].items()})
         apply(p[(a.rate, a.cutoff)], a.apply, a.rate, a.out)
         return
     p, dc = plans(parse_tables(a.tables))
@@ -245,6 +269,13 @@ def main():
         out["pysacd_stage_dc_gain"] = pdc
         for (rate, cut), plan in sorted(pp.items()):
             out["filters"].append(analyse(rate, cut, plan))
+    if a.precise:
+        pp, pdc = precise_plans(parse_tables(a.precise))
+        out["precise_stage_dc_gain"] = pdc
+        for (rate, cut), plan in sorted(pp.items()):
+            r = analyse(rate, cut, plan)
+            r["filter"] = "precise"
+            out["filters"].append(r)
     json.dump(out, open(a.out, "w"))
     for r in out["filters"]:
         print({k: (round(v, 5) if isinstance(v, float) else v) for k, v in r.items() if k not in ("curve", "impulse_2m8")})

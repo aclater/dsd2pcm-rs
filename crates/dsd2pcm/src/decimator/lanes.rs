@@ -270,10 +270,13 @@ impl S1Pair {
     pub(super) fn run(&self, lut: &S1Lut, bytes: &[u8], out: &mut impl PairSink) {
         const T9: usize = pair_tables(9);
         const T13: usize = pair_tables(13);
+        const T17: usize = pair_tables(17);
         if let (8, Ok(t)) = (self.bytes, <&[PTable; T9]>::try_from(&self.tables[..])) {
             s1_pairs_n::<9, T9>(t, self.bias, bytes, out);
         } else if let (12, Ok(t)) = (self.bytes, <&[PTable; T13]>::try_from(&self.tables[..])) {
             s1_pairs_n::<13, T13>(t, self.bias, bytes, out);
+        } else if let (16, Ok(t)) = (self.bytes, <&[PTable; T17]>::try_from(&self.tables[..])) {
+            s1_pairs_n::<17, T17>(t, self.bias, bytes, out);
         } else {
             for k in 0..out.pairs() {
                 let mut v = [0.0; 2];
@@ -315,6 +318,7 @@ const fn pair_tables(joint: usize) -> usize {
 fn s1_lanes(p: &Pass<'_>, a: &mut [Lanes]) {
     const T9: usize = pair_tables(9);
     const T13: usize = pair_tables(13);
+    const T17: usize = pair_tables(17);
     for w in 0..W {
         let bytes = &p.bytes[p.starts[w]..];
         let pr = p.pair.map(|pr| (pr.bytes, &pr.tables[..], pr.bias));
@@ -322,6 +326,8 @@ fn s1_lanes(p: &Pass<'_>, a: &mut [Lanes]) {
             s1_pairs_lane::<9, T9>(t.try_into().unwrap(), bias, bytes, a, w);
         } else if let Some((12, t, bias)) = pr.filter(|pr| pr.1.len() == T13) {
             s1_pairs_lane::<13, T13>(t.try_into().unwrap(), bias, bytes, a, w);
+        } else if let Some((16, t, bias)) = pr.filter(|pr| pr.1.len() == T17) {
+            s1_pairs_lane::<17, T17>(t.try_into().unwrap(), bias, bytes, a, w);
         } else {
             s1(p.lut, bytes, 0, 1, a.iter_mut().map(|v| &mut v.0[w]));
         }

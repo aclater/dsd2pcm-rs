@@ -43,10 +43,22 @@ samples, with K at most `ceil(context_bytes / k) + 1` (`k` input bytes per outpu
 | default | 88.2 kHz | 30 / 40 | 46 / 36 |
 | default | 176.4 kHz | 30 / 40 / wide | 91 / 71 / 62 |
 | default | 352.8 kHz | 30 / 40 / wide | 196 / 156 / 67 |
+| precise | 88.2 kHz | 30 / 40 | 83 / 64 |
+| precise | 176.4 kHz | 30 / 40 / wide | 164 / 126 / 113 |
+| precise | 352.8 kHz | 30 / 40 / wide | 350 / 274 / 119 |
 | pysacd | 88.2 kHz | 40 | 55 |
 | pysacd | 176.4 kHz | 40 | 27 |
 
-Options: `--gain DB` (-120 to +24, default 0), `--single-thread`, `--filter pysacd`.
+Options: `--gain DB` (-120 to +24, default 0), `--single-thread`, `--filter precise`,
+`--filter pysacd`.
+
+`--filter precise` (`Filter::Precise`, `DSD2PCM_FILTER_PRECISE` in C) uses the precise
+filter: the same cutoffs, rates, exact integer arithmetic, centring and rounding as the
+default, with at least 150 dB of stopband wherever ultrasonic content would fold into the
+passband (the default: about 110 dB) and half the passband ripple. With very quiet sources
+it lowers the audio-band floor from about -128 dBFS to the 24-bit output's own, about
+-150 dBFS. It takes about twice the CPU time of the default and its output bytes differ
+from scarletbook-pcm's ([PCM quality](pcm-quality.md#the-precise-filter)).
 
 `--filter pysacd` (`Filter::Pysacd` in `PcmOptions` and `frames::PcmConfig`) uses pysacd's
 filter instead: three Kaiser-windowed FIR stages in `f32` and a TPDF-dithered quantiser,
@@ -57,7 +69,7 @@ output are unchanged.
 ## Command line
 
 ```
-dsd2pcm IN OUT [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread]
+dsd2pcm IN OUT [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|precise|pysacd] [--single-thread]
 ```
 
 The `dsd2pcm` tool converts one DSF or DFF file (DSD64) to a 24-bit WAV file; WAV and FLAC

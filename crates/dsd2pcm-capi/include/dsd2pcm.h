@@ -80,6 +80,11 @@ template <typename T> static inline T dsd2pcm_init_() {
 // `dsd2pcm_run.first_frame`.
 #define DSD2PCM_FILTER_PYSACD 1
 
+// Filter and quantiser: the precise filter, at every rate and cutoff, rounded as the
+// default: at least 150 dB of stopband where ultrasonic content folds into the passband,
+// at a higher CPU cost.
+#define DSD2PCM_FILTER_PRECISE 2
+
 // The ABI version: it changes on any incompatible change to the interface. Compatible
 // changes only append fields to the structs (see `struct_size`) or add functions.
 #define DSD2PCM_ABI_VERSION 1

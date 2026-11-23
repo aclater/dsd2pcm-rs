@@ -20,6 +20,7 @@ mod exact;
 mod kernel;
 mod lanes;
 mod tables;
+mod tables_precise;
 
 pub(crate) use dispatch::Isa;
 #[doc(hidden)]
@@ -77,6 +78,19 @@ pub enum Cutoff {
     Wide,
 }
 
+/// The filter taps: scarletbook-pcm 0.7.0's, or the `precise` filter's
+/// (`crate::Filter::Precise`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) enum Design {
+    /// scarletbook-pcm 0.7.0's tables (`tables`).
+    #[default]
+    Default,
+    /// The precise filter's tables (`tables_precise`): S1 with stopbands of 150 dB where
+    /// the input folds into the passband, and every later stage as a cascade of two filters
+    /// of about 80 dB each.
+    Precise,
+}
+
 /// `10^(db / 20)` with IEEE-754 additions, multiplications and divisions only, in a fixed
 /// order (ported unchanged): exactly 1 at 0 dB, monotonic, identical on every platform.
 /// Valid for `|db| <= 120`.
@@ -128,24 +142,61 @@ fn pair(half: &[i32]) -> lanes::S1Pair {
     })
 }
 
-static PAIR_S1: OnceLock<lanes::S1Pair> = OnceLock::new();
-static PAIR_S1_WIDE: OnceLock<lanes::S1Pair> = OnceLock::new();
+/// The first stages: S1 of the 30 and 40 kHz filters and of the wide one, of each
+/// [`Design`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum S1Kind {
+    Default,
+    DefaultWide,
+    Precise,
+    PreciseWide,
+}
 
-/// S1's tables and the wide filter's, in each layout.
-static LUT_S1: [OnceLock<Lut>; 2] = [OnceLock::new(), OnceLock::new()];
-static LUT_S1_WIDE: [OnceLock<Lut>; 2] = [OnceLock::new(), OnceLock::new()];
+impl S1Kind {
+    #[cfg(test)]
+    const ALL: [S1Kind; 4] = [
+        S1Kind::Default,
+        S1Kind::DefaultWide,
+        S1Kind::Precise,
+        S1Kind::PreciseWide,
+    ];
 
-/// The tables of `half` (S1 or the wide filter) in `layout`, built once.
-fn s1_lut(half: &'static [i32], layout: S1Layout) -> &'static Lut {
-    let cell = if half == &tables::S1_WIDE[..] {
-        &LUT_S1_WIDE
-    } else {
-        &LUT_S1
-    };
-    cell[layout as usize].get_or_init(|| lut(half, layout))
+    fn of(design: Design, cutoff: Cutoff) -> S1Kind {
+        match (design, cutoff == Cutoff::Wide) {
+            (Design::Default, false) => S1Kind::Default,
+            (Design::Default, true) => S1Kind::DefaultWide,
+            (Design::Precise, false) => S1Kind::Precise,
+            (Design::Precise, true) => S1Kind::PreciseWide,
+        }
+    }
+
+    /// The taps, from the centre out.
+    fn half(self) -> &'static [i32] {
+        match self {
+            S1Kind::Default => &tables::S1,
+            S1Kind::DefaultWide => &tables::S1_WIDE,
+            S1Kind::Precise => &tables_precise::S1,
+            S1Kind::PreciseWide => &tables_precise::S1_WIDE,
+        }
+    }
+
+    /// Its paired tables (`lanes`), built once.
+    fn pair(self) -> &'static lanes::S1Pair {
+        static PAIRS: [OnceLock<lanes::S1Pair>; 4] = [const { OnceLock::new() }; 4];
+        PAIRS[self as usize].get_or_init(|| pair(self.half()))
+    }
+
+    /// Its tables in `layout`, built once.
+    fn lut(self, layout: S1Layout) -> &'static Lut {
+        static LUTS: [[OnceLock<Lut>; 2]; 4] = [const { [const { OnceLock::new() }; 2] }; 4];
+        LUTS[self as usize][layout as usize].get_or_init(|| lut(self.half(), layout))
+    }
 }
 
 const Q_FIR: i32 = 24;
+
+/// The grid of the samples between stages and of the output: 100 % modulation is 2^26.
+const GRID: i32 = 26;
 
 /// Outputs are computed in whole blocks of this many (a multiple of every kernel's block).
 const PAD: usize = kernel::MAX_L;
@@ -166,7 +217,7 @@ const LANES_MIN: usize = 128 * PAD;
 const LANES_MIN_SSE2: [usize; 2] = [32 * PAD, 64 * PAD];
 
 /// Most stages after S1 in any plan.
-const MAX_OPS: usize = 3;
+const MAX_OPS: usize = 6;
 
 /// One stage after S1.
 #[derive(Clone, Debug)]
@@ -323,60 +374,113 @@ pub(crate) struct Plan {
     lanes_min: usize,
 }
 
+/// scarletbook-pcm 0.7.0's stages after S1 for `rate` and `cutoff`.
+fn default_ops(rate: PcmRate, cutoff: Cutoff) -> Vec<Op> {
+    let sym = |t: &[i32]| Sym::new(t, pow2(-Q_FIR));
+    let hb = || sym(&tables::HB);
+    match (cutoff, rate) {
+        (Cutoff::Wide, PcmRate::Hz352800) => vec![Op::Fir1(sym(&tables::F40))],
+        (Cutoff::Wide, _) => vec![Op::Dec2(sym(&tables::F80))],
+        (_, rate) => {
+            let f = sym(if cutoff == Cutoff::Low {
+                &tables::F30
+            } else {
+                &tables::F40
+            });
+            match rate {
+                PcmRate::Hz88200 => vec![Op::Dec2(hb()), Op::Dec2(f)],
+                PcmRate::Hz176400 => vec![Op::Dec2(hb()), Op::Fir1(f)],
+                PcmRate::Hz352800 => vec![Op::Dec2(hb()), Op::Fir1(f), Op::Interp2(hb())],
+            }
+        }
+    }
+}
+
+/// The precise filter's stages after S1 for `rate` and `cutoff` (see `tables_precise`):
+/// the prefilter `P` takes S1's finer grid back to 2^26, and every sharp filter runs twice,
+/// so that each stopband is the sum of two in dB.
+fn precise_ops(rate: PcmRate, cutoff: Cutoff) -> Vec<Op> {
+    use tables_precise as t;
+    // A stage with taps `h` (summing to 2^q) on samples on the grid 2^`grid`, rounded to
+    // the 2^26 grid.
+    let sym = |h: &[i32], q: i32, grid: i32| Sym::new(h, pow2(-(q + grid - GRID)));
+    let hb = || sym(&t::HB, t::Q_HB, GRID);
+    match (cutoff, rate) {
+        (Cutoff::Wide, PcmRate::Hz352800) => {
+            let s1 = t::Q_S1_WIDE;
+            vec![
+                Op::Fir1(sym(&t::F40, t::Q_F40, s1)),
+                Op::Fir1(sym(&t::F40, t::Q_F40, GRID)),
+            ]
+        }
+        (Cutoff::Wide, _) => {
+            let s1 = t::Q_S1_WIDE;
+            vec![
+                Op::Fir1(sym(&t::F80, t::Q_F80, s1)),
+                Op::Dec2(sym(&t::F80, t::Q_F80, GRID)),
+            ]
+        }
+        (_, rate) => {
+            let f = || {
+                if cutoff == Cutoff::Low {
+                    sym(&t::F30, t::Q_F30, GRID)
+                } else {
+                    sym(&t::F40, t::Q_F40, GRID)
+                }
+            };
+            let mut ops = vec![
+                Op::Fir1(sym(&t::P, t::Q_P, t::Q_S1)),
+                Op::Dec2(hb()),
+                Op::Fir1(f()),
+            ];
+            match rate {
+                PcmRate::Hz88200 => ops.push(Op::Dec2(f())),
+                PcmRate::Hz176400 => ops.push(Op::Fir1(f())),
+                PcmRate::Hz352800 => ops.extend([
+                    Op::Fir1(f()),
+                    Op::Interp2(hb()),
+                    Op::Fir1(sym(&t::P, t::Q_P, GRID)),
+                ]),
+            }
+            ops
+        }
+    }
+}
+
 impl Plan {
     pub(crate) fn new(rate: PcmRate, cutoff: Cutoff) -> Result<Plan> {
-        let hb = || Sym::new(&tables::HB, pow2(-Q_FIR));
-        let f40 = || Sym::new(&tables::F40, pow2(-Q_FIR));
+        Plan::with_design(rate, cutoff, Design::Default)
+    }
+
+    pub(crate) fn with_design(rate: PcmRate, cutoff: Cutoff, design: Design) -> Result<Plan> {
+        if (cutoff, rate) == (Cutoff::Wide, PcmRate::Hz88200) {
+            return Err(Error::InvalidArgument(
+                "the wide filter is not available at 88.2 kHz".into(),
+            ));
+        }
         let isa = Isa::current();
-        let layout = dispatch::s1_layout(isa);
-        let wide = || s1_lut(&tables::S1_WIDE, layout);
-        let (s1_half, lut, mut ops) = match (cutoff, rate) {
-            (Cutoff::Wide, PcmRate::Hz88200) => {
-                return Err(Error::InvalidArgument(
-                    "the wide filter is not available at 88.2 kHz".into(),
-                ))
-            }
-            (Cutoff::Wide, PcmRate::Hz352800) => {
-                (&tables::S1_WIDE[..], wide(), vec![Op::Fir1(f40())])
-            }
-            (Cutoff::Wide, PcmRate::Hz176400) => (
-                &tables::S1_WIDE[..],
-                wide(),
-                vec![Op::Dec2(Sym::new(&tables::F80, pow2(-Q_FIR)))],
-            ),
-            (_, rate) => {
-                let f = if cutoff == Cutoff::Low {
-                    Sym::new(&tables::F30, pow2(-Q_FIR))
-                } else {
-                    f40()
-                };
-                let ops = match rate {
-                    PcmRate::Hz88200 => vec![Op::Dec2(hb()), Op::Dec2(f)],
-                    PcmRate::Hz176400 => vec![Op::Dec2(hb()), Op::Fir1(f)],
-                    PcmRate::Hz352800 => {
-                        vec![Op::Dec2(hb()), Op::Fir1(f), Op::Interp2(hb())]
-                    }
-                };
-                (&tables::S1[..], s1_lut(&tables::S1, layout), ops)
-            }
+        let kind = S1Kind::of(design, cutoff);
+        let lut = kind.lut(dispatch::s1_layout(isa));
+        let mut ops = match design {
+            Design::Default => default_ops(rate, cutoff),
+            Design::Precise => precise_ops(rate, cutoff),
         };
         debug_assert!(ops.len() <= MAX_OPS);
-        exact::prove(s1_half, &mut ops);
+        // An interpolation's outputs start at an even index (`Op::need`): a stage after it
+        // has an even half length.
+        debug_assert!(ops.windows(2).all(|w| match w {
+            [Op::Interp2(_), Op::Fir1(s)] => s.half_len() % 2 == 0,
+            [Op::Interp2(_), _] => false,
+            _ => true,
+        }));
+        exact::prove(kind.half(), &mut ops);
         let k = (rate.decimation() / 8) as i64;
         let pass = (PASS_BYTES / k as usize).div_ceil(PAD) * PAD;
         let lanes = (dispatch::lanes_level(isa)
             && ops.iter().all(|op| match op {
                 Op::Fir1(s) | Op::Dec2(s) | Op::Interp2(s) => lanes::takes(s),
             }))
-        .then(|| {
-            dispatch::lanes_pair().then(|| {
-                if cutoff == Cutoff::Wide {
-                    PAIR_S1_WIDE.get_or_init(|| pair(&tables::S1_WIDE))
-                } else {
-                    PAIR_S1.get_or_init(|| pair(&tables::S1))
-                }
-            })
-        });
+        .then(|| dispatch::lanes_pair().then(|| kind.pair()));
         let mut plan = Plan {
             lut,
             isa,
@@ -882,13 +986,7 @@ mod tests {
         (PcmRate::Hz352800, Cutoff::Wide),
     ];
 
-    fn s1_half(cutoff: Cutoff) -> &'static [i32] {
-        if cutoff == Cutoff::Wide {
-            &tables::S1_WIDE
-        } else {
-            &tables::S1
-        }
-    }
+    const DESIGNS: [Design; 2] = [Design::Default, Design::Precise];
 
     fn sym(op: &Op) -> &Sym {
         match op {
@@ -904,13 +1002,14 @@ mod tests {
     /// cannot prove runs unfused, and this test fails so that the change is noticed.
     #[test]
     fn sums_are_exact() {
-        for (rate, cutoff) in ALL {
-            let plan = Plan::new(rate, cutoff).unwrap();
-            let s1 = exact::s1_bound(s1_half(cutoff));
+        for (design, (rate, cutoff)) in DESIGNS.iter().flat_map(|&d| ALL.map(|p| (d, p))) {
+            let plan = Plan::with_design(rate, cutoff, design).unwrap();
+            let half = S1Kind::of(design, cutoff).half();
+            let s1 = exact::s1_bound(half);
             assert!(s1 < i32::MAX as u128, "S1 bound {s1}");
             // The tables themselves stay within the bound, in both layouts.
             for layout in [S1Layout::Wide, S1Layout::Byte] {
-                let worst: u128 = lut(s1_half(cutoff), layout)
+                let worst: u128 = lut(half, layout)
                     .table_slices()
                     .iter()
                     .map(|t| {
@@ -920,14 +1019,20 @@ mod tests {
                             .unwrap()
                     })
                     .sum();
-                assert!(worst <= s1, "{rate:?} {cutoff:?}: tables {worst} > {s1}");
+                assert!(
+                    worst <= s1,
+                    "{design:?} {rate:?} {cutoff:?}: tables {worst} > {s1}"
+                );
             }
             let mut x = s1;
             for op in &plan.ops {
                 let (sum, out) = exact::stage(op, x)
-                    .unwrap_or_else(|| panic!("{rate:?} {cutoff:?}: {op:?} not exact"));
+                    .unwrap_or_else(|| panic!("{design:?} {rate:?} {cutoff:?}: {op:?} not exact"));
                 assert!(sum < exact::LIMIT);
-                assert!(sym(op).fused, "{rate:?} {cutoff:?}: {op:?} not fused");
+                assert!(
+                    sym(op).fused,
+                    "{design:?} {rate:?} {cutoff:?}: {op:?} not fused"
+                );
                 x = out;
             }
             // The gain multiply (at most +24 dB, below 16) of an integer output is exact
@@ -936,8 +1041,8 @@ mod tests {
         }
         // The paired S1 tables of the lanes: no half of a sum reaches 2^32, so the halves
         // never carry into each other; and the tables stay small enough for the L2 cache.
-        for half in [&tables::S1[..], &tables::S1_WIDE[..]] {
-            let p = pair(half);
+        for kind in S1Kind::ALL {
+            let p = pair(kind.half());
             for w in p.worst() {
                 assert!((0..1 << 32).contains(&w), "pair half bound {w}");
             }
@@ -965,15 +1070,11 @@ mod tests {
             })
             .collect();
         for level in SimdLevel::available() {
-            for (rate, cutoff) in ALL {
-                let plan = with_simd_level(level, || Plan::new(rate, cutoff))
+            for (design, (rate, cutoff)) in DESIGNS.iter().flat_map(|&d| ALL.map(|p| (d, p))) {
+                let plan = with_simd_level(level, || Plan::with_design(rate, cutoff, design))
                     .unwrap()
                     .unwrap();
-                let paired = Some(if cutoff == Cutoff::Wide {
-                    PAIR_S1_WIDE.get_or_init(|| pair(&tables::S1_WIDE))
-                } else {
-                    PAIR_S1.get_or_init(|| pair(&tables::S1))
-                });
+                let paired = Some(S1Kind::of(design, cutoff).pair());
                 let mut ordered = plan.clone();
                 ordered.lanes = None;
                 // With and without the paired S1 tables.
@@ -994,10 +1095,136 @@ mod tests {
                         lanes.pass_run(&bytes, 300, o0, n, &mut b);
                         assert!(
                             a.a[..n] == b.a[..n],
-                            "{level:?} {rate:?} {cutoff:?} paired {} o0 {o0} n {n}",
+                            "{level:?} {design:?} {rate:?} {cutoff:?} paired {} o0 {o0} n {n}",
                             s1.is_some()
                         );
                     }
+                }
+            }
+        }
+    }
+
+    /// `x * 2^-q` rounded half to even, in integers.
+    fn round_shift(x: i128, q: u32) -> i128 {
+        let (d, r) = (x >> q, x & ((1 << q) - 1));
+        let half = 1i128 << (q - 1);
+        d + i128::from(r > half || (r == half && d % 2 != 0))
+    }
+
+    /// Level `l` of `plan` (0: S1 at every byte) at indices `a .. a + n`, computed from the
+    /// definitions in `i128`, one sample at a time: S1 over the window around each byte;
+    /// Fir1 `y[i] = sum h[j] x[i + j]`; Dec2 `y[i] = sum h[j] x[2 i + j]`; Interp2
+    /// `y[2 i] = x[i]`, `y[2 i + 1] = 2 sum h[2 k + 1] (x[i - k] + x[i + 1 + k])`; each
+    /// rescaled and rounded half to even. Bytes outside `src` (byte 0 first) are idle.
+    fn reference(plan: &Plan, half: &[i32], src: &[u8], l: usize, a: i64, n: usize) -> Vec<i128> {
+        if l == 0 {
+            let byte = |b: i64| usize::try_from(b).ok().and_then(|b| src.get(b)).copied();
+            let m = (half.len() - 1) as i64;
+            return (a..a + n as i64)
+                .map(|b| {
+                    // Sample `8 b` is the centre; taps at offsets -m ..= m.
+                    (-m..=m)
+                        .map(|t| {
+                            let i = 8 * b + t;
+                            let bit = (byte(i.div_euclid(8)).unwrap_or(IDLE)
+                                >> (7 - i.rem_euclid(8)))
+                                & 1;
+                            let h = i128::from(half[t.unsigned_abs() as usize]);
+                            if bit == 1 {
+                                h
+                            } else {
+                                -h
+                            }
+                        })
+                        .sum()
+                })
+                .collect();
+        }
+        let s = sym(&plan.ops[l - 1]);
+        let q = (-s.scale.log2()) as u32;
+        let h = |j: i64| s.full[j.unsigned_abs() as usize] as i128;
+        let m = s.half_len() as i64;
+        match &plan.ops[l - 1] {
+            Op::Fir1(_) => {
+                let x = reference(plan, half, src, l - 1, a - m, n + 2 * m as usize);
+                (0..n)
+                    .map(|i| {
+                        round_shift(
+                            (-m..=m)
+                                .map(|j| h(j) * x[(i as i64 + m + j) as usize])
+                                .sum(),
+                            q,
+                        )
+                    })
+                    .collect()
+            }
+            Op::Dec2(_) => {
+                let x = reference(plan, half, src, l - 1, 2 * a - m, 2 * n + 2 * m as usize);
+                (0..n)
+                    .map(|i| {
+                        round_shift(
+                            (-m..=m)
+                                .map(|j| h(j) * x[(2 * i as i64 + m + j) as usize])
+                                .sum(),
+                            q,
+                        )
+                    })
+                    .collect()
+            }
+            Op::Interp2(_) => {
+                let (a0, o) = (a.div_euclid(2), s.odd.len() as i64);
+                let x = reference(plan, half, src, l - 1, a0 - o, n / 2 + 2 * o as usize + 2);
+                let xi = |i: i64| x[(i - a0 + o) as usize];
+                (a..a + n as i64)
+                    .map(|t| {
+                        let i = t.div_euclid(2);
+                        if t % 2 == 0 {
+                            xi(i)
+                        } else {
+                            let sum: i128 = (0..o)
+                                .map(|k| h(2 * k + 1) * (xi(i - k) + xi(i + 1 + k)))
+                                .sum();
+                            round_shift(2 * sum, q)
+                        }
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    /// Every plan of both designs gives the samples of its definition ([`reference`]), at
+    /// every level: the stage alignment, centring, decimation and interpolation phases and
+    /// rounding, checked against a direct computation in integers.
+    #[test]
+    fn plans_match_reference() {
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        let src: Vec<u8> = (0..1200)
+            .map(|i| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                if (300..400).contains(&i) {
+                    0xFF
+                } else {
+                    seed as u8
+                }
+            })
+            .collect();
+        for level in SimdLevel::available() {
+            for design in DESIGNS {
+                for (rate, cutoff) in ALL {
+                    let plan = with_simd_level(level, || Plan::with_design(rate, cutoff, design))
+                        .unwrap()
+                        .unwrap();
+                    let half = S1Kind::of(design, cutoff).half();
+                    // From before the input to past its end.
+                    let k = plan.bytes_per_output();
+                    let (o0, n) = ((-200 / k) & !1, ((1600 / k) as usize) & !1);
+                    let mut sc = Scratch::default();
+                    plan.pass_run(&src, 0, o0, n, &mut sc);
+                    let want = reference(&plan, half, &src, plan.ops.len(), o0, n);
+                    let got: Vec<i128> = sc.a[..n].iter().map(|&v| v as i128).collect();
+                    assert!(got == want, "{level:?} {design:?} {rate:?} {cutoff:?}");
                 }
             }
         }
@@ -1061,7 +1288,7 @@ mod tests {
                 }
             })
             .collect();
-        for half in [&tables::S1[..], &tables::S1_WIDE[..]] {
+        for half in S1Kind::ALL.map(S1Kind::half) {
             let reference = byte_tables(half);
             let b = reference.len();
             for stride in [1, 2] {

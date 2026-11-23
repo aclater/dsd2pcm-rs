@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- New opt-in filter `precise` (`--filter precise`, `Filter::Precise`,
+  `DSD2PCM_FILTER_PRECISE`): every rate and cutoff, exact integer arithmetic like the
+  default, at least 150 dB of stopband wherever ultrasonic content folds into the passband
+  (the default: about 110 dB) and about half the passband ripple. With a very quiet DSD64
+  source the audio-band floor falls from -128 dBFS (SINAD 122 dB) to the 24-bit output's,
+  about -150 dBFS (SINAD 142 to 145 dB); it takes about twice the CPU time
+  ([PCM quality](docs/pcm-quality.md#the-precise-filter)). Its taps come from
+  `tools/filters/design_precise.py`. The default filter and its output are unchanged.
 - x86_64 without AVX2 (e.g. Celeron and Pentium J and N series of NAS units): the `sse2`
   level now runs there too, where the generic level ran at 0.6x to 0.9x the speed of
   scarletbook-pcm 0.7.0 ([performance](docs/performance.md)). Output bytes unchanged.

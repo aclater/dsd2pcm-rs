@@ -43,8 +43,45 @@ def save(f, out, name):
     plt.close(f)
 
 
-def filt(F, rate, cut):
-    return next(x for x in F["filters"] if x["rate"] == rate and x["cutoff"] == cut)
+def filt(F, rate, cut, filter_="default"):
+    return next(x for x in F["filters"] if x["rate"] == rate and x["cutoff"] == cut
+                and x.get("filter", "default") == filter_)
+
+
+def plot_precise(F, R, C_, out):
+    """The precise filter against the default: the composite response to 1.4112 MHz, and
+    the audio band of the quiet 8th-order 1 kHz tone (176.4 kHz, 40 kHz filter)."""
+    if not any(x.get("filter") == "precise" for x in F["filters"]):
+        return
+    f, ax = fig()
+    for name, col, lw in (("default", C["40"], 1.2), ("precise", "#0b0b0b", 1.0)):
+        r = filt(F, 176400, "40", name)
+        ax.plot(np.array(r["curve_full"]["f"]) / 1e3, r["curve_full"]["db"], color=col, lw=lw,
+                label=f"{name} filter, 40 kHz, 176.4 kHz output")
+    for k in range(1, 5):
+        ax.axvspan(k * 352.8 - 20, k * 352.8 + 20, color="#e34948", alpha=0.12, lw=0)
+    ax.set_xlim(0, 1411.2)
+    ax.set_ylim(-200, 5)
+    ax.set_xlabel("Frequency (kHz)")
+    ax.set_ylabel("Response (dB)")
+    ax.legend(loc="upper right")
+    save(f, out, "precise-response.svg")
+    sets = [("source (bitstream)", C["source"], "source/quiet_sine1k-dsd-dsd64-ref", 1.0),
+            ("default filter", C["40"], "dsd2pcm/176k4-40/quiet_sine1k-dsd-dsd64-ref", 1.2),
+            ("precise filter", "#0b0b0b", "dsd2pcm-precise/176k4-40/quiet_sine1k-dsd-dsd64-ref", 1.0)]
+    if not all(k in C_ for _, _, k, _ in sets):
+        return
+    f, ax = fig()
+    for label, col, key, lw in sets:
+        c = C_[key]["spectrum_log"]
+        ax.plot(np.array(c["f"]) / 1e3, c["db"], color=col, label=label, lw=lw)
+    ax.set_xscale("log")
+    ax.set_xlim(0.02, 20)
+    ax.set_ylim(-200, 0)
+    ax.set_xlabel("Frequency (kHz)")
+    ax.set_ylabel("dBFS")
+    ax.legend(loc="upper right")
+    save(f, out, "precise-quiet.svg")
 
 
 def plot_filters(F, out):
@@ -202,6 +239,7 @@ def main():
     Cv = json.load(open(a.curves))
     os.makedirs(a.out, exist_ok=True)
     plot_filters(F, a.out)
+    plot_precise(F, R, Cv, a.out)
     d = "dsd2pcm/352k8-{}/"
     plot_time(R, Cv, a.out, None, "impulse.svg",
               "Impulse response: one DSD bit flipped (352.8 kHz output samples, pysacd at 176.4 kHz)", 0.3,

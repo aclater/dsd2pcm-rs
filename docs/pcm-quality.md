@@ -30,6 +30,7 @@ At every rate and filter:
 - **No clipping at 0 dB gain** up to +4.5 dB SACD, past the +3.1 dB SACD peak level the Scarlet Book allows.
 - **24-bit output, rounded, not dithered.** The rounding noise (-153 dBFS in 20 Hz-20 kHz at 176.4 kHz) is 30 dB below the DSD64 test signal's own noise.
 - **Filter floor:** with a very quiet DSD64 source the filters themselves limit the audio band to about -128 dBFS (-122 dBFS with `wide`): a stopband limit, measured and explained [below](#filter-floor-with-very-quiet-sources).
+- **The opt-in precise filter** (`--filter precise`) removes that floor: 150 dB and more of stopband wherever content folds into the passband, SINAD 142 to 145 dB with that source (the 24-bit output's limit), half the passband ripple, at about twice the CPU time ([details](#the-precise-filter)).
 - **Against the foobar2000 SACD plug-in** (2.0.27): equal in the audio band within 0.6 dB, the plug-in slightly quieter; dsd2pcm keeps DSD silence and timing exact and passes far less ultrasonic noise than the plug-in's default mode ([details](#comparisons)).
 
 With the 5th-order test signals the figures are limited by the test signal, not by the converter: THD+N, noise and
@@ -430,7 +431,104 @@ with `wide`), relative to a full scale at which 0 dB SACD reads -6.02 dBFS. It i
 in-band noise of the 5th-order test signals on this page (-122.5 dBFS) and only shows with
 a source that is quieter than that. A deeper stopband in the bands above would lower it;
 that would mean new filters and therefore new output bytes, which this crate changes only
-with a major version.
+with a major version. The opt-in [precise filter](#the-precise-filter) is such a filter.
+
+## The precise filter
+
+`--filter precise` (`Filter::Precise`, `DSD2PCM_FILTER_PRECISE`) keeps everything that
+makes the default exact (integer taps, exact sums, the same rounding, centring, linear
+phase and cutoffs) and deepens the stopband to 150 dB and more wherever ultrasonic content
+folds into the passband. How it is built is in [design](design.md#the-precise-filter-filterprecise).
+It is opt-in; the default and its bytes are unchanged.
+
+**From the taps** (`filters.py --precise`; exact composite responses, as above):
+
+| Rate (kHz) | Filter | Ripple to 20 kHz (dB) | -3 dB (kHz) | Stopband (dB) | Worst alias into 0-20 kHz (dB) | Images (dB) | Ringing above -60 dB, each side (ms) |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 88.2, 176.4 | default, 30 / 40 kHz | ±0.0021 / ±0.0019 | 32.0 / 42.7 | 110.2 / 110.9 | 111.5 to 114.5 | – | 0.348 / 0.261 |
+| 88.2, 176.4 | precise, 30 / 40 kHz | ±0.0010 | 32.0 / 42.6 | 157.8 | 158.0 | – | 0.395 / 0.297 |
+| 352.8 | default, 30 / 40 kHz | ±0.0021 / ±0.0019 | 32.0 / 42.7 | 110.2 / 110.9 | 114.5 | 119.3 | 0.348 / 0.261 |
+| 352.8 | precise, 30 / 40 kHz | ±0.0012 | 32.0 / 42.6 | 157.8 | 158.0 | 194.0 | 0.395 / 0.297 |
+| 176.4 | default, wide | ±0.0023 | 82.7 | 109.7 | 111.0 | – | 0.231 |
+| 176.4 | precise, wide | ±0.0009 | 82.7 | 151.3 | 151.3 | – | 0.267 |
+| 352.8 | default, wide | ±0.0020 | 85.3 | 111.1 | 111.1 | – | 0.130 |
+| 352.8 | precise, wide | ±0.0009 | 85.3 | 151.3 | 151.3 | – | 0.148 |
+
+Rejection of each band that folds onto 0-20 kHz (176.4 kHz output; the default's in
+brackets): 156-196 kHz 203.4 dB (127.8), 333-373 kHz 160.4 dB (115.6), 686-726 kHz
+158.0 dB (114.5), 1038-1078 kHz 178.4 dB (116.3); with `wide` 179.0, 165.3, 151.3 and
+172.5 dB (115.5, 111.3, 111.0, 111.3).
+
+![The precise filter's response](assets/quality/precise-response.svg)
+
+*The composite response of the 40 kHz filter at 176.4 kHz output, default and precise, to
+1.4112 MHz. The shaded bands fold onto 0-20 kHz. The precise filter is 150 dB or more down
+in all of them; between them its first stage is left free, and the later stages remove
+what it passes there.*
+
+**End to end** (the 8th-order source above; the 5th-order signals; ffmpeg 9.0.2's DSD
+decoder as a black box, `ffmpeg -i IN.dsf -ar RATE -c:a pcm_f32le OUT.wav`, 32-bit float
+output, at its native 352.8 kHz and resampled to 176.4 kHz by its default resampler):
+
+| Converter | SINAD, 8th-order source (dB) | Noise and distortion (dBFS) | Noise, 5th-order modulated silence (dBFS) | Alias tones 170 kHz to 1.23 MHz, worst rejection (dB) | DSD silence |
+|---|---:|---:|---:|---:|---|
+| The source itself (bitstream) | 146.9 | -152.9 | -122.5 | – | – |
+| default, 30 / 40 kHz, 88.2 / 176.4 / 352.8 kHz | 122.0 to 122.1 | -128.1 to -128.2 | -121.9 | 112.5 to 112.6 | exact zero |
+| default, wide, 176.4 / 352.8 kHz | 116.1 | -122.1 | -118.8 | 107.6 | exact zero |
+| precise, 30 / 40 kHz, 88.2 kHz | 141.8 | -147.8 | -122.5 | 150.6 / 151.4 | exact zero |
+| precise, 30 / 40 kHz, 176.4 kHz | 143.6 | -149.6 | -122.5 | 152.9 / 152.3 | exact zero |
+| precise, 30 / 40 kHz, 352.8 kHz | 144.9 | -150.9 | -122.5 | 155.1 / 156.6 | exact zero |
+| precise, wide, 176.4 / 352.8 kHz | 143.6 / 144.8 | -149.6 / -150.8 | -122.5 | 149.2 / 148.8 | exact zero |
+| precise taps in 64-bit floating point, no rounding, no word length (176.4 kHz, 40 / wide) | 146.7 / 146.5 | -152.7 / -152.5 | – | 156.8 / 149.4 | – |
+| ffmpeg, 352.8 kHz (float) | 146.7 | -152.7 | -122.5 | 16.0 (170 kHz passes) | peaks of -46 dBFS |
+| ffmpeg, 176.4 kHz (float, resampled) | 138.9 | -145.0 | -122.5 | 124.8 | peaks of -52 dBFS |
+
+- **The precise filter removes the filter floor.** SINAD with the quiet source rises from
+  122 dB to 142 to 145 dB (from 116 to 144 dB with `wide`), and every alias tone is 149 dB
+  or more down (107.6 to 122.5 dB with the default).
+- **What is left is the 24-bit output, not the filter.** The same taps in floating point
+  give 146.7 dB, the source's own 146.9 dB. The 24-bit rounding adds -152.7 dBFS in
+  20 Hz-20 kHz at 176.4 kHz (-149.7 at 88.2, -155.7 at 352.8 kHz), and the source's -152.9
+  plus that is -149.8, -148.2 and -151.1 dBFS: within 0.4 dB of what was measured. The
+  rounding between stages (on the 2^26 grid) adds less than that.
+- **ffmpeg** reaches the source's figure at 352.8 kHz because its output is floating
+  point with no word length, but at that rate it barely filters (a 170 kHz tone comes out
+  16 dB down, and the SACD silence pattern converts to a signal peaking at -46 dBFS
+  instead of digital zero); resampled to 176.4 kHz it reads 138.9 dB.
+- **With the 5th-order signals** both filters measure the source: THD+N -106.1 dB, noise
+  -122.5 dBFS for precise against -121.9 dBFS (default, 30 and 40 kHz) and -118.8 dBFS
+  (default, wide). The ultrasonic bands are the same within 0.2 dB (precise -151.1 dBFS in
+  40-96 kHz with the 30 kHz filter at 352.8 kHz).
+
+![The quiet tone, default against precise](assets/quality/precise-quiet.svg)
+
+*1 kHz at 0 dB SACD from the 8th-order source, 176.4 kHz output, 40 kHz filter: the default
+filter's floor rises above 3 kHz with folded ultrasonic noise; the precise filter follows
+the source.*
+
+**Real discs.** Three DSD64 tracks (rock, rock, voice with guitar and piano), converted at
+176.4 kHz with both filters: the two outputs differ by -94 to -99 dBFS in 20 Hz-20 kHz,
+about 75 dB below the music, almost all of it the two filters' passband ripples (both
+under ±0.002 dB). In the quietest second of the one track with a near-silent lead-in the
+floor fell from -124.6 to -125.7 dBFS (the difference, -131.0 dBFS, is the folded noise
+the precise filter removes). On these masters the recording's own noise is far above both
+floors; the precise filter matters for quiet, well-made sources and for measurements.
+
+**Limits, stated plainly.**
+
+- **CPU time:** 1.5 to 2.3 times the default's on one core (about 1.8 times for 30 and
+  40 kHz at 176.4 and 352.8 kHz; 2 to 2.3 times at 88.2 kHz and for `wide` at 176.4 kHz),
+  1.15 to 2.0 times on all cores; see [performance](performance.md#the-precise-filter). It
+  still converts at 90 to 190 times real time on one Zen 2 core, and at 32 times or more on
+  an E-core of the i9-13900H.
+- **Ringing:** 14 % longer above -60 dB (0.297 against 0.261 ms each side for the 40 kHz
+  filter): its sharper cascades ring a little longer. Both are symmetric, ultrasonic and
+  well under a millisecond.
+- **Not the default's bytes:** its output differs from scarletbook-pcm 0.7.0's (by the
+  amounts above); it is exact and identical on every CPU and SIMD level, pinned by its own
+  golden hashes.
+- **Word length:** with the 24-bit output the audio-band floor is the rounding's, about
+  -150 dBFS. A floating-point output would be needed to show the last 3 dB.
 
 ## The 30 kHz filter against a separate low-pass
 
@@ -672,6 +770,24 @@ venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/t
 venv/bin/python tools/quality/plot.py --filters out/filters.json --results out/results.json --curves out/curves.json --out docs/assets/quality
 venv/bin/python tools/quality/report.py --filters out/filters.json --results out/results.json
 ```
+
+The [precise filter](#the-precise-filter)'s figures were made with the same tools, ffmpeg 9.0.2 (Fedora 45) and only the signals they
+use:
+
+```sh
+venv/bin/python tools/quality/gen_signals.py --out out/sig --no-sox --only idle,silence,sine1k_0,fr_tones,alias_steps,bit_impulse,bit_step,quiet_sine1k,quiet_alias
+venv/bin/python tools/quality/decode.py --signals-dir out/sig --out out/dec --tool dsd2pcm=target/release/dsd2pcm --tool ffmpeg=/usr/bin/ffmpeg --decoders dsd2pcm,dsd2pcm-precise,ffmpeg
+mkdir -p out/dec/taps-f64-precise/176k4-40 out/dec/taps-f64-precise/176k4-wide
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --precise crates/dsd2pcm/src/decimator/tables_precise.rs --apply out/sig/dsd/quiet_sine1k-dsd-dsd64-ref.dsf --rate 176400 --cutoff precise-40 --out out/dec/taps-f64-precise/176k4-40/quiet_sine1k-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --precise crates/dsd2pcm/src/decimator/tables_precise.rs --apply out/sig/dsd/quiet_alias-dsd-dsd64-ref.dsf --rate 176400 --cutoff precise-40 --out out/dec/taps-f64-precise/176k4-40/quiet_alias-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --precise crates/dsd2pcm/src/decimator/tables_precise.rs --apply out/sig/dsd/quiet_sine1k-dsd-dsd64-ref.dsf --rate 176400 --cutoff precise-wide --out out/dec/taps-f64-precise/176k4-wide/quiet_sine1k-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --precise crates/dsd2pcm/src/decimator/tables_precise.rs --apply out/sig/dsd/quiet_alias-dsd-dsd64-ref.dsf --rate 176400 --cutoff precise-wide --out out/dec/taps-f64-precise/176k4-wide/quiet_alias-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/analyse.py --signals-dir out/sig --decoded out/dec --out out/results.json --curves out/curves.json --sources quiet_sine1k,quiet_alias,silence,sine1k_0
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --precise crates/dsd2pcm/src/decimator/tables_precise.rs --out out/filters.json
+```
+
+The two precise charts are `plot_precise` in `plot.py`. The real-disc comparison used
+three commercial DSD64 tracks, which are not distributed.
 
 The foobar2000 rows come from WAVs made on Windows as described under
 [comparisons](#comparisons) and copied to `out/dec/foobar/<mode>-<rate>/` before

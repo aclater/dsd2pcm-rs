@@ -16,7 +16,7 @@ dsd2pcm crate; the decoders are run by path.
 | `decode.py` | DSF files | One WAV per decoder, setting and signal, and `runs.json` (commands, exit status, SHA-256 of inputs and outputs) |
 | `postfilter.py` | WAV files | The same, through a separate reference linear-phase low-pass (for the 30 kHz comparison) |
 | `analyse.py` | WAV files (and DSF sources) | `results.json` (metrics) and `curves.json` (plot data); the analysis settings are written into `results.json` |
-| `filters.py` | `tables.rs`, `pysacd_taps.rs` | `filters.json`: the filters' exact response, from their taps; with `--apply`, the same filter in 64-bit floating point run on a DSF file (a reference decoder without rounding or word length) |
+| `filters.py` | `tables.rs`, `pysacd_taps.rs`, `tables_precise.rs` (`--precise`) | `filters.json`: the filters' exact response, from their taps; with `--apply`, the same filter in 64-bit floating point run on a DSF file (a reference decoder without rounding or word length; `--cutoff precise-40` and so on for the precise filter) |
 | `plot.py` | JSON | SVG charts |
 | `report.py` | JSON | The Markdown tables of the page |
 | `sbpcm/` | raw DSD | scarletbook-pcm 0.7.0 as a command-line decoder (a separate Cargo project) |

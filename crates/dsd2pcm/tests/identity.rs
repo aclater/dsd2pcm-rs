@@ -151,8 +151,9 @@ const ALL: [(PcmRate, Cutoff); 8] = [
 
 /// SHA-256 of the output bytes and clip counts for every channel count (1, 2, 6), input
 /// (the test material and full scale, all 0xFF) and gain (0, -3 and +7.5 dB, which clips),
-/// for one rate and cutoff.
-fn digest(rate: PcmRate, cutoff: Cutoff) -> String {
+/// for one rate, cutoff and filter (the default's output is checked against
+/// scarletbook-pcm's as well).
+fn digest(rate: PcmRate, cutoff: Cutoff, filter: dsd2pcm::Filter) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     for ch in [1usize, 2, 6] {
@@ -168,15 +169,17 @@ fn digest(rate: PcmRate, cutoff: Cutoff) -> String {
                     gain_db,
                     // Both the threaded and the single-thread driver.
                     threads: gain_db != -3.0,
-                    filter: dsd2pcm::Filter::Default,
+                    filter,
                 };
                 let (bytes, clipped) = ours(chans, &opts);
-                // The hashed output is scarletbook-pcm's.
-                let (b, cb) = theirs(chans, rate, cutoff, gain_db);
-                assert!(
-                    bytes == b && clipped == cb,
-                    "{rate:?} {cutoff:?} {gain_db} dB"
-                );
+                if filter == dsd2pcm::Filter::Default {
+                    // The hashed output is scarletbook-pcm's.
+                    let (b, cb) = theirs(chans, rate, cutoff, gain_db);
+                    assert!(
+                        bytes == b && clipped == cb,
+                        "{rate:?} {cutoff:?} {gain_db} dB"
+                    );
+                }
                 h.update(&bytes);
                 for c in clipped {
                     h.update(c.to_le_bytes());
@@ -187,11 +190,34 @@ fn digest(rate: PcmRate, cutoff: Cutoff) -> String {
     h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// The digests of `filter` at every rate and cutoff, at every SIMD level of this CPU (each
+/// forced in turn), checked against `golden`.
+fn check_golden(filter: dsd2pcm::Filter, golden: [&str; 8]) {
+    use dsd2pcm::decimator::{with_simd_level, SimdLevel};
+    let levels = SimdLevel::available();
+    let got: Vec<Vec<String>> = ALL
+        .into_iter()
+        .map(|(rate, cutoff)| {
+            levels
+                .iter()
+                .map(|&level| with_simd_level(level, || digest(rate, cutoff, filter)).unwrap())
+                .collect()
+        })
+        .collect();
+    for ((rate, cutoff), d) in ALL.into_iter().zip(&got) {
+        eprintln!("{filter:?} {rate:?} {cutoff:?}: {d:?}");
+    }
+    for (((rate, cutoff), d), golden) in ALL.into_iter().zip(&got).zip(golden) {
+        for (level, d) in levels.iter().zip(d) {
+            assert_eq!(d, golden, "{filter:?} {rate:?} {cutoff:?} at {level:?}");
+        }
+    }
+}
+
 /// Golden output hashes, the same at every SIMD level of this CPU (each forced in turn) and
 /// on every platform. They change only with a major version.
 #[test]
 fn golden_hashes_at_every_simd_level() {
-    use dsd2pcm::decimator::{with_simd_level, SimdLevel};
     const GOLDEN: [&str; 8] = [
         "56c126ccdc7ad14f156a408fc41433350ad64799cb029d5c1daf112ea6f2e5e2",
         "fbf0ced5f83210c736a5ac42b4f71bfe7e35f33eb0b65b663ac3c12b0e209348",
@@ -202,24 +228,24 @@ fn golden_hashes_at_every_simd_level() {
         "30de64ebe6a071f889121069306e49b7c8094b9bba4b0c0dd69bbba5214c6be2",
         "14d04a339fd56e168d5566edc241dae92910fde490ef96a92bf89bbf2f2bf40e",
     ];
-    let levels = SimdLevel::available();
-    let got: Vec<Vec<String>> = ALL
-        .into_iter()
-        .map(|(rate, cutoff)| {
-            levels
-                .iter()
-                .map(|&level| with_simd_level(level, || digest(rate, cutoff)).unwrap())
-                .collect()
-        })
-        .collect();
-    for ((rate, cutoff), d) in ALL.into_iter().zip(&got) {
-        eprintln!("{rate:?} {cutoff:?}: {d:?}");
-    }
-    for (((rate, cutoff), d), golden) in ALL.into_iter().zip(&got).zip(GOLDEN) {
-        for (level, d) in levels.iter().zip(d) {
-            assert_eq!(d, golden, "{rate:?} {cutoff:?} at {level:?}");
-        }
-    }
+    check_golden(dsd2pcm::Filter::Default, GOLDEN);
+}
+
+/// The precise filter's golden output hashes, as [`golden_hashes_at_every_simd_level`]
+/// (computed at the generic, sse2, avx2 and avx2fma levels on x86-64, all equal).
+#[test]
+fn golden_hashes_precise_at_every_simd_level() {
+    const GOLDEN: [&str; 8] = [
+        "18acb04ec74f4fe8c1393a9de446e3d29672a2d404d4d1bbd2a707e88ab81bf6",
+        "2d0dd8496e57d1ce0215d86c75ad6515fcc8999bef6ab24cfd69d5c583f6aae0",
+        "5b98d636b7a8d6adefe8aa0ecf64439e29c8772a0b2ff9a0452cd1f6ff0f4802",
+        "cb1691c219858053f0f188ce99f60a1fa6d35f5cdf35a169118ec8e0a1aaa31b",
+        "2ff237858fb9f93576afac5f9378adf54bf7f2bb29a1de3189e7841875e1ff65",
+        "c33b9582063e2a62009dcf12caf68fc68714d2c4505b82c40a0d25bc29d6d065",
+        "bd4a8286a40a6d6ee09c2a16110e47228f694b4bc717efb2dc5c68c2feb7555d",
+        "bfeef94a939fc912ffed9819371d4daa3829723dc9957e1207e8b07555e939ba",
+    ];
+    check_golden(dsd2pcm::Filter::Precise, GOLDEN);
 }
 
 /// A real DSD64 file (path in `DSD2PCM_REAL_DSF`), cut to whole 4704-byte frames.

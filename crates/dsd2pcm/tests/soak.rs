@@ -89,7 +89,7 @@ static A: Counting = Counting;
 
 const RATES: [PcmRate; 3] = [PcmRate::Hz88200, PcmRate::Hz176400, PcmRate::Hz352800];
 const CUTOFFS: [Cutoff; 3] = [Cutoff::Standard, Cutoff::Low, Cutoff::Wide];
-const FILTERS: [Filter; 2] = [Filter::Default, Filter::Pysacd];
+const FILTERS: [Filter; 3] = [Filter::Default, Filter::Precise, Filter::Pysacd];
 const CHANNELS: [u8; 4] = [1, 2, 5, 6];
 
 #[cfg(feature = "flac")]

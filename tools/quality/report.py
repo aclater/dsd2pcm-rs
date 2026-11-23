@@ -40,6 +40,8 @@ def filter_table(F):
            "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
     for r in F["filters"]:
         cut = {"30": "30 kHz", "40": "40 kHz", "wide": "wide", "pysacd": "pysacd preset"}[r["cutoff"]]
+        if r.get("filter") == "precise":
+            cut = "precise, " + cut
         out.append(f"| {r['rate'] / 1000:g} | {cut} | ±{r['max_dev_20k_db']:.4f} | ±{r['max_dev_pass_db']:.4f} (to {r['pass_hz'] / 1000:g} kHz) | "
                    f"{r['minus3_hz'] / 1000:.1f} | {r['stopband_db']:.1f} (from {r['stop_hz'] / 1000:g} kHz) | {r['worst_alias_20k_db']:.1f} | "
                    f"{f(r.get('images_db'))} | {r['pre_ring_60_ms']:.3f} | {r['step_overshoot_pct']:.1f} | "
@@ -155,7 +157,8 @@ def floor_table(R, F):
     out += ["", "| Rate (kHz) | Filter | Rejection of each band folding onto 0-20 kHz (band in kHz: dB) |", "|---:|---|---|"]
     for r in F["filters"]:
         bands = ", ".join(f"{b['lo_hz'] / 1000:g}-{b['hi_hz'] / 1000:g}: {b['rejection_db']:.1f}" for b in r.get("alias_bands", [])[:8])
-        out.append(f"| {r['rate'] / 1000:g} | {r['cutoff']} | {bands} |")
+        name = ("precise, " if r.get("filter") == "precise" else "") + r["cutoff"]
+        out.append(f"| {r['rate'] / 1000:g} | {name} | {bands} |")
     return "\n".join(out)
 
 

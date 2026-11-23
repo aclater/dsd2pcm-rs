@@ -56,6 +56,64 @@ history; it starts 4096 idle bytes before the input and flushes with idle bytes,
 output sample is the same function of the input as in scarletbook-pcm's whole-area
 conversion. Output length: `ceil(samples / d)` per channel.
 
+## The precise filter (`Filter::Precise`)
+
+An opt-in filter on the same decimator, kernels and exactness proof as the default: integer
+taps, exact integer sums in `f64`, half-to-even rounding at each stage end, the same
+quantiser, the same centring (no delay) and linear phase. Only the tables
+(`decimator/tables_precise.rs`) and the stage plan differ. Its aim is a stopband of 150 dB
+wherever ultrasonic content folds into the passband; the default's is about 110 dB, which
+with a very quiet source sets an audio-band floor near -128 dBFS
+([PCM quality](pcm-quality.md#the-precise-filter)).
+
+The taps come from `tools/filters/design_precise.py` (NumPy, pinned in
+`tools/filters/requirements.txt`), which writes the tables deterministically and checks the
+committed ones (`--report` prints every stage's response and the largest partial sum of every
+plan).
+
+- **Why cascades.** The exactness proof needs every partial sum below 2^53. With samples on
+  the 2^26 grid, a stage's taps can carry about 52 - 26 - log2(sum of the gains) bits, about
+  22 to 24. One 150 dB sharp filter needs about 28-bit taps (in the design trials, rounding
+  its taps to 24 to 27 bits left 120 to 144 dB), so it cannot be exact. Two filters of about 80 dB in a
+  row, each with 21 or 22-bit taps, give the sum of their stopbands in dB: 160 dB and more,
+  with the same exact arithmetic.
+- **S1** is the one stage that cannot be split: it decimates the bit stream, so it must
+  remove everything that folds into the passband by itself. Its sums are taken from tables
+  in 32-bit integers, which leaves room for 2^29-scaled taps (sum of absolute taps below
+  2^31). It is a multiband design: 150 dB and more only in the bands that fold onto what the
+  later stages keep (k x 352.8 kHz +- 48 kHz for the 30 and 40 kHz filters, +- 96 kHz for
+  `wide`), don't-care between them, where the later stages' own stopbands remove what S1
+  passes. 95 taps (a 12-byte window) for 30 and 40 kHz, 127 taps (16 bytes) for `wide`;
+  the kernels gained the 16-byte window as a constant size. Like the default S1 it has the
+  factor `(1 + z^-1)^2 (1 + z^-4)`, so the idle pattern converts to exact zero.
+- **P**, a short low-pass at 352.8 kHz (25 taps), takes S1's 2^29 grid back to 2^26 and adds
+  its stopband in front of the half-band (128.4 to 176.4 kHz, which folds onto 0 to 48 kHz).
+  At 352.8 kHz output it runs again after the interpolation, against its images.
+- **Plans** (each stage rounds to the 2^26 grid):
+
+| Cutoff | Rate | Stages after S1 |
+|---|---|---|
+| 30, 40 | 88.2 kHz | P, half-band /2, F, F /2 |
+| 30, 40 | 176.4 kHz | P, half-band /2, F, F |
+| 30, 40 | 352.8 kHz | P, half-band /2, F, F, half-band x2, P |
+| wide | 176.4 kHz | F80, F80 /2 |
+| wide | 352.8 kHz | F40, F40 (at 352.8 kHz: 80 kHz passband, stop from 96 kHz) |
+
+  F is F40 (111 taps) or F30 (149 taps) at 176.4 kHz; F80 has 217 taps. A stage after an
+  interpolation by 2 has an even half length, so that its inputs start at an even index.
+- **Taps.** Each stage is designed by the Remez exchange (a NumPy port of scarletbook-pcm
+  0.7.0's `design.rs`, see PROVENANCE.md), rounded to integers summing exactly to 2^q, then
+  improved by a greedy integer search that moves one tap pair at a time while the largest
+  stopband error falls and the passband stays within its ripple. Every stage's passband
+  ripple is at most 1e-4 (linear), so the composite stays within +-0.0012 dB.
+- **Proof and tests.** `exact.rs` proves every plan as for the default (the largest partial
+  sum is 2^52.95, for 352.8 kHz with the 30 kHz filter), so FMA and the lanes stay exact;
+  `plans_match_reference` checks every plan of both filters, at every SIMD level, against a
+  direct computation of its definition in 128-bit integers; `lanes_match_ordered` and the
+  S1 table tests cover the new tables; golden hashes pin the output at every level.
+- **Cost.** More taps per output than the default: see [performance](performance.md) and
+  [PCM quality](pcm-quality.md#the-precise-filter) for the measured CPU time.
+
 ## pysacd's filter (`Filter::Pysacd`)
 
 `filters/pysacd.rs` ports pysacd's filter (`csrc/dsp.c`, MIT OR Apache-2.0) and the

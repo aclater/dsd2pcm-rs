@@ -65,3 +65,31 @@ settings = [
   { name = "352k8-40", rate = 352800, cutoff = "40" },
   { name = "352k8-wide", rate = 352800, cutoff = "wide" },
 ]
+
+[decoder.dsd2pcm-precise]
+desc = "dsd2pcm --filter precise"
+command = ["{tool:dsd2pcm}", "{input}", "{output}", "--rate", "{rate}", "--cutoff", "{cutoff}", "--gain", "{gain}", "--filter", "precise"]
+input = "dsf"
+output = "wav"
+dsd_rates = [64]
+settings = [
+  { name = "88k2-30", rate = 88200, cutoff = "30", gain = "0" },
+  { name = "88k2-40", rate = 88200, cutoff = "40", gain = "0" },
+  { name = "176k4-30", rate = 176400, cutoff = "30", gain = "0" },
+  { name = "176k4-40", rate = 176400, cutoff = "40", gain = "0" },
+  { name = "176k4-wide", rate = 176400, cutoff = "wide", gain = "0" },
+  { name = "352k8-30", rate = 352800, cutoff = "30", gain = "0" },
+  { name = "352k8-40", rate = 352800, cutoff = "40", gain = "0" },
+  { name = "352k8-wide", rate = 352800, cutoff = "wide", gain = "0" },
+]
+
+[decoder.ffmpeg]
+desc = "ffmpeg's DSD decoder (352.8 kHz, 32-bit float; 176.4 kHz through its default resampler)"
+command = ["{tool:ffmpeg}", "-v", "error", "-y", "-i", "{input}", "-ar", "{rate}", "-c:a", "pcm_f32le", "{output}"]
+input = "dsf"
+output = "wav"
+dsd_rates = [64]
+settings = [
+  { name = "176k4", rate = 176400 },
+  { name = "352k8", rate = 352800 },
+]

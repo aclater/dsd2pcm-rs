@@ -70,6 +70,10 @@ pub const DSD2PCM_FILTER_DEFAULT: u32 = 0;
 /// its index in the area: files count from their start, frame runs from
 /// `dsd2pcm_run.first_frame`.
 pub const DSD2PCM_FILTER_PYSACD: u32 = 1;
+/// Filter and quantiser: the precise filter, at every rate and cutoff, rounded as the
+/// default: at least 150 dB of stopband where ultrasonic content folds into the passband,
+/// at a higher CPU cost.
+pub const DSD2PCM_FILTER_PRECISE: u32 = 2;
 
 /// The ABI version: it changes on any incompatible change to the interface. Compatible
 /// changes only append fields to the structs (see `struct_size`) or add functions.
@@ -385,7 +389,8 @@ pub(crate) fn filter(f: u32) -> Result<Filter, Fail> {
     match f {
         DSD2PCM_FILTER_DEFAULT => Ok(Filter::Default),
         DSD2PCM_FILTER_PYSACD => Ok(Filter::Pysacd),
-        _ => Err(invalid(format!("filter {f}: 0 or 1"))),
+        DSD2PCM_FILTER_PRECISE => Ok(Filter::Precise),
+        _ => Err(invalid(format!("filter {f}: 0, 1 or 2"))),
     }
 }
 

@@ -119,7 +119,8 @@ pub struct PcmConfig {
     pub channels: u8,
     /// The gain; [`Gain::UNITY`] by default.
     pub gain: Gain,
-    /// The filter and quantiser; [`Filter::Default`] (scarletbook-pcm's) by default. With
+    /// The filter and quantiser; [`Filter::Default`] (scarletbook-pcm's) by default
+    /// ([`Filter::Precise`] has the same interface and frame independence). With
     /// [`Filter::Pysacd`] the output also depends on each run's position in the area
     /// ([`Run::at_frame`]).
     pub filter: Filter,
@@ -337,7 +338,7 @@ impl Converter {
             )?)),
             _ => None,
         };
-        let plan = Plan::new(config.rate, config.cutoff)?;
+        let plan = Plan::with_design(config.rate, config.cutoff, config.filter.design())?;
         Ok(Converter {
             config,
             plan,
