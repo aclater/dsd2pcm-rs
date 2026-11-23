@@ -93,7 +93,10 @@ boundaries. Whole-file conversion passes the hook through. The frame-run API nee
 
 ## C interface (`crates/dsd2pcm-capi`)
 
-A thin layer over the Rust API, described in [c-api.md](c-api.md). All of its `unsafe` code
+A thin layer over the Rust API, described in [c-api.md](c-api.md). Every struct it reads or writes
+starts with `struct_size`: a size below the 0.1.0 layout is refused before any access,
+only the known fields of a larger one are read, and output structs get
+`min(struct_size, ours)` bytes copied from a padding-free local. All of its `unsafe` code
 is in `src/ffi.rs`: each entry point checks pointers for NULL, lengths against the
 converter, alignment for `int32_t` output, and that no output buffer overlaps another
 buffer, before it makes any Rust reference; the body runs inside `catch_unwind`. A

@@ -10,7 +10,27 @@ documentation_style = "c99"
 usize_is_size_t = true
 sys_includes = ["stddef.h", "stdint.h"]
 no_includes = true
-after_includes = ""
+after_includes = """
+
+// Initialisers: every field zero (the defaults) except struct_size, which every struct the
+// library reads or writes carries first. Example:
+//   dsd2pcm_file_options opts = DSD2PCM_FILE_OPTIONS_INIT;
+//   opts.rate_hz = 176400;
+#ifdef __cplusplus
+template <typename T> static inline T dsd2pcm_init_() {
+  T v = T();
+  v.struct_size = (uint32_t)sizeof(T);
+  return v;
+}
+#define DSD2PCM_INIT_(T) dsd2pcm_init_<T>()
+#else
+#define DSD2PCM_INIT_(T) {.struct_size = (uint32_t)sizeof(T)}
+#endif
+#define DSD2PCM_FILE_OPTIONS_INIT DSD2PCM_INIT_(dsd2pcm_file_options)
+#define DSD2PCM_FILE_REPORT_INIT DSD2PCM_INIT_(dsd2pcm_file_report)
+#define DSD2PCM_FRAMES_CONFIG_INIT DSD2PCM_INIT_(dsd2pcm_frames_config)
+#define DSD2PCM_RUN_INIT DSD2PCM_INIT_(dsd2pcm_run)
+#define DSD2PCM_STATS_INIT DSD2PCM_INIT_(dsd2pcm_stats)"""
 
 [export]
 exclude = []

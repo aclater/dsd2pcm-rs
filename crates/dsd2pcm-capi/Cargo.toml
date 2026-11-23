@@ -5,11 +5,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-publish.workspace = true
+# Not published for 0.1.0: the C library ships as build artefacts.
+publish = false
+build = "build.rs"
 
 [lib]
 name = "dsd2pcm"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-dsd = { package = "dsd2pcm", path = "../dsd2pcm" }
+dsd2pcm.workspace = true

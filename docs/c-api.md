@@ -21,10 +21,17 @@
   `DSD2PCM_E_INTERNAL`.
 - The only memory the caller frees is a converter, with `dsd2pcm_frames_free`. Strings
   returned by the library are static or owned by it.
-- Paths are NUL-terminated UTF-8 on every platform, Windows included (`DSD2PCM_E_INVALID_ARGUMENT`
-  if not valid UTF-8).
-- Settings structs are zero-initialised defaults apart from the rate (and channel count):
-  cutoff `DSD2PCM_CUTOFF_STANDARD`, filter `DSD2PCM_FILTER_DEFAULT`, 0 dB, all cores, no
+- Paths are NUL-terminated. On Unix they are raw bytes, passed to the file system as they
+  are (any encoding); on Windows and other systems they must be UTF-8
+  (`DSD2PCM_E_INVALID_ARGUMENT` otherwise). A wide-character variant for Windows may come
+  later. An empty path is refused.
+- Every struct the library reads or writes starts with `uint32_t struct_size`, set to
+  `sizeof` the struct as the caller compiled it; start from its `*_INIT` macro
+  (`DSD2PCM_FILE_OPTIONS_INIT`, `DSD2PCM_FILE_REPORT_INIT`, `DSD2PCM_FRAMES_CONFIG_INIT`,
+  `DSD2PCM_RUN_INIT`, `DSD2PCM_STATS_INIT`), which sets it and zeroes the rest. Output
+  structs (report, stats) need it set too. See [ABI](#abi).
+- Zero fields are the defaults, apart from the rate (and channel count): cutoff
+  `DSD2PCM_CUTOFF_STANDARD`, filter `DSD2PCM_FILTER_DEFAULT`, 0 dB, all cores, no
   callback. Integer selectors (cutoff, filter, format, threads) are checked, never trusted.
 - `filter` selects the filter and quantiser: 0 is the default (scarletbook-pcm 0.7.0's
   samples). `DSD2PCM_FILTER_PYSACD` (1) is pysacd's filter with its dithered quantiser
@@ -54,7 +61,7 @@ the output samples per channel done and in all; a non-zero return stops the conv
 `DSD2PCM_E_CANCELLED`. It must not unwind (C++ exceptions, `longjmp`) into the library.
 After an error the output file may exist and be incomplete.
 
-`crates/dsd2pcm-capi/tests/c/convert.c` is a complete program:
+`crates/dsd2pcm-capi/examples/convert.c` is a complete program:
 
 ```c
 static int progress(uint64_t done, uint64_t total, void *user_data) {
@@ -63,8 +70,10 @@ static int progress(uint64_t done, uint64_t total, void *user_data) {
     return 0; /* any other value cancels */
 }
 
-dsd2pcm_file_options opts = {.rate_hz = 176400, .progress = progress};
-dsd2pcm_file_report report;
+dsd2pcm_file_options opts = DSD2PCM_FILE_OPTIONS_INIT;
+opts.rate_hz = 176400;
+opts.progress = progress;
+dsd2pcm_file_report report = DSD2PCM_FILE_REPORT_INIT;
 int rc = dsd2pcm_convert_file(argv[1], argv[2], &opts, &report);
 if (rc != DSD2PCM_OK)
     fprintf(stderr, "dsd2pcm: %s: %s\n", dsd2pcm_status_str(rc), dsd2pcm_last_error());
@@ -79,11 +88,14 @@ context. Any run with its neighbours gives the bytes of that run in a whole-area
 conversion, and those equal `dsd2pcm_convert_file`'s.
 
 ```c
-dsd2pcm_frames_config cfg = {.rate_hz = 176400, .channels = 2};
+dsd2pcm_frames_config cfg = DSD2PCM_FRAMES_CONFIG_INIT;
+cfg.rate_hz = 176400;
+cfg.channels = 2;
 dsd2pcm_frames *conv;
 if (dsd2pcm_frames_new(&cfg, &conv) != DSD2PCM_OK) { /* dsd2pcm_last_error() */ }
 
 dsd2pcm_run run = {
+    .struct_size = sizeof(dsd2pcm_run),
     .before = prev, .before_len = frame_bytes,   /* NULL, 0 at the start of the area */
     .frames = data, .frames_len = n * frame_bytes,
     .after = next,  .after_len = frame_bytes,    /* NULL, 0 at the end of the area */
@@ -103,21 +115,41 @@ dsd2pcm_frames_free(conv);
   `_context_bytes` (the neighbour bytes the output depends on) and `_output_bytes` size the
   buffers; each returns 0 for a NULL handle.
 - `frame_clipped` receives the clamped samples per frame (all channels); `stats` the
-  clamped samples per channel and their sum.
+  channel count, the clamped samples per channel and their sum.
 - After the first call a converter allocates nothing. Use one converter per thread: a call
   while another thread uses the same handle returns `DSD2PCM_E_BUSY`. Freeing a handle
   while another thread uses it is undefined.
 
-`crates/dsd2pcm-capi/tests/c/minimal.c` is the smallest complete program (see the README for
-the commands), and `tests/c/smoke.c` uses every function.
+`crates/dsd2pcm-capi/tests/minimal.c` is the smallest complete program (see the README for
+the commands), and `tests/smoke.c` uses every function. Both run without arguments.
+
+## ABI
+
+- `DSD2PCM_ABI_VERSION` (1) in the header and `dsd2pcm_abi_version()` in the library name
+  the ABI; a program can compare them at start-up. On Linux the shared library's SONAME is
+  `libdsd2pcm.so.<ABI version>`, so a program linked against ABI 1 never loads another.
+- The ABI version goes up on any incompatible change: a field removed, moved or retyped, a
+  changed function signature, a changed meaning of a value.
+- Compatible changes only append: new fields go at the end of a struct, new functions,
+  constants and status codes are added. Zero in a new field means the old behaviour.
+- `struct_size` makes this work both ways. The library refuses a size below the struct's
+  0.1.0 size (`DSD2PCM_E_INVALID_ARGUMENT`, before reading or writing anything), reads only
+  the fields it knows from a larger struct (a newer header), and writes only
+  `min(struct_size, its size)` bytes of an output struct.
+- 0.1.0 sizes on 64-bit platforms: `dsd2pcm_file_options` 48, `dsd2pcm_file_report` 88,
+  `dsd2pcm_frames_config` 32, `dsd2pcm_run` 80, `dsd2pcm_stats` 64 bytes (checked when the
+  library is built).
 
 ## Checks
 
 `crates/dsd2pcm-capi/check.sh`, from the repository root, checks that the committed header
 equals cbindgen's output (cbindgen from `PATH`, or the binary named by the `CBINDGEN`
-environment variable; install it with `cargo install cbindgen`), then builds and runs the C programs under gcc and clang with
-`-Wall -Wextra -Werror`, and the smoke test under clang's AddressSanitizer and
+environment variable; install it with `cargo install cbindgen`), then builds and runs
+`tests/*.c` and `examples/convert.c` under gcc and clang with `-Wall -Wextra -Werror`,
+compiles the header and its init macros as C++11, and runs the smoke test under clang's AddressSanitizer and
 UndefinedBehaviorSanitizer (`ASAN=0` skips that). The Rust tests of the interface
-(`cargo test -p dsd2pcm-capi`) cover NULL pointers, bad lengths and values, overlapping
-buffers, cancelling, busy and poisoned handles, allocation after warm-up, and byte identity
-with the Rust API.
+(`cargo test -p dsd2pcm-capi`) cover NULL pointers, bad lengths and values, `struct_size`,
+overlapping buffers, cancelling, busy and poisoned handles, allocation after warm-up, and
+byte identity with the Rust API. They also run under Miri
+(`cargo +nightly miri test -p dsd2pcm-capi`), apart from those that use files or convert
+many frames, which are marked as ignored under Miri.

@@ -9,6 +9,9 @@ license = "MIT OR Apache-2.0"
 rust-version = "1.83"
 publish = false
 
+[workspace.dependencies]
+dsd2pcm = { path = "crates/dsd2pcm", version = "=0.1.0" }
+
 [profile.release]
 codegen-units = 1
 lto = "thin"

@@ -8,6 +8,7 @@ use dsd::dsf::DsfWriter;
 use dsd::frames::{Converter, PcmOut, Run};
 use dsd::io::DsdWrite;
 use std::ffi::{CStr, CString};
+use std::mem::size_of;
 use std::path::PathBuf;
 use std::ptr::{null, null_mut};
 
@@ -65,14 +66,33 @@ impl Drop for TempDir {
 
 /// Writes a DSF file of `frames` frames of `area` data.
 fn write_dsf(path: &std::path::Path, ch: usize, frames: usize) {
+    write_dsf_at(path, ch, frames, 2_822_400);
+}
+
+/// [`write_dsf`] at DSD sample rate `rate`.
+fn write_dsf_at(path: &std::path::Path, ch: usize, frames: usize, rate: u32) {
     let a = area(ch, frames, 0x5eed);
     let chans: Vec<Vec<u8>> = (0..ch)
         .map(|c| a.iter().skip(c).step_by(ch).copied().collect())
         .collect();
     let f = std::fs::File::create(path).unwrap();
-    let mut w = DsfWriter::new(f, ch as u16, 2_822_400, None).unwrap();
+    let mut w = DsfWriter::new(f, ch as u16, rate, None).unwrap();
     w.write_bytes(&chans).unwrap();
     w.finish((frames * FPC * 8) as u64).unwrap();
+}
+
+fn report_init() -> dsd2pcm_file_report {
+    dsd2pcm_file_report {
+        struct_size: size_of::<dsd2pcm_file_report>() as u32,
+        ..Default::default()
+    }
+}
+
+fn stats_init() -> dsd2pcm_stats {
+    dsd2pcm_stats {
+        struct_size: size_of::<dsd2pcm_stats>() as u32,
+        ..Default::default()
+    }
 }
 
 fn cstr(p: &std::path::Path) -> CString {
@@ -81,6 +101,7 @@ fn cstr(p: &std::path::Path) -> CString {
 
 fn file_opts(rate_hz: u32) -> dsd2pcm_file_options {
     dsd2pcm_file_options {
+        struct_size: size_of::<dsd2pcm_file_options>() as u32,
         rate_hz,
         cutoff: 0,
         filter: 0,
@@ -107,6 +128,7 @@ fn version_and_status_strings() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "file I/O")]
 fn convert_file_matches_rust_and_reports() {
     let d = TempDir::new("file");
     let (inp, ours, theirs) = (d.path("in.dsf"), d.path("c.wav"), d.path("rust.wav"));
@@ -141,7 +163,7 @@ fn convert_file_matches_rust_and_reports() {
         o.cutoff = cutoff;
         o.gain_db = gain;
         o.threads = threads;
-        let mut rep = dsd2pcm_file_report::default();
+        let mut rep = report_init();
         // SAFETY (test): valid strings, options and report.
         let rc = unsafe {
             dsd2pcm_convert_file(cstr(&inp).as_ptr(), cstr(&ours).as_ptr(), &o, &mut rep)
@@ -173,6 +195,7 @@ fn convert_file_matches_rust_and_reports() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "file I/O")]
 fn convert_file_rejects_nulls_and_bad_values() {
     let d = TempDir::new("bad");
     let inp = d.path("in.dsf");
@@ -188,12 +211,19 @@ fn convert_file_rejects_nulls_and_bad_values() {
     assert_eq!(call(i.as_ptr(), null(), &good), DSD2PCM_E_NULL);
     assert_eq!(call(i.as_ptr(), o.as_ptr(), null()), DSD2PCM_E_NULL);
     assert_eq!(last_error(), "options is NULL");
+    // Not UTF-8: on Unix a valid path of raw bytes (here, a missing file); elsewhere refused.
     let bad_utf8 = b"\xff\xfe.dsf\0";
+    let rc = call(bad_utf8.as_ptr().cast(), o.as_ptr(), &good);
+    if cfg!(unix) {
+        assert_eq!(rc, DSD2PCM_E_IO);
+    } else {
+        assert_eq!(rc, DSD2PCM_E_INVALID_ARGUMENT);
+        assert!(last_error().contains("UTF-8"));
+    }
     assert_eq!(
-        call(bad_utf8.as_ptr().cast(), o.as_ptr(), &good),
+        call(c"".as_ptr(), o.as_ptr(), &good),
         DSD2PCM_E_INVALID_ARGUMENT
     );
-    assert!(last_error().contains("UTF-8"));
     let mutate = |f: &dyn Fn(&mut dsd2pcm_file_options)| {
         let mut x = good;
         f(&mut x);
@@ -262,6 +292,7 @@ unsafe extern "C" fn record(done: u64, total: u64, user: *mut c_void) -> c_int {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "file I/O")]
 fn progress_and_cancel_from_the_callback() {
     let d = TempDir::new("progress");
     let (inp, out) = (d.path("in.dsf"), d.path("out.wav"));
@@ -309,6 +340,7 @@ fn progress_and_cancel_from_the_callback() {
 
 fn frames_cfg(rate_hz: u32, channels: u32) -> dsd2pcm_frames_config {
     dsd2pcm_frames_config {
+        struct_size: size_of::<dsd2pcm_frames_config>() as u32,
         rate_hz,
         cutoff: 0,
         filter: 0,
@@ -330,6 +362,7 @@ fn contiguous(before: Option<&[u8]>, frames: &[u8], after: Option<&[u8]>) -> dsd
     let (b, bl) = before.map_or((null(), 0), |b| (b.as_ptr(), b.len()));
     let (a, al) = after.map_or((null(), 0), |a| (a.as_ptr(), a.len()));
     dsd2pcm_run {
+        struct_size: size_of::<dsd2pcm_run>() as u32,
         before: b,
         before_len: bl,
         frames: if frames.is_empty() {
@@ -348,7 +381,7 @@ fn contiguous(before: Option<&[u8]>, frames: &[u8], after: Option<&[u8]>) -> dsd
 
 #[test]
 fn frames_new_rejects_bad_configs() {
-    let mut h: *mut dsd2pcm_frames = 1 as *mut _;
+    let mut h: *mut dsd2pcm_frames = std::ptr::NonNull::dangling().as_ptr();
     // SAFETY (test): `out` valid, config NULL.
     assert_eq!(
         unsafe { dsd2pcm_frames_new(null(), &mut h) },
@@ -436,6 +469,7 @@ fn frames_queries() {
 /// for contiguous and per-frame buffers (over several groups), in both formats, with both
 /// filters, at the start of an area and inside it (pysacd's dither depends on the position).
 #[test]
+#[cfg_attr(miri, ignore = "too slow: 70-frame conversions, covered natively")]
 fn frames_convert_matches_rust() {
     let cases = [
         (176_400, 2u32, 6.0, DSD2PCM_FILTER_DEFAULT, 0u64, true),
@@ -502,7 +536,7 @@ fn frames_convert_matches_rust() {
         for r in [cont, separate] {
             let mut got = vec![0u8; want.len()];
             let mut fc = vec![u64::MAX; n];
-            let mut st = dsd2pcm_stats::default();
+            let mut st = stats_init();
             // SAFETY (test): every buffer valid for its length.
             let rc = unsafe {
                 dsd2pcm_frames_convert(
@@ -571,7 +605,7 @@ fn frames_edges_and_empty_run() {
     assert_eq!(got, want);
     let mut st = dsd2pcm_stats {
         clipped_total: 7,
-        ..Default::default()
+        ..stats_init()
     };
     // SAFETY (test): an empty run with NULL buffers.
     let rc = unsafe {
@@ -925,6 +959,7 @@ static COUNTING: Counting = Counting;
 /// After the first call, `dsd2pcm_frames_convert` allocates nothing, in either buffer
 /// layout and format.
 #[test]
+#[cfg_attr(miri, ignore = "too slow: 40-frame conversions, covered natively")]
 fn frames_convert_allocates_nothing_after_warm_up() {
     for filter in [DSD2PCM_FILTER_DEFAULT, DSD2PCM_FILTER_PYSACD] {
         alloc_case(filter);
@@ -947,7 +982,7 @@ fn alloc_case(filter: u32) {
     let cont = contiguous(Some(before), run, Some(after));
     let mut out = vec![0i32; n * 2352 * 6];
     let mut fc = vec![0u64; n];
-    let mut st = dsd2pcm_stats::default();
+    let mut st = stats_init();
     let mut go = |r: &dsd2pcm_run, fmt: u32| {
         let len = if fmt == 0 {
             n * 2352 * 6 * 3
@@ -976,4 +1011,190 @@ fn alloc_case(filter: u32) {
     assert_eq!(ALLOCS.with(|a| a.get()), before_count, "filter {filter}");
     // SAFETY (test): live handle.
     unsafe { dsd2pcm_frames_free(h) };
+}
+
+#[test]
+fn abi_version() {
+    assert_eq!(dsd2pcm_abi_version(), DSD2PCM_ABI_VERSION);
+    assert_eq!(DSD2PCM_ABI_VERSION, 1);
+}
+
+/// Paths are raw bytes on Unix: a file whose name is not UTF-8 converts.
+#[cfg(unix)]
+#[test]
+#[cfg_attr(miri, ignore = "file I/O")]
+fn non_utf8_paths_on_unix() {
+    use std::os::unix::ffi::OsStrExt;
+    let d = TempDir::new("bytes");
+    let inp = d.0.join(std::ffi::OsStr::from_bytes(b"in-\xff\xfe.dsf"));
+    let out = d.0.join(std::ffi::OsStr::from_bytes(b"out-\xe9.wav"));
+    write_dsf(&inp, 1, 2);
+    let c = |p: &std::path::Path| CString::new(p.as_os_str().as_bytes()).unwrap();
+    // SAFETY (test): valid strings and options.
+    let rc = unsafe {
+        dsd2pcm_convert_file(
+            c(&inp).as_ptr(),
+            c(&out).as_ptr(),
+            &file_opts(88_200),
+            null_mut(),
+        )
+    };
+    assert_eq!(rc, DSD2PCM_OK, "{}", last_error());
+    assert!(out.exists());
+}
+
+/// DSD128 input with pysacd's filter is refused before the filter is chosen.
+#[test]
+#[cfg_attr(miri, ignore = "file I/O")]
+fn dsd128_with_pysacd_is_unsupported() {
+    let d = TempDir::new("dsd128");
+    let (inp, out) = (d.path("in.dsf"), d.path("out.wav"));
+    write_dsf_at(&inp, 2, 2, 5_644_800);
+    for filter in [DSD2PCM_FILTER_PYSACD, DSD2PCM_FILTER_DEFAULT] {
+        let o = dsd2pcm_file_options {
+            filter,
+            ..file_opts(88_200)
+        };
+        // SAFETY (test): valid strings and options.
+        let rc = unsafe {
+            dsd2pcm_convert_file(cstr(&inp).as_ptr(), cstr(&out).as_ptr(), &o, null_mut())
+        };
+        assert_eq!(rc, DSD2PCM_E_UNSUPPORTED, "filter {filter}");
+        assert!(last_error().contains("only DSD64"), "{}", last_error());
+    }
+}
+
+/// A caller's struct with a field this version does not know.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Newer<T> {
+    known: T,
+    extra: u64,
+}
+
+fn newer<T: Versioned>(mut known: T) -> Newer<T> {
+    known.set_struct_size(size_of::<Newer<T>>() as u32);
+    Newer {
+        known,
+        extra: 0xDEAD_BEEF,
+    }
+}
+
+/// `struct_size` below the 0.1.0 size is refused for every struct, before anything is read
+/// or written; a larger one (a newer header) is accepted, and only our fields are read or
+/// written.
+#[test]
+fn struct_size_is_checked() {
+    let cfg = frames_cfg(176_400, 1);
+    let h = new_handle(&cfg);
+    let a = area(1, 1, 3);
+    let mut out = vec![0u8; 2352 * 3];
+    let run = contiguous(None, &a, None);
+    let convert = |r: *const dsd2pcm_run, st: *mut dsd2pcm_stats, out: &mut [u8]| {
+        // SAFETY (test): valid buffers; the structs are at least their struct_size.
+        unsafe {
+            dsd2pcm_frames_convert(
+                h,
+                r,
+                0,
+                out.as_mut_ptr().cast(),
+                out.len(),
+                null_mut(),
+                0,
+                st,
+            )
+        }
+    };
+    fn too_small<T>(k: usize) -> u32 {
+        [0, 4, size_of::<T>() as u32 - 1][k]
+    }
+    for k in 0..3 {
+        let r = dsd2pcm_run {
+            struct_size: too_small::<dsd2pcm_run>(k),
+            ..run
+        };
+        assert_eq!(
+            convert(&r, null_mut(), &mut out),
+            DSD2PCM_E_INVALID_ARGUMENT
+        );
+        assert!(last_error().contains("struct_size"), "{}", last_error());
+        let mut st = dsd2pcm_stats {
+            struct_size: too_small::<dsd2pcm_stats>(k),
+            clipped_total: 77,
+            ..stats_init()
+        };
+        assert_eq!(convert(&run, &mut st, &mut out), DSD2PCM_E_INVALID_ARGUMENT);
+        assert_eq!(st.clipped_total, 77, "nothing written");
+        let mut hh = null_mut();
+        let c = dsd2pcm_frames_config {
+            struct_size: too_small::<dsd2pcm_frames_config>(k),
+            ..cfg
+        };
+        // SAFETY (test): valid pointers.
+        assert_eq!(
+            unsafe { dsd2pcm_frames_new(&c, &mut hh) },
+            DSD2PCM_E_INVALID_ARGUMENT
+        );
+        assert!(hh.is_null());
+    }
+    // Newer, larger structs.
+    let r = newer(run);
+    let mut st = newer(stats_init());
+    assert_eq!(
+        convert(&r.known, &mut st.known, &mut out),
+        DSD2PCM_OK,
+        "{}",
+        last_error()
+    );
+    assert_eq!(st.extra, 0xDEAD_BEEF, "only our fields are written");
+    assert_eq!(
+        st.known.struct_size as usize,
+        size_of::<Newer<dsd2pcm_stats>>()
+    );
+    assert_eq!(st.known.channels, 1);
+    let c = newer(cfg);
+    let mut hh = null_mut();
+    // SAFETY (test): valid pointers.
+    assert_eq!(unsafe { dsd2pcm_frames_new(&c.known, &mut hh) }, DSD2PCM_OK);
+    // SAFETY (test): live handles.
+    unsafe {
+        dsd2pcm_frames_free(hh);
+        dsd2pcm_frames_free(h);
+    }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "file I/O")]
+fn struct_size_is_checked_for_files() {
+    let d = TempDir::new("size");
+    let (inp, out) = (d.path("in.dsf"), d.path("out.wav"));
+    write_dsf(&inp, 1, 2);
+    let call = |o: *const dsd2pcm_file_options, rep: *mut dsd2pcm_file_report| {
+        // SAFETY (test): valid strings; the structs are at least their struct_size.
+        unsafe { dsd2pcm_convert_file(cstr(&inp).as_ptr(), cstr(&out).as_ptr(), o, rep) }
+    };
+    let good = file_opts(88_200);
+    let small = dsd2pcm_file_options {
+        struct_size: 20,
+        ..good
+    };
+    assert_eq!(call(&small, null_mut()), DSD2PCM_E_INVALID_ARGUMENT);
+    let mut rep = dsd2pcm_file_report {
+        struct_size: 8,
+        out_samples: 5,
+        ..report_init()
+    };
+    assert_eq!(call(&good, &mut rep), DSD2PCM_E_INVALID_ARGUMENT);
+    assert_eq!(rep.out_samples, 5, "nothing written");
+    assert!(!out.exists(), "refused before converting");
+    let o = newer(good);
+    let mut rep = newer(report_init());
+    assert_eq!(
+        call(&o.known, &mut rep.known),
+        DSD2PCM_OK,
+        "{}",
+        last_error()
+    );
+    assert_eq!(rep.extra, 0xDEAD_BEEF);
+    assert_eq!(rep.known.out_samples, (2 * FPC * 8 / 32) as u64);
 }

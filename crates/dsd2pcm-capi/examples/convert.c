@@ -15,8 +15,10 @@ int main(int argc, char **argv) {
         fprintf(stderr, "usage: convert IN.dsf OUT.wav\n");
         return 2;
     }
-    dsd2pcm_file_options opts = {.rate_hz = 176400, .progress = progress};
-    dsd2pcm_file_report report;
+    dsd2pcm_file_options opts = DSD2PCM_FILE_OPTIONS_INIT;
+    opts.rate_hz = 176400;
+    opts.progress = progress;
+    dsd2pcm_file_report report = DSD2PCM_FILE_REPORT_INIT;
     int rc = dsd2pcm_convert_file(argv[1], argv[2], &opts, &report);
     fprintf(stderr, "\n");
     if (rc != DSD2PCM_OK) {

@@ -67,20 +67,26 @@ The crate `crates/dsd2pcm-capi` builds `libdsd2pcm.so` and `libdsd2pcm.a`, with 
 `crates/dsd2pcm-capi/include/dsd2pcm.h`. It offers whole-file conversion with a progress and
 cancel callback, and a frame-run converter with the semantics of `dsd2pcm::frames`. Every
 function returns a status code, checks its pointers and lengths and never lets a panic
-reach the caller; paths are UTF-8. See [docs/c-api.md](docs/c-api.md).
+reach the caller. The structs carry their size, so the ABI (version 1, SONAME
+`libdsd2pcm.so.1`) can grow compatibly. See [docs/c-api.md](docs/c-api.md).
 
-A minimal program, `crates/dsd2pcm-capi/tests/c/minimal.c`, converts one stereo frame of
+A minimal program, `crates/dsd2pcm-capi/tests/minimal.c`, converts one stereo frame of
 DSD silence. To build and run it on Linux, from the repository root:
 
 ```
 cargo build --release -p dsd2pcm-capi
-cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/c/minimal.c target/release/libdsd2pcm.a -lpthread -ldl -lm -o minimal
+cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c target/release/libdsd2pcm.a -lpthread -ldl -lm -o minimal
 ./minimal
 ```
 
 It prints `dsd2pcm 0.1.0: 2352 samples per channel, first byte 0`. To link the shared
-library instead, use `-L target/release -ldsd2pcm` in place of the `.a` file and the three
-`-l` options, and run it with `LD_LIBRARY_PATH=target/release ./minimal`.
+library instead (its SONAME is `libdsd2pcm.so.1`, so it needs that name at run time):
+
+```
+ln -sf libdsd2pcm.so target/release/libdsd2pcm.so.1
+cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c -L target/release -ldsd2pcm -o minimal
+LD_LIBRARY_PATH=target/release ./minimal
+```
 
 ## Licence
 

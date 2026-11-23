@@ -25,24 +25,94 @@ pub extern "C" fn dsd2pcm_last_error() -> *const c_char {
     last_error_ptr()
 }
 
+/// The ABI version, `DSD2PCM_ABI_VERSION` of the library as built: compare it with the
+/// header's at start-up.
+#[no_mangle]
+pub extern "C" fn dsd2pcm_abi_version() -> u32 {
+    DSD2PCM_ABI_VERSION
+}
+
 /// A short static name for a status code, such as "invalid argument".
 #[no_mangle]
 pub extern "C" fn dsd2pcm_status_str(status: c_int) -> *const c_char {
     status_str(status).as_ptr().cast()
 }
 
-/// A `&str` from a NUL-terminated UTF-8 string.
+/// A path from a NUL-terminated string: its raw bytes on Unix, UTF-8 elsewhere.
 ///
 /// # Safety
 /// `p` is NULL or points to a NUL-terminated string that outlives `'a`.
-unsafe fn utf8<'a>(p: *const c_char, name: &str) -> Result<&'a str, Fail> {
+unsafe fn path<'a>(p: *const c_char, name: &str) -> Result<&'a Path, Fail> {
     if p.is_null() {
         return Err(null(name));
     }
     // SAFETY: `p` is not NULL, and the caller guarantees a NUL-terminated string.
     let s = unsafe { CStr::from_ptr(p) };
-    s.to_str()
-        .map_err(|_| invalid(format!("{name} is not valid UTF-8")))
+    if s.is_empty() {
+        return Err(invalid(format!("{name} is empty")));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        Ok(Path::new(std::ffi::OsStr::from_bytes(s.to_bytes())))
+    }
+    #[cfg(not(unix))]
+    {
+        s.to_str()
+            .map(Path::new)
+            .map_err(|_| invalid(format!("{name} is not valid UTF-8")))
+    }
+}
+
+/// Reads a struct that starts with its `struct_size`, after checking that size: only the
+/// fields this version knows are read.
+///
+/// # Safety
+/// `p` is NULL or points to a readable `u32` and, if that is at least `T::V1_SIZE`, to
+/// that many readable bytes.
+unsafe fn read_struct<T: Versioned>(p: *const T, name: &str) -> Result<T, Fail> {
+    if p.is_null() {
+        return Err(null(name));
+    }
+    // SAFETY: not NULL; every such struct starts with a readable `u32` (contract).
+    let size = unsafe { p.cast::<u32>().read_unaligned() };
+    check_struct_size::<T>(size, name)?;
+    // SAFETY: at least `size_of::<T>()` bytes are readable (checked size, contract); any
+    // bit pattern is valid for these plain-data structs (integers, floats, raw pointers,
+    // and an `Option` of a function pointer, for which every non-NULL value is taken as
+    // the caller's function).
+    Ok(unsafe { p.read_unaligned() })
+}
+
+/// The bytes to write to an output struct that starts with its `struct_size`: the smaller
+/// of the caller's size and ours, after checking the caller's size. `None` for NULL.
+///
+/// # Safety
+/// `p` is NULL or points to a readable `u32`.
+unsafe fn out_struct<T: Versioned>(p: *mut T, name: &str) -> Result<Option<usize>, Fail> {
+    if p.is_null() {
+        return Ok(None);
+    }
+    // SAFETY: not NULL; the struct starts with a readable `u32` (contract).
+    let size = unsafe { p.cast::<u32>().read_unaligned() };
+    check_struct_size::<T>(size, name)?;
+    Ok(Some((size as usize).min(size_of::<T>())))
+}
+
+/// Writes the first `n` bytes of `v` (with `struct_size` kept as the caller's) to `p`.
+///
+/// # Safety
+/// `p` is valid for writes of `n` bytes, `n <= size_of::<T>()`, and `p` does not overlap
+/// any reference in use.
+unsafe fn write_struct<T: Versioned>(p: *mut T, mut v: T, n: usize) {
+    // SAFETY: the caller's `struct_size` is readable (checked by `out_struct`).
+    let size = unsafe { p.cast::<u32>().read_unaligned() };
+    v.set_struct_size(size);
+    debug_assert!(n <= size_of::<T>());
+    // SAFETY: `v` is a local of `size_of::<T>() >= n` bytes; the output structs have no
+    // padding (their sizes are asserted in lib.rs), so all `n` bytes are initialised; `p`
+    // is writable for `n` bytes (contract), and a local cannot overlap it.
+    unsafe { std::ptr::copy_nonoverlapping((&v as *const T).cast::<u8>(), p.cast::<u8>(), n) };
 }
 
 /// Checks a buffer pointer and length: `None` for NULL with length 0, an error for NULL with
@@ -97,16 +167,18 @@ unsafe fn slice_mut<'a, T>(p: *mut T, len: usize) -> &'a mut [T] {
 /// Converts a DSF or DFF file (DSD64) to a 24-bit WAV file.
 ///
 /// `input_path` and `output_path` are NUL-terminated UTF-8 paths (on every platform). An
-/// existing output file is replaced; on any error it may be left incomplete. `report` may
-/// be NULL; it is written on success only. The progress callback in `options`, if any, is
+/// existing output file is replaced; on any error it may be left incomplete. On Unix the
+/// paths are taken as raw bytes (any encoding the file system accepts); elsewhere they
+/// must be UTF-8. `report` may be NULL; it is written on success only. The progress callback in `options`, if any, is
 /// called on this thread.
 ///
 /// Returns `DSD2PCM_OK` or a `DSD2PCM_E_*` code; `dsd2pcm_last_error` gives the message.
 ///
 /// # Safety
 /// `input_path` and `output_path` are NULL or NUL-terminated strings; `options` is NULL or
-/// points to a `dsd2pcm_file_options`; `report` is NULL or points to writable memory for a
-/// `dsd2pcm_file_report`. The callback must not unwind.
+/// points to a `dsd2pcm_file_options` readable for its `struct_size` bytes; `report` is
+/// NULL or points to a `dsd2pcm_file_report` whose `struct_size` is set, writable for
+/// that many bytes. The callback must not unwind.
 #[no_mangle]
 pub unsafe extern "C" fn dsd2pcm_convert_file(
     input_path: *const c_char,
@@ -116,15 +188,15 @@ pub unsafe extern "C" fn dsd2pcm_convert_file(
 ) -> c_int {
     guard(|| {
         // SAFETY: NUL-terminated or NULL by the contract; NULL is checked.
-        let input = unsafe { utf8(input_path, "input_path") }?;
+        let input = unsafe { path(input_path, "input_path") }?;
         // SAFETY: as above.
-        let output = unsafe { utf8(output_path, "output_path") }?;
-        if options.is_null() {
-            return Err(null("options"));
-        }
-        // SAFETY: not NULL; points to a `dsd2pcm_file_options` by the contract. It is
+        let output = unsafe { path(output_path, "output_path") }?;
+        // SAFETY: NULL or a `dsd2pcm_file_options` of `struct_size` bytes (contract). It is
         // copied, so later changes by the caller do not matter.
-        let o = unsafe { options.read_unaligned() };
+        let o = unsafe { read_struct(options, "options") }?;
+        // SAFETY: NULL or a struct starting with its `struct_size` (contract). Checked
+        // before the conversion, so a bad size fails at once.
+        let report_bytes = unsafe { out_struct(report, "report") }?;
         let opts = file_options(&o)?;
         let (cb, user_data) = (o.progress, o.user_data);
         let mut hook = |p: dsd::Progress| match cb {
@@ -133,10 +205,10 @@ pub unsafe extern "C" fn dsd2pcm_convert_file(
             Some(f) if unsafe { f(p.done, p.total, user_data) } != 0 => ControlFlow::Break(()),
             _ => ControlFlow::Continue(()),
         };
-        let rep = dsd::convert_file_with(Path::new(input), Path::new(output), &opts, &mut hook)?;
-        if !report.is_null() {
-            // SAFETY: not NULL; writable for one `dsd2pcm_file_report` by the contract.
-            unsafe { report.write_unaligned(file_report(&rep)) };
+        let rep = dsd::convert_file_with(input, output, &opts, &mut hook)?;
+        if let Some(n) = report_bytes {
+            // SAFETY: not NULL; writable for `struct_size >= n` bytes (contract).
+            unsafe { write_struct(report, file_report(&rep), n) };
         }
         Ok(())
     })
@@ -146,8 +218,8 @@ pub unsafe extern "C" fn dsd2pcm_convert_file(
 /// Free it with `dsd2pcm_frames_free`.
 ///
 /// # Safety
-/// `config` is NULL or points to a `dsd2pcm_frames_config`; `out` is NULL or points to
-/// writable memory for a pointer.
+/// `config` is NULL or points to a `dsd2pcm_frames_config` readable for its `struct_size`
+/// bytes; `out` is NULL or points to writable memory for a pointer.
 #[no_mangle]
 pub unsafe extern "C" fn dsd2pcm_frames_new(
     config: *const dsd2pcm_frames_config,
@@ -159,11 +231,8 @@ pub unsafe extern "C" fn dsd2pcm_frames_new(
         }
         // SAFETY: not NULL; writable for a pointer by the contract.
         unsafe { out.write_unaligned(std::ptr::null_mut()) };
-        if config.is_null() {
-            return Err(null("config"));
-        }
-        // SAFETY: not NULL; points to a `dsd2pcm_frames_config` by the contract.
-        let c = unsafe { config.read_unaligned() };
+        // SAFETY: NULL or a `dsd2pcm_frames_config` of `struct_size` bytes (contract).
+        let c = unsafe { read_struct(config, "config") }?;
         let conv = dsd::frames::Converter::new(frames_config(&c)?)?;
         let handle = Box::into_raw(Box::new(dsd2pcm_frames::new(conv)));
         // SAFETY: as above.
@@ -273,11 +342,11 @@ const GROUP: usize = 32;
 /// Output buffers must not overlap each other or any input buffer.
 ///
 /// # Safety
-/// `conv` is NULL or a live handle; `run` is NULL or points to a `dsd2pcm_run` whose
-/// non-NULL pointers are valid for reads of their lengths (each `frame_ptrs` entry for one
+/// `conv` is NULL or a live handle; `run` is NULL or points to a `dsd2pcm_run` readable
+/// for its `struct_size` bytes, whose non-NULL pointers are valid for reads of their lengths (each `frame_ptrs` entry for one
 /// frame); `out` is NULL or valid for writes of `out_bytes` bytes; `frame_clipped` is NULL
-/// or valid for writes of `frame_clipped_len` entries; `stats` is NULL or writable for one
-/// `dsd2pcm_stats`. No other thread writes these buffers during the call.
+/// or valid for writes of `frame_clipped_len` entries; `stats` is NULL or a `dsd2pcm_stats` whose
+/// `struct_size` is set, writable for that many bytes. No other thread writes these buffers during the call.
 #[no_mangle]
 pub unsafe extern "C" fn dsd2pcm_frames_convert(
     conv: *mut dsd2pcm_frames,
@@ -292,11 +361,8 @@ pub unsafe extern "C" fn dsd2pcm_frames_convert(
     guard(|| {
         // SAFETY: contract of this function.
         let h = unsafe { handle(conv) }.ok_or_else(|| null("conv"))?;
-        if run.is_null() {
-            return Err(null("run"));
-        }
-        // SAFETY: not NULL; points to a `dsd2pcm_run` by the contract; copied.
-        let r = unsafe { run.read_unaligned() };
+        // SAFETY: NULL or a `dsd2pcm_run` of `struct_size` bytes (contract); copied.
+        let r = unsafe { read_struct(run, "run") }?;
         let fb = h.frame_bytes();
 
         // Every buffer's address range, before any reference is made.
@@ -335,7 +401,10 @@ pub unsafe extern "C" fn dsd2pcm_frames_convert(
                 "{frame_clipped_len} per-frame clip counts for {frames} frames"
             )));
         }
-        let statr = buffer(stats, usize::from(!stats.is_null()), "stats")?;
+        // SAFETY: NULL or a struct starting with its `struct_size` (contract); a raw read,
+        // before any reference is made.
+        let stats_bytes = unsafe { out_struct(stats, "stats") }?;
+        let statr = stats_bytes.map(|n| (stats as usize, n));
 
         for (n, len) in [(before, r.before_len), (after, r.after_len)] {
             if n.is_some() && len != fb {
@@ -468,14 +537,16 @@ pub unsafe extern "C" fn dsd2pcm_frames_convert(
                 g += n;
             }
         }
-        if !stats.is_null() {
+        if let Some(n) = stats_bytes {
             let st = dsd2pcm_stats {
+                struct_size: 0,
+                channels: h.channels as u32,
                 clipped: total.clipped,
                 clipped_total: total.clipped_total(),
             };
-            // SAFETY: not NULL; writable for one `dsd2pcm_stats` (contract), overlapping no
-            // other buffer (checked).
-            unsafe { stats.write_unaligned(st) };
+            // SAFETY: not NULL; writable for `struct_size >= n` bytes (contract),
+            // overlapping no other buffer (checked).
+            unsafe { write_struct(stats, st, n) };
         }
         Ok(())
     })

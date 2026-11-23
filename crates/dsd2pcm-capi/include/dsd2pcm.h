@@ -7,6 +7,25 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// Initialisers: every field zero (the defaults) except struct_size, which every struct the
+// library reads or writes carries first. Example:
+//   dsd2pcm_file_options opts = DSD2PCM_FILE_OPTIONS_INIT;
+//   opts.rate_hz = 176400;
+#ifdef __cplusplus
+template <typename T> static inline T dsd2pcm_init_() {
+  T v = T();
+  v.struct_size = (uint32_t)sizeof(T);
+  return v;
+}
+#define DSD2PCM_INIT_(T) dsd2pcm_init_<T>()
+#else
+#define DSD2PCM_INIT_(T) {.struct_size = (uint32_t)sizeof(T)}
+#endif
+#define DSD2PCM_FILE_OPTIONS_INIT DSD2PCM_INIT_(dsd2pcm_file_options)
+#define DSD2PCM_FILE_REPORT_INIT DSD2PCM_INIT_(dsd2pcm_file_report)
+#define DSD2PCM_FRAMES_CONFIG_INIT DSD2PCM_INIT_(dsd2pcm_frames_config)
+#define DSD2PCM_RUN_INIT DSD2PCM_INIT_(dsd2pcm_run)
+#define DSD2PCM_STATS_INIT DSD2PCM_INIT_(dsd2pcm_stats)
 
 // Success.
 #define DSD2PCM_OK 0
@@ -15,8 +34,8 @@
 #define DSD2PCM_E_NULL 1
 
 // An argument is out of range: a rate, cutoff, filter, format, channel count, gain or
-// thread value, a buffer length, a misaligned or overlapping buffer, a path that is not
-// UTF-8.
+// thread value, a `struct_size` below the 0.1.0 size, a buffer length, a misaligned or
+// overlapping buffer, an empty path, a path that is not UTF-8 (outside Unix).
 #define DSD2PCM_E_INVALID_ARGUMENT 2
 
 // An operating-system I/O error.
@@ -61,6 +80,10 @@
 // `dsd2pcm_run.first_frame`.
 #define DSD2PCM_FILTER_PYSACD 1
 
+// The ABI version: it changes on any incompatible change to the interface. Compatible
+// changes only append fields to the structs (see `struct_size`) or add functions.
+#define DSD2PCM_ABI_VERSION 1
+
 // Bytes of one channel in one Super Audio CD frame.
 #define DSD2PCM_FRAME_BYTES_PER_CHANNEL 4704
 
@@ -78,9 +101,14 @@ typedef struct dsd2pcm_frames dsd2pcm_frames;
 // unwind (C++ exceptions, longjmp) into the library.
 typedef int (*dsd2pcm_progress_fn)(uint64_t done, uint64_t total, void *user_data);
 
-// Settings for `dsd2pcm_convert_file`. All zeros, apart from `rate_hz`, is the default:
-// standard cutoff, default filter, 0 dB, all cores, no callback.
+// Settings for `dsd2pcm_convert_file`. Start from `DSD2PCM_FILE_OPTIONS_INIT` (all zeros
+// but `struct_size`) and set `rate_hz`; the other zeros are the defaults: standard cutoff,
+// default filter, 0 dB, all cores, no callback.
 typedef struct dsd2pcm_file_options {
+  // Size of this struct as the caller compiled it: `sizeof(...)` (the `*_INIT` macro sets
+  // it). Must be at least the 0.1.0 size; the library reads or writes only the fields it
+  // knows.
+  uint32_t struct_size;
   // Output rate: 88200, 176400 or 352800.
   uint32_t rate_hz;
   // `DSD2PCM_CUTOFF_*`.
@@ -97,8 +125,13 @@ typedef struct dsd2pcm_file_options {
   void *user_data;
 } dsd2pcm_file_options;
 
-// What `dsd2pcm_convert_file` did; written on success only.
+// What `dsd2pcm_convert_file` did; written on success only. Start from
+// `DSD2PCM_FILE_REPORT_INIT`.
 typedef struct dsd2pcm_file_report {
+  // Size of this struct as the caller compiled it: `sizeof(...)` (the `*_INIT` macro sets
+  // it). Must be at least the 0.1.0 size; the library reads or writes only the fields it
+  // knows.
+  uint32_t struct_size;
   // Input rate in Hz.
   uint32_t in_rate;
   // Output rate in Hz.
@@ -115,9 +148,14 @@ typedef struct dsd2pcm_file_report {
   uint64_t clipped_total;
 } dsd2pcm_file_report;
 
-// Settings for `dsd2pcm_frames_new`. All zeros, apart from `rate_hz` and `channels`, is
-// the default: standard cutoff, default filter, 0 dB.
+// Settings for `dsd2pcm_frames_new`. Start from `DSD2PCM_FRAMES_CONFIG_INIT` and set
+// `rate_hz` and `channels`; the other zeros are the defaults: standard cutoff, default
+// filter, 0 dB.
 typedef struct dsd2pcm_frames_config {
+  // Size of this struct as the caller compiled it: `sizeof(...)` (the `*_INIT` macro sets
+  // it). Must be at least the 0.1.0 size; the library reads or writes only the fields it
+  // knows.
+  uint32_t struct_size;
   // Output rate: 88200, 176400 or 352800.
   uint32_t rate_hz;
   // `DSD2PCM_CUTOFF_*`.
@@ -136,8 +174,13 @@ typedef struct dsd2pcm_frames_config {
 // The frames are either in one buffer (`frames`, `frames_len` a whole number of frames)
 // or one buffer per frame (`frame_ptrs`, `frame_count` pointers to one frame each); set
 // the other pair to NULL and 0. `before` and `after` are the neighbour frames, NULL with
-// length 0 at an edge of the area (the input beyond is idle).
+// length 0 at an edge of the area (the input beyond is idle). Start from
+// `DSD2PCM_RUN_INIT`.
 typedef struct dsd2pcm_run {
+  // Size of this struct as the caller compiled it: `sizeof(...)` (the `*_INIT` macro sets
+  // it). Must be at least the 0.1.0 size; the library reads or writes only the fields it
+  // knows.
+  uint32_t struct_size;
   // The frame before the run, or NULL.
   const uint8_t *before;
   // `before`'s length in bytes: one frame, or 0 with NULL.
@@ -160,8 +203,15 @@ typedef struct dsd2pcm_run {
   uint64_t first_frame;
 } dsd2pcm_run;
 
-// Counts from one `dsd2pcm_frames_convert` call; written on success only.
+// Counts from one `dsd2pcm_frames_convert` call; written on success only. Start from
+// `DSD2PCM_STATS_INIT`.
 typedef struct dsd2pcm_stats {
+  // Size of this struct as the caller compiled it: `sizeof(...)` (the `*_INIT` macro sets
+  // it). Must be at least the 0.1.0 size; the library reads or writes only the fields it
+  // knows.
+  uint32_t struct_size;
+  // Channels of the converter.
+  uint32_t channels;
   // Samples clamped to 24 bits, per channel (entries past the channel count are 0).
   uint64_t clipped[DSD2PCM_MAX_CHANNELS];
   // Sum of `clipped`.
@@ -180,22 +230,28 @@ const char *dsd2pcm_version(void);
 // library and stays valid until the next failed call on this thread.
 const char *dsd2pcm_last_error(void);
 
+// The ABI version, `DSD2PCM_ABI_VERSION` of the library as built: compare it with the
+// header's at start-up.
+uint32_t dsd2pcm_abi_version(void);
+
 // A short static name for a status code, such as "invalid argument".
 const char *dsd2pcm_status_str(int status);
 
 // Converts a DSF or DFF file (DSD64) to a 24-bit WAV file.
 //
 // `input_path` and `output_path` are NUL-terminated UTF-8 paths (on every platform). An
-// existing output file is replaced; on any error it may be left incomplete. `report` may
-// be NULL; it is written on success only. The progress callback in `options`, if any, is
+// existing output file is replaced; on any error it may be left incomplete. On Unix the
+// paths are taken as raw bytes (any encoding the file system accepts); elsewhere they
+// must be UTF-8. `report` may be NULL; it is written on success only. The progress callback in `options`, if any, is
 // called on this thread.
 //
 // Returns `DSD2PCM_OK` or a `DSD2PCM_E_*` code; `dsd2pcm_last_error` gives the message.
 //
 // # Safety
 // `input_path` and `output_path` are NULL or NUL-terminated strings; `options` is NULL or
-// points to a `dsd2pcm_file_options`; `report` is NULL or points to writable memory for a
-// `dsd2pcm_file_report`. The callback must not unwind.
+// points to a `dsd2pcm_file_options` readable for its `struct_size` bytes; `report` is
+// NULL or points to a `dsd2pcm_file_report` whose `struct_size` is set, writable for
+// that many bytes. The callback must not unwind.
 int dsd2pcm_convert_file(const char *input_path,
                          const char *output_path,
                          const struct dsd2pcm_file_options *options,
@@ -205,8 +261,8 @@ int dsd2pcm_convert_file(const char *input_path,
 // Free it with `dsd2pcm_frames_free`.
 //
 // # Safety
-// `config` is NULL or points to a `dsd2pcm_frames_config`; `out` is NULL or points to
-// writable memory for a pointer.
+// `config` is NULL or points to a `dsd2pcm_frames_config` readable for its `struct_size`
+// bytes; `out` is NULL or points to writable memory for a pointer.
 int dsd2pcm_frames_new(const struct dsd2pcm_frames_config *config, struct dsd2pcm_frames **out);
 
 // Frees a converter. NULL is allowed and does nothing.
@@ -258,11 +314,11 @@ size_t dsd2pcm_frames_output_bytes(const struct dsd2pcm_frames *conv,
 // Output buffers must not overlap each other or any input buffer.
 //
 // # Safety
-// `conv` is NULL or a live handle; `run` is NULL or points to a `dsd2pcm_run` whose
-// non-NULL pointers are valid for reads of their lengths (each `frame_ptrs` entry for one
+// `conv` is NULL or a live handle; `run` is NULL or points to a `dsd2pcm_run` readable
+// for its `struct_size` bytes, whose non-NULL pointers are valid for reads of their lengths (each `frame_ptrs` entry for one
 // frame); `out` is NULL or valid for writes of `out_bytes` bytes; `frame_clipped` is NULL
-// or valid for writes of `frame_clipped_len` entries; `stats` is NULL or writable for one
-// `dsd2pcm_stats`. No other thread writes these buffers during the call.
+// or valid for writes of `frame_clipped_len` entries; `stats` is NULL or a `dsd2pcm_stats` whose
+// `struct_size` is set, writable for that many bytes. No other thread writes these buffers during the call.
 int dsd2pcm_frames_convert(struct dsd2pcm_frames *conv,
                            const struct dsd2pcm_run *run,
                            uint32_t format,

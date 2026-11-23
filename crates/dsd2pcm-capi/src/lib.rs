@@ -5,12 +5,16 @@
 //! Rules of the interface: every pointer is checked for NULL, every buffer comes with its
 //! length, no panic crosses the boundary (each entry point catches it and returns
 //! [`DSD2PCM_E_INTERNAL`]), and the only memory the caller frees is a converter handle,
-//! with `dsd2pcm_frames_free`. Paths are NUL-terminated UTF-8 on every platform.
+//! with `dsd2pcm_frames_free`. Paths are NUL-terminated: raw bytes on Unix, UTF-8 elsewhere.
+//! Every struct starts with its `struct_size` (ABI versioning, see docs/c-api.md).
 //!
 //! The `unsafe` code (raw pointers, `#[no_mangle]`) is all in `ffi.rs`; this module holds
 //! the types, constants and the safe helpers.
 #![deny(unsafe_code)]
 #![allow(non_camel_case_types)]
+
+// The Rust library, which has this crate's library name too.
+extern crate dsd2pcm as dsd;
 
 use dsd::frames::MAX_CHANNELS;
 use dsd::{Cutoff, Error, Filter, PcmRate};
@@ -31,8 +35,8 @@ pub const DSD2PCM_OK: c_int = 0;
 /// A required pointer argument is NULL.
 pub const DSD2PCM_E_NULL: c_int = 1;
 /// An argument is out of range: a rate, cutoff, filter, format, channel count, gain or
-/// thread value, a buffer length, a misaligned or overlapping buffer, a path that is not
-/// UTF-8.
+/// thread value, a `struct_size` below the 0.1.0 size, a buffer length, a misaligned or
+/// overlapping buffer, an empty path, a path that is not UTF-8 (outside Unix).
 pub const DSD2PCM_E_INVALID_ARGUMENT: c_int = 2;
 /// An operating-system I/O error.
 pub const DSD2PCM_E_IO: c_int = 3;
@@ -67,6 +71,10 @@ pub const DSD2PCM_FILTER_DEFAULT: u32 = 0;
 /// `dsd2pcm_run.first_frame`.
 pub const DSD2PCM_FILTER_PYSACD: u32 = 1;
 
+/// The ABI version: it changes on any incompatible change to the interface. Compatible
+/// changes only append fields to the structs (see `struct_size`) or add functions.
+pub const DSD2PCM_ABI_VERSION: u32 = 1;
+
 /// Bytes of one channel in one Super Audio CD frame.
 pub const DSD2PCM_FRAME_BYTES_PER_CHANNEL: usize = 4704;
 /// The highest channel count.
@@ -82,11 +90,16 @@ const _: () = assert!(DSD2PCM_MAX_CHANNELS == MAX_CHANNELS as usize);
 pub type dsd2pcm_progress_fn =
     Option<unsafe extern "C" fn(done: u64, total: u64, user_data: *mut c_void) -> c_int>;
 
-/// Settings for `dsd2pcm_convert_file`. All zeros, apart from `rate_hz`, is the default:
-/// standard cutoff, default filter, 0 dB, all cores, no callback.
+/// Settings for `dsd2pcm_convert_file`. Start from `DSD2PCM_FILE_OPTIONS_INIT` (all zeros
+/// but `struct_size`) and set `rate_hz`; the other zeros are the defaults: standard cutoff,
+/// default filter, 0 dB, all cores, no callback.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct dsd2pcm_file_options {
+    /// Size of this struct as the caller compiled it: `sizeof(...)` (the `*_INIT` macro sets
+    /// it). Must be at least the 0.1.0 size; the library reads or writes only the fields it
+    /// knows.
+    pub struct_size: u32,
     /// Output rate: 88200, 176400 or 352800.
     pub rate_hz: u32,
     /// `DSD2PCM_CUTOFF_*`.
@@ -103,10 +116,15 @@ pub struct dsd2pcm_file_options {
     pub user_data: *mut c_void,
 }
 
-/// What `dsd2pcm_convert_file` did; written on success only.
+/// What `dsd2pcm_convert_file` did; written on success only. Start from
+/// `DSD2PCM_FILE_REPORT_INIT`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct dsd2pcm_file_report {
+    /// Size of this struct as the caller compiled it: `sizeof(...)` (the `*_INIT` macro sets
+    /// it). Must be at least the 0.1.0 size; the library reads or writes only the fields it
+    /// knows.
+    pub struct_size: u32,
     /// Input rate in Hz.
     pub in_rate: u32,
     /// Output rate in Hz.
@@ -123,11 +141,16 @@ pub struct dsd2pcm_file_report {
     pub clipped_total: u64,
 }
 
-/// Settings for `dsd2pcm_frames_new`. All zeros, apart from `rate_hz` and `channels`, is
-/// the default: standard cutoff, default filter, 0 dB.
+/// Settings for `dsd2pcm_frames_new`. Start from `DSD2PCM_FRAMES_CONFIG_INIT` and set
+/// `rate_hz` and `channels`; the other zeros are the defaults: standard cutoff, default
+/// filter, 0 dB.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct dsd2pcm_frames_config {
+    /// Size of this struct as the caller compiled it: `sizeof(...)` (the `*_INIT` macro sets
+    /// it). Must be at least the 0.1.0 size; the library reads or writes only the fields it
+    /// knows.
+    pub struct_size: u32,
     /// Output rate: 88200, 176400 or 352800.
     pub rate_hz: u32,
     /// `DSD2PCM_CUTOFF_*`.
@@ -146,10 +169,15 @@ pub struct dsd2pcm_frames_config {
 /// The frames are either in one buffer (`frames`, `frames_len` a whole number of frames)
 /// or one buffer per frame (`frame_ptrs`, `frame_count` pointers to one frame each); set
 /// the other pair to NULL and 0. `before` and `after` are the neighbour frames, NULL with
-/// length 0 at an edge of the area (the input beyond is idle).
+/// length 0 at an edge of the area (the input beyond is idle). Start from
+/// `DSD2PCM_RUN_INIT`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct dsd2pcm_run {
+    /// Size of this struct as the caller compiled it: `sizeof(...)` (the `*_INIT` macro sets
+    /// it). Must be at least the 0.1.0 size; the library reads or writes only the fields it
+    /// knows.
+    pub struct_size: u32,
     /// The frame before the run, or NULL.
     pub before: *const u8,
     /// `before`'s length in bytes: one frame, or 0 with NULL.
@@ -172,10 +200,17 @@ pub struct dsd2pcm_run {
     pub first_frame: u64,
 }
 
-/// Counts from one `dsd2pcm_frames_convert` call; written on success only.
+/// Counts from one `dsd2pcm_frames_convert` call; written on success only. Start from
+/// `DSD2PCM_STATS_INIT`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct dsd2pcm_stats {
+    /// Size of this struct as the caller compiled it: `sizeof(...)` (the `*_INIT` macro sets
+    /// it). Must be at least the 0.1.0 size; the library reads or writes only the fields it
+    /// knows.
+    pub struct_size: u32,
+    /// Channels of the converter.
+    pub channels: u32,
     /// Samples clamped to 24 bits, per channel (entries past the channel count are 0).
     pub clipped: [u64; DSD2PCM_MAX_CHANNELS],
     /// Sum of `clipped`.
@@ -222,6 +257,48 @@ impl dsd2pcm_frames {
 }
 
 // ---- Safe helpers ----
+
+/// A struct passed with its `struct_size`: the size of its 0.1.0 (ABI 1) layout, the
+/// smallest a caller may pass.
+pub(crate) trait Versioned: Copy {
+    const NAME: &'static str;
+    const V1_SIZE: usize;
+    fn set_struct_size(&mut self, size: u32);
+}
+
+macro_rules! versioned {
+    ($t:ident, $v1_64:expr) => {
+        impl Versioned for $t {
+            const NAME: &'static str = stringify!($t);
+            const V1_SIZE: usize = std::mem::size_of::<$t>();
+            fn set_struct_size(&mut self, size: u32) {
+                self.struct_size = size;
+            }
+        }
+        // The 0.1.0 layout is a contract: these sizes never shrink or change.
+        #[cfg(target_pointer_width = "64")]
+        const _: () = assert!(std::mem::size_of::<$t>() == $v1_64);
+    };
+}
+
+versioned!(dsd2pcm_file_options, 48);
+versioned!(dsd2pcm_file_report, 88);
+versioned!(dsd2pcm_frames_config, 32);
+versioned!(dsd2pcm_run, 80);
+versioned!(dsd2pcm_stats, 64);
+
+/// Checks a caller's `struct_size`.
+pub(crate) fn check_struct_size<T: Versioned>(size: u32, what: &str) -> Result<(), Fail> {
+    if (size as usize) < T::V1_SIZE {
+        return Err(invalid(format!(
+            "{what}->struct_size {size}: {} needs at least {} (use {}_INIT)",
+            T::NAME,
+            T::V1_SIZE,
+            T::NAME.to_uppercase()
+        )));
+    }
+    Ok(())
+}
 
 /// A failure: status code and message.
 pub(crate) struct Fail(c_int, String);
@@ -340,6 +417,7 @@ pub(crate) fn frames_config(c: &dsd2pcm_frames_config) -> Result<dsd::frames::Pc
 
 pub(crate) fn file_report(r: &dsd::Report) -> dsd2pcm_file_report {
     let mut out = dsd2pcm_file_report {
+        struct_size: 0,
         in_rate: r.in_rate,
         out_rate: r.out_rate,
         channels: r.clipped.len() as u32,

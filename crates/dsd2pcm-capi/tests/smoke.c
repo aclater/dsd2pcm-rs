@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MIT OR Apache-2.0 */
 /*
  * Smoke test of the C interface, built against include/dsd2pcm.h and the static library
- * by check.sh (gcc, clang, and clang with AddressSanitizer).
+ * by check.sh (gcc, clang, and clang with AddressSanitizer); it runs with no arguments.
  *
  * It makes a stereo area of pseudo-random frames, writes it as a DSF file, and checks:
  * whole-file conversion with progress and cancel; the frame-run converter on the whole area
@@ -9,7 +9,7 @@
  * with neighbours give the same bytes; the same with pysacd's filter, whose dither
  * depends on first_frame; error codes and messages for bad arguments.
  *
- * Usage: smoke DIR (a writable directory for the test files).
+ * Usage: smoke [DIR] (a writable directory for the test files; default $TMPDIR or /tmp).
  */
 #include "dsd2pcm.h"
 
@@ -133,14 +133,18 @@ static int on_progress(uint64_t done, uint64_t total, void *user) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 2) {
-        fprintf(stderr, "usage: smoke DIR\n");
+    if (argc > 2) {
+        fprintf(stderr, "usage: smoke [DIR]\n");
         return 2;
     }
+    /* Without DIR: $TMPDIR or /tmp, and the files are removed at the end. */
+    const char *dir = argc == 2 ? argv[1] : getenv("TMPDIR");
+    if (!dir || !*dir) dir = "/tmp";
     char dsf[4096], wav[4096];
-    snprintf(dsf, sizeof dsf, "%s/smoke.dsf", argv[1]);
-    snprintf(wav, sizeof wav, "%s/smoke.wav", argv[1]);
-    printf("dsd2pcm %s\n", dsd2pcm_version());
+    snprintf(dsf, sizeof dsf, "%s/dsd2pcm-smoke.dsf", dir);
+    snprintf(wav, sizeof wav, "%s/dsd2pcm-smoke.wav", dir);
+    printf("dsd2pcm %s, ABI %u\n", dsd2pcm_version(), (unsigned)dsd2pcm_abi_version());
+    CHECK(dsd2pcm_abi_version() == DSD2PCM_ABI_VERSION);
 
     /* Pseudo-random area with full-scale stretches (which clip at +6 dB). */
     unsigned char *area = malloc((size_t)FRAMES * FRAME);
@@ -155,9 +159,9 @@ int main(int argc, char **argv) {
 
     /* Whole file, with progress. */
     struct progress prog = {0, 1 << 30, 0, 0};
-    dsd2pcm_file_options opts = {.rate_hz = 176400, .gain_db = 6.0, .threads = 1,
+    dsd2pcm_file_options opts = {.struct_size = sizeof(dsd2pcm_file_options), .rate_hz = 176400, .gain_db = 6.0, .threads = 1,
                                  .progress = on_progress, .user_data = &prog};
-    dsd2pcm_file_report rep;
+    dsd2pcm_file_report rep = DSD2PCM_FILE_REPORT_INIT;
     CHECK(dsd2pcm_convert_file(dsf, wav, &opts, &rep) == DSD2PCM_OK);
     CHECK(prog.calls >= 2 && prog.last_done == prog.total && prog.total == rep.out_samples);
     CHECK(rep.channels == CH && rep.out_rate == 176400 && rep.in_rate == 2822400);
@@ -174,7 +178,7 @@ int main(int argc, char **argv) {
     CHECK(strcmp(dsd2pcm_last_error(), "conversion cancelled") == 0);
 
     /* Frame runs, same settings. */
-    dsd2pcm_frames_config cfg = {.rate_hz = 176400, .channels = CH, .gain_db = 6.0};
+    dsd2pcm_frames_config cfg = {.struct_size = sizeof(dsd2pcm_frames_config), .rate_hz = 176400, .channels = CH, .gain_db = 6.0};
     dsd2pcm_frames *conv = NULL;
     CHECK(dsd2pcm_frames_new(&cfg, &conv) == DSD2PCM_OK && conv != NULL);
     CHECK(dsd2pcm_frames_frame_bytes(conv) == FRAME);
@@ -186,8 +190,8 @@ int main(int argc, char **argv) {
     /* The whole area as one run equals the WAV file. */
     unsigned char *pcm = malloc(out_len);
     uint64_t frame_clipped[FRAMES];
-    dsd2pcm_stats st;
-    dsd2pcm_run run = {.frames = area, .frames_len = (size_t)FRAMES * FRAME};
+    dsd2pcm_stats st = DSD2PCM_STATS_INIT;
+    dsd2pcm_run run = {.struct_size = sizeof(dsd2pcm_run), .frames = area, .frames_len = (size_t)FRAMES * FRAME};
     CHECK(dsd2pcm_frames_convert(conv, &run, DSD2PCM_FORMAT_S24LE, pcm, out_len,
                                  frame_clipped, FRAMES, &st) == DSD2PCM_OK);
     CHECK(wav_data && memcmp(pcm, wav_data, out_len) == 0);
@@ -198,7 +202,7 @@ int main(int argc, char **argv) {
     /* Frames 3..14 with neighbours, one buffer per frame, as int32: the same samples. */
     const unsigned char *ptrs[12];
     for (int i = 0; i < 12; i++) ptrs[i] = area + (size_t)(3 + i) * FRAME;
-    dsd2pcm_run part = {.before = area + 2 * FRAME, .before_len = FRAME,
+    dsd2pcm_run part = {.struct_size = sizeof(dsd2pcm_run), .before = area + 2 * FRAME, .before_len = FRAME,
                         .frame_ptrs = ptrs, .frame_count = 12,
                         .after = area + 15 * FRAME, .after_len = FRAME, .first_frame = 3};
     size_t n32 = dsd2pcm_frames_output_bytes(conv, 12, DSD2PCM_FORMAT_I32);
@@ -217,20 +221,20 @@ int main(int argc, char **argv) {
     /* pysacd's filter: the file equals the whole area as one run, and frames 3..14 with
      * neighbours and first_frame = 3, in separate buffers, give the same bytes. */
     {
-        dsd2pcm_file_options popts = {.rate_hz = 88200, .filter = DSD2PCM_FILTER_PYSACD,
+        dsd2pcm_file_options popts = {.struct_size = sizeof(dsd2pcm_file_options), .rate_hz = 88200, .filter = DSD2PCM_FILTER_PYSACD,
                                       .gain_db = 3.0};
-        dsd2pcm_file_report prep;
+        dsd2pcm_file_report prep = DSD2PCM_FILE_REPORT_INIT;
         CHECK(dsd2pcm_convert_file(dsf, wav, &popts, &prep) == DSD2PCM_OK);
         size_t plen = 0;
         unsigned char *pwav = read_wav_data(wav, &plen);
-        dsd2pcm_frames_config pcfg = {.rate_hz = 88200, .channels = CH, .gain_db = 3.0,
+        dsd2pcm_frames_config pcfg = {.struct_size = sizeof(dsd2pcm_frames_config), .rate_hz = 88200, .channels = CH, .gain_db = 3.0,
                                       .filter = DSD2PCM_FILTER_PYSACD};
         dsd2pcm_frames *pconv = NULL;
         CHECK(dsd2pcm_frames_new(&pcfg, &pconv) == DSD2PCM_OK);
         size_t n = dsd2pcm_frames_output_bytes(pconv, FRAMES, DSD2PCM_FORMAT_S24LE);
         CHECK(pwav != NULL && n == plen);
         unsigned char *ppcm = malloc(n);
-        dsd2pcm_stats pst;
+        dsd2pcm_stats pst = DSD2PCM_STATS_INIT;
         CHECK(dsd2pcm_frames_convert(pconv, &run, DSD2PCM_FORMAT_S24LE, ppcm, n, NULL, 0,
                                      &pst) == DSD2PCM_OK);
         CHECK(pwav && memcmp(ppcm, pwav, n) == 0);
@@ -263,18 +267,18 @@ int main(int argc, char **argv) {
           DSD2PCM_E_INVALID_ARGUMENT);
     CHECK(dsd2pcm_frames_convert(conv, &run, 0, pcm, out_len, frame_clipped, 3, NULL) ==
           DSD2PCM_E_INVALID_ARGUMENT);
-    dsd2pcm_run overlap = {.frames = pcm, .frames_len = FRAME};
+    dsd2pcm_run overlap = {.struct_size = sizeof(dsd2pcm_run), .frames = pcm, .frames_len = FRAME};
     CHECK(dsd2pcm_frames_convert(conv, &overlap, 0, pcm + 1,
                                  dsd2pcm_frames_output_bytes(conv, 1, 0), NULL, 0, NULL) ==
           DSD2PCM_E_INVALID_ARGUMENT);
-    dsd2pcm_run short_run = {.frames = area, .frames_len = FRAME - 1};
+    dsd2pcm_run short_run = {.struct_size = sizeof(dsd2pcm_run), .frames = area, .frames_len = FRAME - 1};
     memset(pcm, 0xAB, out_len);
     CHECK(dsd2pcm_frames_convert(conv, &short_run, 0, pcm, out_len, NULL, 0, NULL) ==
           DSD2PCM_E_INVALID_ARGUMENT);
     CHECK(pcm[0] == 0xAB && pcm[out_len - 1] == 0xAB);
     CHECK(dsd2pcm_convert_file(NULL, wav, &opts, NULL) == DSD2PCM_E_NULL);
     CHECK(strcmp(dsd2pcm_last_error(), "input_path is NULL") == 0);
-    dsd2pcm_file_options bad = {.rate_hz = 44100};
+    dsd2pcm_file_options bad = {.struct_size = sizeof(dsd2pcm_file_options), .rate_hz = 44100};
     CHECK(dsd2pcm_convert_file(dsf, wav, &bad, NULL) == DSD2PCM_E_INVALID_ARGUMENT);
     bad.rate_hz = 352800;
     bad.filter = DSD2PCM_FILTER_PYSACD; /* pysacd: 88.2 and 176.4 kHz only */
@@ -284,13 +288,28 @@ int main(int argc, char **argv) {
     CHECK(dsd2pcm_frames_new(&cfg, &none) == DSD2PCM_E_INVALID_ARGUMENT && none == NULL);
     CHECK(strcmp(dsd2pcm_status_str(DSD2PCM_E_BUSY), "converter busy") == 0);
 
+    /* struct_size: zero (not initialised) and too small are refused; the macros work. */
+    dsd2pcm_file_options zero = {.rate_hz = 176400};
+    CHECK(dsd2pcm_convert_file(dsf, wav, &zero, NULL) == DSD2PCM_E_INVALID_ARGUMENT);
+    CHECK(strstr(dsd2pcm_last_error(), "struct_size") != NULL);
+    dsd2pcm_run small = run;
+    small.struct_size = 8;
+    CHECK(dsd2pcm_frames_convert(conv, &small, 0, pcm, out_len, NULL, 0, NULL) ==
+          DSD2PCM_E_INVALID_ARGUMENT);
+    dsd2pcm_frames_config init_cfg = DSD2PCM_FRAMES_CONFIG_INIT;
+    init_cfg.rate_hz = 88200;
+    init_cfg.channels = 1;
+    dsd2pcm_frames *c2 = NULL;
+    CHECK(dsd2pcm_frames_new(&init_cfg, &c2) == DSD2PCM_OK);
+    dsd2pcm_frames_free(c2);
+
     dsd2pcm_frames_free(conv);
     dsd2pcm_frames_free(NULL);
     free(pcm32);
     free(pcm);
     free(wav_data);
     free(area);
-    /* smoke.dsf stays for check.sh's run of convert.c. */
+    if (argc != 2) remove(dsf); /* with DIR, it stays for check.sh's run of convert.c */
     remove(wav);
     if (failures) {
         fprintf(stderr, "%d checks failed\n", failures);
