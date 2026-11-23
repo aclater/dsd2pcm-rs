@@ -7,7 +7,8 @@
 DSD to PCM conversion in Rust, with DSF, DFF and WAV reading and writing, and FLAC reading.
 It ships as a Rust crate (`dsd2pcm`), a C library and a command-line tool.
 
-Status: in development, nothing released yet. dsd2pcm-rs is an independent library.
+Status: 0.1.0 is the first release ([CHANGELOG.md](CHANGELOG.md)). dsd2pcm-rs is an
+independent library.
 
 ## Quick start
 
