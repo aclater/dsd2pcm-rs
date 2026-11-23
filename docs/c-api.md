@@ -171,7 +171,8 @@ An archive holds:
 - `include/dsd2pcm.h`;
 - the shared library: `lib/libdsd2pcm.so.1` with the link `lib/libdsd2pcm.so` (Linux,
   SONAME `libdsd2pcm.so.1`); `lib/libdsd2pcm.1.dylib` with the link `lib/libdsd2pcm.dylib`
-  (macOS, install name `@rpath/libdsd2pcm.1.dylib`, not signed or notarised);
+  (macOS, install name `@rpath/libdsd2pcm.1.dylib`, signed with a Developer ID and
+  notarised);
   `bin/dsd2pcm.dll` and its import library `lib/dsd2pcm.dll.lib` (Windows, C runtime
   linked in);
 - the static library: `lib/libdsd2pcm.a` (`lib/dsd2pcm.lib` on Windows, built with the

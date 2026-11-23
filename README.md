@@ -18,7 +18,7 @@ reproduces ([performance](docs/performance.md)).
 | System | How | Guide |
 |---|---|---|
 | Linux | Release builds of the tool and the C library for x86_64, aarch64 and 32-bit x86, glibc 2.17 or later; `cargo install dsd2pcm-cli` | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
-| macOS 11 or later | Release builds for Apple silicon (tool and C library). Not signed or notarised | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
+| macOS 11 or later | Release builds for Apple silicon (tool and C library), signed and notarized | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
 | Windows 10 and 11, x64 | Release builds (tool and C library, C runtime linked in). Not code-signed | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
 | Any Rust target | The `dsd2pcm` crate | [docs.rs](https://docs.rs/dsd2pcm) |
 
