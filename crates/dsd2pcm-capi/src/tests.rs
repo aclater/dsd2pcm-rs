@@ -1020,7 +1020,9 @@ fn abi_version() {
 }
 
 /// Paths are raw bytes on Unix: a file whose name is not UTF-8 converts.
-#[cfg(unix)]
+// macOS file systems (APFS, HFS+) refuse names that are not UTF-8, so the test cannot
+// create its input there.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 #[cfg_attr(miri, ignore = "file I/O")]
 fn non_utf8_paths_on_unix() {

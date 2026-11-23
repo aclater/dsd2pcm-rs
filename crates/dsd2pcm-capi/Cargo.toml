@@ -12,6 +12,9 @@ build = "build.rs"
 [lib]
 name = "dsd2pcm"
 crate-type = ["cdylib", "staticlib"]
+# Same name as the Rust library: rustdoc would write both to one place. The C API is
+# documented in docs/c-api.md and the header.
+doc = false
 
 [dependencies]
 dsd2pcm.workspace = true
