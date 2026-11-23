@@ -7,7 +7,8 @@
 //! DSD2PCM_SOAK_ITERATIONS=2000 cargo test --release -p dsd2pcm --test soak -- --ignored --nocapture
 //! ```
 //!
-//! `DSD2PCM_SOAK_ITERATIONS` (default 300) sets the iterations. Each iteration converts one
+//! `DSD2PCM_SOAK_ITERATIONS` (default 300) sets the iterations; with `DSD2PCM_SOAK_SECONDS`
+//! the run stops after that many seconds instead (the iterations, if set, are a ceiling). Each iteration converts one
 //! pseudo-random area with one setting of the cycle below (every rate, cutoff, filter and
 //! channel count, invalid combinations included as error paths): with a reused and a fresh
 //! `frames::Converter` (contiguous and per-frame buffers, a whole run and frame by frame),
@@ -396,11 +397,16 @@ fn iteration(
 #[test]
 #[ignore = "soak test: minutes to hours; run with --ignored (see the file's comment)"]
 fn soak() {
-    let iterations: usize = std::env::var("DSD2PCM_SOAK_ITERATIONS")
-        .ok()
-        .map(|v| v.parse().expect("DSD2PCM_SOAK_ITERATIONS: a number"))
-        .unwrap_or(300);
-    assert!(iterations >= 50, "at least 50 iterations");
+    let env = |name: &str| -> Option<u64> {
+        let v = std::env::var(name).ok()?;
+        Some(v.parse().unwrap_or_else(|_| panic!("{name}: a number")))
+    };
+    let seconds = env("DSD2PCM_SOAK_SECONDS");
+    // With a duration, the iterations are only a ceiling.
+    let max_iterations =
+        env("DSD2PCM_SOAK_ITERATIONS").unwrap_or(if seconds.is_some() { 4_000_000 } else { 300 })
+            as usize;
+    let deadline = seconds.map(|s| Instant::now() + std::time::Duration::from_secs(s));
     let tmp = std::env::temp_dir().join(format!("dsd2pcm-soak-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).unwrap();
     let mut rng = Rng(0x2545_F491_4F6C_DD1D);
@@ -413,13 +419,20 @@ fn soak() {
     };
     let base_threads = threads();
     // Written before the run, so its pages do not add to the resident set on the way.
-    let mut rss = vec![0u64; iterations];
+    let mut rss = vec![0u64; max_iterations];
     let have_rss = rss_kib().is_some();
     let t0 = Instant::now();
+    let mut iterations = 0;
     for (i, r) in rss.iter_mut().enumerate() {
+        if deadline.is_some_and(|d| Instant::now() >= d) {
+            break;
+        }
         iteration(i, &mut rng, &mut reused, &tmp, base_threads, &mut st);
         *r = rss_kib().unwrap_or(0);
+        iterations += 1;
     }
+    rss.truncate(iterations);
+    assert!(iterations >= 50, "at least 50 iterations, ran {iterations}");
     std::fs::remove_dir_all(&tmp).unwrap();
     let secs = t0.elapsed().as_secs_f64();
     let max_ch = usize::from(MAX_CHANNELS);
