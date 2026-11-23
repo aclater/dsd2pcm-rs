@@ -9,15 +9,8 @@
   or FLAC's `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` comment); `DsdRead::channel_mask` the
   layout of a DSF channel type or of DSDIFF channel IDs; `WavWriter::with_channel_mask`,
   `DsfWriter::set_channel_mask`, `dsf::channel_mask_for_type` and
-  `dsf::channel_type_for_mask` ([usage](docs/usage.md#formats)).
-
-### Changed
-
-- DSD to WAV conversion writes the channel mask of the input's layout (DSF channel type,
-  DSDIFF channel IDs) instead of the one of its channel count. The WAV header changes only
-  where the two differ: a DSF of type 5 (FL FR C LFE) was labelled quad (FL FR BL BR), and
-  DSDIFF files with other speaker sets, such as FL FR LFE, were labelled by their count.
-  The samples are unchanged.
+  `dsf::channel_type_for_mask` ([usage](docs/usage.md#formats)). DSD to WAV conversion
+  still writes the mask of the channel count, so output files are unchanged.
 
 ## 0.1.2 (2026-11-23)
 

@@ -12,16 +12,17 @@
 - Writes DSF, DSDIFF and WAV. WAV files with more than 16 bits, float samples or more than two
   channels use `WAVE_FORMAT_EXTENSIBLE` with the channel mask of the channel count (SACD
   order: FL FR FC LFE BL BR), or one given to `WavWriter::with_channel_mask`.
-- Channel layouts: a DSD to WAV conversion takes the WAV channel mask from the input's
-  layout, not only its channel count: the DSF channel type (specification 1.01: 1 mono C,
-  2 FL FR, 3 FL FR C, 4 FL FR BL BR, 5 FL FR C LFE, 6 FL FR C BL BR, 7 FL FR C LFE BL BR)
-  when it matches the channel count, or the DSDIFF `CHNL` IDs (`SLFT`/`MLFT`, `SRGT`/`MRGT`,
-  `C`, `LFE`, `LS`, `RS`) when each is a speaker, none twice, in WAV's channel order.
-  Otherwise (numbered IDs such as `C000`, an order WAV cannot express) the count's mask.
-  `WavReader::channel_mask` and `FlacReader::channel_mask` (also `PcmRead::channel_mask`)
-  give the mask a file declares: `dwChannelMask`, or the `WAVEFORMATEXTENSIBLE_CHANNEL_MASK`
-  Vorbis comment. `DsfWriter::set_channel_mask` sets the DSF type from a mask (the type of
-  the count when no type has that mask).
+- Channel layouts: `DsdRead::channel_mask` gives the speakers a DSD file declares: the DSF
+  channel type (specification 1.01: 1 mono C, 2 FL FR, 3 FL FR C, 4 FL FR BL BR, 5 FL FR C
+  LFE, 6 FL FR C BL BR, 7 FL FR C LFE BL BR) when it matches the channel count, or the
+  DSDIFF `CHNL` IDs (`SLFT`/`MLFT`, `SRGT`/`MRGT`, `C`, `LFE`, `LS`, `RS`) when each is a
+  speaker, none twice, in WAV's channel order; otherwise none (numbered IDs such as `C000`,
+  an order WAV cannot express). `WavReader::channel_mask` and `FlacReader::channel_mask`
+  (also `PcmRead::channel_mask`) give the mask a file declares: `dwChannelMask`, or the
+  `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` Vorbis comment. `DsfWriter::set_channel_mask` sets the
+  DSF type from a mask (the type of the count when no type has that mask). A DSD to WAV
+  conversion still writes the mask of the channel count; it will take the input's layout
+  in 0.2, as that changes output files.
 - Converts DSD64 to 24-bit PCM at 88.2, 176.4 or 352.8 kHz with one of three linear-phase
   filters:
 
