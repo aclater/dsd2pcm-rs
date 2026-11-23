@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `frames::Converter`: the first-stage values kept between calls cost next to nothing
+  when consecutive calls are not adjacent runs (pooled converters): only the bytes the next
+  run could share are kept. Output bytes unchanged.
+
 ## 0.1.2 (2026-11-23)
 
 This release contains security fixes; upgrading is recommended. Versions 0.1.0 and 0.1.1 are
