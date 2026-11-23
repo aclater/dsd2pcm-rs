@@ -44,7 +44,9 @@ yanked from crates.io.
   check the input and options before writing, write to a temporary file next to the output
   and rename it into place only on success, so a failed or cancelled conversion leaves an
   existing output as it was and never leaves a partial WAV; an output that is a hard link to
-  the input is refused on Unix, as the same path and symbolic links already were.
+  the input is refused on Unix, as the same path and symbolic links already were. The tool
+  also stops cleanly on Ctrl-C or SIGTERM (Ctrl-Break on Windows): it removes the
+  temporary file and exits with 130 or 143.
 - `WavWriter::write_raw` refuses data past the 4 GiB RIFF limit when it is written, not
   only at `finish`.
 - C interface: a struct from a caller built against an older header is read for its

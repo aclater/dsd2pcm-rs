@@ -168,3 +168,45 @@ fn dsf_open_reads_the_file_a_bounded_number_of_times() {
     let (ok, times) = open_counted("a.dsf", &f, |r| DsfReader::new(r).is_ok());
     assert!(ok && times <= MAX_TIMES, "read {times:.1} times");
 }
+
+/// The limits are exact: 4096 DFF chunks up to and including `DSD `, 4096 property chunks,
+/// 4096 WAV chunks up to and including `data`, 4096 FLAC metadata blocks with STREAMINFO.
+#[test]
+fn chunk_limits_are_exact() {
+    use std::io::Cursor;
+    let dff_ok = |top, sub| DffReader::new(Cursor::new(dff(top, sub))).is_ok();
+    // FVER, `top` empty chunks, PROP, DSD.
+    assert!(dff_ok(4093, 0));
+    assert!(!dff_ok(4094, 0));
+    // FS, CHNL, CMPR and `sub` empty property chunks.
+    assert!(dff_ok(0, 4093));
+    assert!(!dff_ok(0, 4094));
+    // fmt, `n` empty chunks, data.
+    let wav_ok = |n| WavReader::new(Cursor::new(wav(n, 8, 0))).is_ok();
+    assert!(wav_ok(4094));
+    assert!(!wav_ok(4095));
+}
+
+#[cfg(feature = "flac")]
+#[test]
+fn flac_block_limit_is_exact() {
+    use dsd2pcm::flac::FlacReader;
+    use std::io::Cursor;
+    // STREAMINFO and `n` PADDING blocks, then one frame-less byte: the open fails either
+    // way, so the message tells which check stopped it.
+    let too_many = |n: usize| {
+        let mut v = b"fLaC".to_vec();
+        v.extend([0, 0, 0, 34]);
+        v.extend([
+            0x10, 0x00, 0x10, 0x00, 0, 0, 0, 0, 0, 0, 0x0A, 0xC4, 0x42, 0xF0,
+        ]);
+        v.extend([0u8; 20]);
+        for i in 0..n {
+            v.extend([if i + 1 == n { 0x81 } else { 0x01 }, 0, 0, 0]);
+        }
+        let e = FlacReader::new(Cursor::new(v)).err().unwrap().to_string();
+        e.contains("too many metadata blocks")
+    };
+    assert!(!too_many(4095));
+    assert!(too_many(4096));
+}

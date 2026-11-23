@@ -118,7 +118,8 @@ pub(crate) fn seek_to<R: Read + Seek>(r: &mut R, target: u64) -> Result<()> {
     Ok(())
 }
 
-/// Most chunks a reader walks while looking for the audio data.
+/// Most chunks a reader reads up to and including the audio data chunk (DFF top-level chunks
+/// with `DSD `, WAV chunks with `data`), and most DFF property chunks in `PROP`.
 pub(crate) const MAX_CHUNKS: usize = 4096;
 
 /// Checks that a DSD rate is a multiple of 44.1 kHz or 48 kHz between DSD64 and DSD1024.

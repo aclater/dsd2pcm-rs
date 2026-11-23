@@ -32,7 +32,7 @@ pub const MAX_CHUNK: usize = 1 << 20;
 
 /// Most ID3v2 tags skipped before the `fLaC` marker.
 const MAX_ID3_TAGS: usize = 16;
-/// Most metadata blocks skipped after STREAMINFO.
+/// Most metadata blocks, STREAMINFO included.
 const MAX_METADATA_BLOCKS: usize = 4096;
 
 /// A reader whose `read` never returns more than the buffer length, whatever the inner
@@ -126,7 +126,7 @@ fn parse_container<R: Read + Seek>(r: &mut R, file_len: u64) -> Result<(u64, [u8
     }
     let mut streaminfo = None;
     for n in 0.. {
-        if n > MAX_METADATA_BLOCKS {
+        if n == MAX_METADATA_BLOCKS {
             return format_err("FLAC file has too many metadata blocks");
         }
         if pos + 4 > file_len {

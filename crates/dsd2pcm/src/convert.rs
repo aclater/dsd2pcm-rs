@@ -9,7 +9,6 @@ use crate::error::{Error, Result};
 use crate::filters::{pysacd, Filter};
 use crate::io::{DsdRead, PcmRead};
 use crate::wav::{WavFormat, WavReader, WavWriter};
-use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::ops::ControlFlow;
@@ -124,13 +123,17 @@ pub fn convert_file(input: &Path, output: &Path, opts: &PcmOptions) -> Result<Re
 
 /// [`convert_file`] with a progress hook (see [`ProgressHook`]).
 ///
-/// The input, its rate and channels, the options and the output size are checked before
-/// anything is written. The WAV is then written to a new temporary file next to `output`
-/// (in the same directory, created exclusively), synced, and renamed over `output` only
-/// when the conversion succeeds. On any error, including [`Error::Cancelled`], the
-/// temporary file is removed and an existing `output` is left as it was. An `output` that
-/// is the input file (by path, symbolic link or hard link) is refused. A symbolic link at
-/// `output` is replaced by the new file, not followed.
+/// Before anything is written, the input, its rate and channels, the options and the output
+/// size are checked, and so is `output`: a directory (or a path ending in a separator), a
+/// device, FIFO or socket, an existing file that is not writable, and the input file itself
+/// (by path, symbolic link or hard link) are refused. The WAV is then written to a new
+/// temporary file `.dsd2pcm-<pid>-<n>.tmp` in `output`'s directory (created exclusively;
+/// creating it also checks that the directory is writable), synced, given the permissions
+/// of the file it replaces, and renamed over `output` only when the conversion succeeds; the
+/// directory is then synced too (Unix, best effort). On any error, including
+/// [`Error::Cancelled`], the temporary file is removed and an existing `output` is left as
+/// it was. A symbolic link at `output` is replaced by the new file, not followed. The owner,
+/// ACLs and extended attributes of a replaced file are not kept.
 pub fn convert_file_with(
     input: &Path,
     output: &Path,
@@ -143,6 +146,7 @@ pub fn convert_file_with(
     check_options(opts)?;
     let info = r.info();
     check_dsd64(info.sample_rate)?;
+    let replaced = check_output(output)?;
     if same_file(input, output) {
         return Err(Error::InvalidArgument("output is the input file".into()));
     }
@@ -154,17 +158,62 @@ pub fn convert_file_with(
             "WAV output over 4 GiB (RF64 is not supported yet)".into(),
         ));
     }
-    let mut tmp = TempFile::create(output)?;
+    let mut tmp = TempFile::create(output, replaced.is_some())?;
     let file = tmp.file.take().expect("a new temporary file is open");
     let out = BufWriter::with_capacity(1 << 20, file);
     let mut w = WavWriter::new(out, WavFormat::I24, info.channels, opts.rate.hz())?;
     let rep = dsd64_to_pcm_with(r, &mut w, opts, progress)?;
     w.finish()?;
     let file = w.into_inner().into_inner().map_err(|e| e.into_error())?;
+    if let Some(perms) = replaced {
+        file.set_permissions(perms)?;
+    }
     file.sync_all()?;
     drop(file);
     tmp.persist(output)?;
     Ok(rep)
+}
+
+/// Checks the output path before converting. Returns the permissions of the regular file it
+/// would replace, or `None` when there is none (or it is a symbolic link, which is replaced).
+fn check_output(output: &Path) -> Result<Option<std::fs::Permissions>> {
+    let ends_in_separator = output
+        .as_os_str()
+        .as_encoded_bytes()
+        .last()
+        .is_some_and(|&b| std::path::is_separator(char::from(b)));
+    if ends_in_separator || output.file_name().is_none() {
+        return Err(Error::InvalidArgument(
+            "output path names a directory, not a file".into(),
+        ));
+    }
+    let meta = match std::fs::symlink_metadata(output) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    let kind = meta.file_type();
+    if kind.is_dir() {
+        return Err(Error::InvalidArgument("output is a directory".into()));
+    }
+    if kind.is_symlink() {
+        return Ok(None);
+    }
+    if !kind.is_file() {
+        return Err(Error::InvalidArgument(
+            "output exists and is not a regular file (a device, FIFO or socket); \
+             refusing to replace it"
+                .into(),
+        ));
+    }
+    // Opening for writing (without truncating) changes nothing; it fails as writing would.
+    if let Err(e) = OpenOptions::new().write(true).open(output) {
+        return Err(Error::Io(std::io::Error::new(
+            e.kind(),
+            format!("the existing output is not writable: {e}"),
+        )));
+    }
+    Ok(Some(meta.permissions()))
 }
 
 /// A temporary output file next to its target, removed on drop unless persisted.
@@ -174,29 +223,33 @@ struct TempFile {
 }
 
 impl TempFile {
-    /// Creates `.<name>.<pid>-<n>.tmp` in `target`'s directory, failing if it exists.
-    fn create(target: &Path) -> Result<TempFile> {
+    /// Creates `.dsd2pcm-<pid>-<n>.tmp` in `target`'s directory, failing if it exists. With
+    /// `private`, it is created readable and writable by the owner only (Unix), until it is
+    /// given the permissions of the file it replaces.
+    fn create(target: &Path, private: bool) -> Result<TempFile> {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let Some(name) = target.file_name() else {
-            return Err(Error::InvalidArgument(
-                "output path has no file name".into(),
-            ));
-        };
         let dir = match target.parent() {
             Some(d) if !d.as_os_str().is_empty() => d,
             _ => Path::new("."),
         };
         let mut last = None;
         for _ in 0..100 {
-            let mut tmp_name = OsString::from(".");
-            tmp_name.push(name);
-            tmp_name.push(format!(
-                ".{}-{}.tmp",
+            let name = format!(
+                ".dsd2pcm-{}-{}.tmp",
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
-            ));
-            let path = dir.join(tmp_name);
-            match OpenOptions::new().write(true).create_new(true).open(&path) {
+            );
+            let path = dir.join(name);
+            let mut o = OpenOptions::new();
+            o.write(true).create_new(true);
+            #[cfg(unix)]
+            if private {
+                use std::os::unix::fs::OpenOptionsExt;
+                o.mode(0o600);
+            }
+            #[cfg(not(unix))]
+            let _ = private;
+            match o.open(&path) {
                 Ok(file) => {
                     return Ok(TempFile {
                         path: Some(path),
@@ -212,12 +265,17 @@ impl TempFile {
             .into())
     }
 
-    /// Renames the file over `target`.
+    /// Renames the file over `target`, then syncs the directory (Unix, best effort: some
+    /// file systems do not support it).
     fn persist(mut self, target: &Path) -> Result<()> {
         let path = self.path.take().expect("not yet persisted");
         if let Err(e) = std::fs::rename(&path, target) {
             let _ = std::fs::remove_file(&path);
             return Err(e.into());
+        }
+        #[cfg(unix)]
+        if let Some(dir) = path.parent() {
+            let _ = File::open(dir).and_then(|d| d.sync_all());
         }
         Ok(())
     }

@@ -66,7 +66,8 @@ The `dsd2pcm` tool converts one DSF or DFF file (DSD64) to a 24-bit WAV file; WA
 input is read by the library only. Defaults: `--rate 176400 --cutoff 40 --gain 0
 --filter default`, on all cores (`--single-thread`: on the calling thread only). It prints
 the rates, the length of the audio, the time taken and the clipped samples, in all and per
-channel. Exit status: 0 on success, 1 when the conversion fails, 2 for a usage error.
+channel. Exit status: 0 on success, 1 when the conversion fails, 2 for a usage error, 130
+or 143 when interrupted by SIGINT or SIGTERM.
 `--help` prints the usage.
 
 ## Build settings for consumers
@@ -96,10 +97,19 @@ samples done and the total at each block, on the calling thread, and stops the c
 with `Error::Cancelled` when it returns `ControlFlow::Break`. `Error` is `#[non_exhaustive]`.
 
 `convert_file` and `convert_file_with` (and the `dsd2pcm` tool) check the input, its rate,
-the options and the output size before writing, write the WAV to a temporary file in the
-output's directory and rename it over the output only on success. On any error or cancel an
-existing output is left as it was and no partial file remains. An output that is the input
-(by path, symbolic link or, on Unix, hard link) is refused; a symbolic link at the output
-path is replaced, not followed.
+the options, the output size and the output path before writing. They refuse an output that
+is the input (by path, symbolic link or, on Unix, hard link), a directory or a path ending
+in a separator, an existing device, FIFO or socket, an existing file that is not writable,
+and a directory that cannot be written. The WAV goes to a temporary file
+`.dsd2pcm-PID-N.tmp` in the output's directory, which is renamed over the output only on
+success and given the permissions of the file it replaces (not its owner, ACLs or extended
+attributes). On any error or cancel an existing output is left as it was and no partial
+file remains. A symbolic link at the output path is replaced, not followed.
+
+The `dsd2pcm` tool treats Ctrl-C, SIGINT and SIGTERM (on Windows Ctrl-C and Ctrl-Break) as a
+cancel: an interrupted conversion leaves no file and an existing output as it was, and the
+tool exits with status 130 (SIGINT) or 143 (SIGTERM); a second signal ends it at once. If the
+process is killed outright (SIGKILL, a crash, power loss), a hidden `.dsd2pcm-PID-N.tmp` file
+may remain next to the output; it is safe to delete. The library installs no signal handlers.
 
 Limits of this version: DSD64 input only for PCM output; WAV output up to 4 GiB.

@@ -1,8 +1,11 @@
 //! `dsd2pcm IN.dsf|IN.dff OUT.wav [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread]`
 
-use dsd2pcm::{convert_file, Cutoff, Filter, PcmOptions, PcmRate};
+use dsd2pcm::{convert_file_with, Cutoff, Filter, PcmOptions, PcmRate};
+use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 const USAGE: &str = "usage: dsd2pcm IN.dsf|IN.dff OUT.wav [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread]
@@ -78,8 +81,16 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let signal = watch_signals();
     let t = Instant::now();
-    match convert_file(&inp, &out, &opts) {
+    let mut hook = |_| {
+        if signal.load(Ordering::Relaxed) == 0 {
+            ControlFlow::Continue(())
+        } else {
+            ControlFlow::Break(())
+        }
+    };
+    match convert_file_with(&inp, &out, &opts, &mut hook) {
         Ok(rep) => {
             let secs = t.elapsed().as_secs_f64();
             let total: u64 = rep.clipped.iter().sum();
@@ -95,9 +106,43 @@ fn main() -> ExitCode {
             );
             ExitCode::SUCCESS
         }
+        Err(dsd2pcm::Error::Cancelled) if signal.load(Ordering::Relaxed) != 0 => {
+            eprintln!("dsd2pcm: interrupted; no output written");
+            ExitCode::from(exit_status(signal.load(Ordering::Relaxed)))
+        }
         Err(e) => {
             eprintln!("dsd2pcm: {e}");
             ExitCode::FAILURE
         }
     }
+}
+
+/// The signals that stop a conversion cleanly: SIGINT and SIGTERM (on Windows also Ctrl-Break,
+/// as SIGBREAK). The first one sets the returned value to the signal number, and the progress
+/// hook then cancels the conversion, which removes the temporary output file. A second one
+/// ends the process at once with the same exit status. Registration failures are ignored:
+/// the default action (ending the process) then applies.
+fn watch_signals() -> Arc<AtomicUsize> {
+    use signal_hook::consts::{SIGINT, SIGTERM};
+    let got = Arc::new(AtomicUsize::new(0));
+    let first = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    #[cfg(windows)]
+    let signals = [SIGINT, SIGTERM, signal_hook::consts::SIGBREAK];
+    #[cfg(not(windows))]
+    let signals = [SIGINT, SIGTERM];
+    for sig in signals {
+        let status = i32::from(exit_status(sig as usize));
+        // Registered first, so it sees the flag the first signal sets only from the second
+        // signal on.
+        let _ = signal_hook::flag::register_conditional_shutdown(sig, status, first.clone());
+        let _ = signal_hook::flag::register(sig, first.clone());
+        let _ = signal_hook::flag::register_usize(sig, got.clone(), sig as usize);
+    }
+    got
+}
+
+/// The shell's status for a process ended by a signal: 128 + the signal number (130 for
+/// SIGINT, 143 for SIGTERM).
+fn exit_status(sig: usize) -> u8 {
+    u8::try_from(128 + sig).unwrap_or(128)
 }
