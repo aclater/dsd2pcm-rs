@@ -14,6 +14,17 @@
   RMAA-style summary; the pysacd preset, scarletbook-pcm 0.7.0 and the foobar2000 SACD
   plug-in compared), with the measurement scripts in `tools/quality`.
 
+### Fixed
+
+- DSF input whose sample count is not a multiple of 8: the padding bits of the last byte
+  convert as silence (the reader delivers them as 0x69's bits); before, zero padding gave a
+  click in each channel's last few output samples ([usage](docs/usage.md#output)).
+- Readers: opening a DFF, WAV or FLAC file with many small chunks takes time linear in its
+  size with any buffered reader; DFF and WAV files may have at most 4096 chunks before the
+  audio data (and DFF 4096 property chunks), as FLAC already had for metadata blocks.
+- 32-bit targets: an output count past 2^32 samples per channel no longer panics in
+  `dsd64_to_pcm_with`.
+
 ## 0.1.1
 
 Faster, same output: every output byte is unchanged from 0.1.0 at every SIMD level.

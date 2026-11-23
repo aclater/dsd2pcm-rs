@@ -146,8 +146,15 @@ fuzz_target!(|case: Case| match case {
         assert_eq!(r.metadata(), want_meta.as_deref());
         let got = read_back(&mut r, &file);
         let keep = samples.div_ceil(8) as usize;
+        // The padding bits past `samples` in the last byte read as 0x69's.
+        let pad = (keep as u64 * 8 - samples) as u32;
+        let mask = ((1u16 << pad) - 1) as u8;
         for (g, c) in got.iter().zip(&chans) {
-            assert_eq!(g[..], c[..keep]);
+            let mut want = c[..keep].to_vec();
+            if let Some(last) = want.last_mut() {
+                *last = (*last & !mask) | (0x69 & mask);
+            }
+            assert_eq!(g[..], want[..]);
         }
     }
     Case::Dff {

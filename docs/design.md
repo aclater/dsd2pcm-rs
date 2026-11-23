@@ -208,6 +208,11 @@ run property the bytes equal one call.
 ## Robustness
 
 Parsers check every size against the file length, cap allocations (DSF metadata 16 MiB,
-block size 1 MiB; FLAC one decoded block) and return errors instead of panicking. The tests
+block size 1 MiB; FLAC one decoded block) and return errors instead of panicking. Chunk
+walking is bounded whatever reader the caller passes: at most 4096 chunks (DFF chunks and
+`PROP` property chunks, WAV chunks before `data` and after a placeholder `data` size, FLAC
+metadata blocks), and the walkers move with short reads or `Seek::seek_relative`, never a
+plain `seek` per chunk, so a buffered reader such as a large `BufReader<File>` keeps its
+buffer and opening a file costs time linear in its header. The tests
 truncate and corrupt valid files byte by byte, and cargo-fuzz targets cover every reader
 (see [fuzzing.md](fuzzing.md)).

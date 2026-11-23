@@ -8,7 +8,7 @@
 //! which is an error.
 
 use crate::error::{format_err, unsupported, Result};
-use crate::io::{le_u16, le_u32, read_exact_arr, PcmInfo, PcmRead};
+use crate::io::{le_u16, le_u32, read_exact_arr, seek_to, PcmInfo, PcmRead, MAX_CHUNKS};
 use std::io::{Read, Seek, SeekFrom, Write};
 
 /// Largest number of frames one `read_frames` call returns.
@@ -65,7 +65,12 @@ impl<R: Read + Seek> WavReader<R> {
         }
         let mut pos = 12u64;
         let mut fmt: Option<(WavFormat, u16, u32)> = None;
+        let mut chunks = 0;
         loop {
+            if chunks == MAX_CHUNKS {
+                return format_err("WAV file has too many chunks before 'data'");
+            }
+            chunks += 1;
             if pos + 8 > file_len {
                 return format_err("WAV file has no 'data' chunk");
             }
@@ -144,7 +149,7 @@ impl<R: Read + Seek> WavReader<R> {
                 _ => {}
             }
             pos = body + size + (size & 1);
-            r.seek(SeekFrom::Start(pos))?;
+            seek_to(&mut r, pos)?;
         }
     }
 
@@ -163,13 +168,13 @@ fn chunks_fill<R: Read + Seek>(r: &mut R, from: u64, file_len: u64) -> Result<bo
         if chunks > 0 && (pos == file_len || pos == file_len + 1) {
             break true;
         }
-        if chunks == 4096 {
+        if chunks == MAX_CHUNKS {
             break true; // that many well-formed chunk headers are not sample data
         }
         if pos + 8 > file_len {
             break false;
         }
-        r.seek(SeekFrom::Start(pos))?;
+        seek_to(r, pos)?;
         let ck: [u8; 8] = read_exact_arr(r)?;
         if !ck[0..4].iter().all(|b| (0x20..=0x7E).contains(b)) {
             break false;
@@ -178,7 +183,7 @@ fn chunks_fill<R: Read + Seek>(r: &mut R, from: u64, file_len: u64) -> Result<bo
         pos += 8 + size + (size & 1);
         chunks += 1;
     };
-    r.seek(SeekFrom::Start(from))?;
+    seek_to(r, from)?;
     Ok(fill)
 }
 
