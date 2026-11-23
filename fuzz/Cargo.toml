@@ -1,0 +1,59 @@
+[package]
+name = "dsd2pcm-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = { version = "1", features = ["derive"] }
+libfuzzer-sys = "0.4"
+dsd2pcm = { path = "../crates/dsd2pcm" }
+
+# Not part of the main workspace: build with `cargo fuzz` from this directory.
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "dsf_read"
+path = "fuzz_targets/dsf_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dff_read"
+path = "fuzz_targets/dff_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wav_read"
+path = "fuzz_targets/wav_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "round_trip"
+path = "fuzz_targets/round_trip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "make_seeds"
+path = "src/bin/make_seeds.rs"
+test = false
+doc = false
+bench = false

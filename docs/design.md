@@ -127,4 +127,5 @@ run property the bytes equal one call.
 
 Parsers check every size against the file length, cap allocations (DSF metadata 16 MiB,
 block size 1 MiB) and return errors instead of panicking. The tests truncate and corrupt
-valid files byte by byte.
+valid files byte by byte, and cargo-fuzz targets cover every reader
+(see [fuzzing.md](fuzzing.md)).
