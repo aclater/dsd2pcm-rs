@@ -8,6 +8,10 @@
 - `frames::Converter`: the first-stage values kept between calls cost next to nothing
   when consecutive calls are not adjacent runs (pooled converters): only the bytes the next
   run could share are kept. Output bytes unchanged.
+- `frames::Converter`: a new converter's first call no longer runs a throwaway pass to
+  size its buffers, and the 13-bit first-stage tables, which the AVX2 levels with paired
+  tables never use, are built only when needed. A new converter plus its first 4-frame run
+  takes about as long as scarletbook-pcm 0.7.0's.
 
 ## 0.1.1
 

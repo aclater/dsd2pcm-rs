@@ -145,6 +145,31 @@ fn s1_lut(half: &'static [i32], layout: S1Layout) -> &'static Lut {
     cell[layout as usize].get_or_init(|| lut(half, layout))
 }
 
+/// S1's tables in a layout, built on first use: the level with paired tables never needs
+/// them, so a converter there does not build them.
+#[derive(Clone, Copy, Debug)]
+struct S1Src {
+    half: &'static [i32],
+    layout: S1Layout,
+    /// Bytes per window.
+    bytes: usize,
+}
+
+impl S1Src {
+    fn new(half: &'static [i32], layout: S1Layout) -> S1Src {
+        S1Src {
+            half,
+            layout,
+            bytes: half.len() / 4,
+        }
+    }
+
+    /// The tables.
+    fn get(self) -> &'static Lut {
+        s1_lut(self.half, self.layout)
+    }
+}
+
 const Q_FIR: i32 = 24;
 
 /// Outputs are computed in whole blocks of this many (a multiple of every kernel's block).
@@ -329,7 +354,7 @@ pub(crate) struct Scratch {
 /// the idle pattern.
 #[derive(Debug, Clone)]
 pub(crate) struct Plan {
-    lut: &'static Lut,
+    lut: S1Src,
     isa: Isa,
     ops: Vec<Op>,
     /// Bytes per output.
@@ -352,7 +377,7 @@ impl Plan {
         let f40 = || Sym::new(&tables::F40, pow2(-Q_FIR));
         let isa = Isa::current();
         let layout = dispatch::s1_layout(isa);
-        let wide = || s1_lut(&tables::S1_WIDE, layout);
+        let wide = || S1Src::new(&tables::S1_WIDE, layout);
         let (s1_half, lut, mut ops) = match (cutoff, rate) {
             (Cutoff::Wide, PcmRate::Hz88200) => {
                 return Err(Error::InvalidArgument(
@@ -380,7 +405,7 @@ impl Plan {
                         vec![Op::Dec2(hb()), Op::Fir1(f), Op::Interp2(hb())]
                     }
                 };
-                (&tables::S1[..], s1_lut(&tables::S1, layout), ops)
+                (&tables::S1[..], S1Src::new(&tables::S1, layout), ops)
             }
         };
         debug_assert!(ops.len() <= MAX_OPS);
@@ -592,7 +617,7 @@ impl Plan {
             return;
         }
         c.reserved = true;
-        let n = LANES_MIN - 2;
+        let n = self.lanes_min - 2;
         let (_, plen) = self.byte_range((0, n), true);
         let s1 = self.levels((0, n), true)[0].1.div_ceil(PAD) * PAD;
         c.bytes.reserve(plen);
@@ -616,11 +641,16 @@ impl Plan {
             }
             if !sc.ordered_sized {
                 // Size the ordered buffers too, for every shorter pass, so that a caller
-                // that warmed up with a long pass allocates nothing later: one ordered pass
-                // of the longest length that stays ordered (on idle bytes; `sc.a` is
-                // overwritten below).
+                // that warmed up with a long pass allocates nothing later. S1's level is the
+                // longest of an ordered pass, so it bounds every buffer of one.
                 sc.ordered_sized = true;
-                self.pass_ordered(&[], 0, 0, LANES_MIN - 2, sc, None);
+                let n = self.lanes_min - 2;
+                let longest = self.levels((0, n), true)[0].1.div_ceil(PAD) * PAD;
+                for v in [&mut sc.a, &mut sc.b, &mut sc.even, &mut sc.odd] {
+                    v.reserve(longest.saturating_sub(v.len()));
+                }
+                let plen = self.byte_range((0, n), true).1;
+                sc.bytes.reserve(plen.saturating_sub(sc.bytes.len()));
             }
             return self.pass_lanes(pair, src, src0, o0, n, sc);
         }
@@ -667,7 +697,7 @@ impl Plan {
                         .map_or(0, |c| c.reuse(bytes, p0, self.lut.bytes, false, a, &mut []));
                     pair.run(self.lut, &bytes[from..], &mut lanes::Flat(&mut a[from..]));
                 }
-                _ => dispatch::s1(self.isa, self.lut, bytes, 0, 1, a),
+                _ => dispatch::s1(self.isa, self.lut.get(), bytes, 0, 1, a),
             }
         }
         for (k, op) in self.ops.iter().enumerate() {
@@ -709,8 +739,8 @@ impl Plan {
                         even.resize(np + 2 * e, 0.0);
                         odd.resize(np + 2 * o, 0.0);
                         if k == 0 {
-                            dispatch::s1(self.isa, self.lut, bytes, de, 2, even);
-                            dispatch::s1(self.isa, self.lut, bytes, dodd, 2, odd);
+                            dispatch::s1(self.isa, self.lut.get(), bytes, de, 2, even);
+                            dispatch::s1(self.isa, self.lut.get(), bytes, dodd, 2, odd);
                         } else {
                             every_other(&a[de..], even);
                             every_other(&a[dodd..], odd);
