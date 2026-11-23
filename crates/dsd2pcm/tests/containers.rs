@@ -154,6 +154,10 @@ fn wav_round_trip_formats() {
 /// Every truncation and many single-byte corruptions of valid files give a result or an
 /// error, never a panic.
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: thousands of corrupted files; the fuzz targets cover it"
+)]
 fn malformed_inputs_do_not_panic() {
     let files = [
         dsf_bytes(

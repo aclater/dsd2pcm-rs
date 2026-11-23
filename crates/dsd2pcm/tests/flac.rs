@@ -24,9 +24,18 @@ fn sample(i: u64, c: u64, bits: u32) -> i64 {
     v.clamp(-full, full - 1)
 }
 
+/// A test file, embedded so the tests need no file system (and run under Miri).
 fn fixture(name: &str) -> Vec<u8> {
-    let p = format!("{}/tests/data/flac/{name}", env!("CARGO_MANIFEST_DIR"));
-    std::fs::read(p).unwrap()
+    let bytes: &[u8] = match name {
+        "s8_1ch_8000.flac" => include_bytes!("data/flac/s8_1ch_8000.flac"),
+        "s12_1ch_22050.flac" => include_bytes!("data/flac/s12_1ch_22050.flac"),
+        "s16_2ch_44100.flac" => include_bytes!("data/flac/s16_2ch_44100.flac"),
+        "s20_2ch_192000.flac" => include_bytes!("data/flac/s20_2ch_192000.flac"),
+        "s24_6ch_96000.flac" => include_bytes!("data/flac/s24_6ch_96000.flac"),
+        "s32_1ch_48000.flac" => include_bytes!("data/flac/s32_1ch_48000.flac"),
+        _ => panic!("no test file {name}"),
+    };
+    bytes.to_vec()
 }
 
 /// (file, bits, channels, rate, frames)
@@ -259,6 +268,7 @@ fn skips_leading_id3_tags() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "file I/O")]
 fn open_input_detects_flac() {
     let dir = env!("CARGO_TARGET_TMPDIR");
     let f = fixture("s24_6ch_96000.flac");
