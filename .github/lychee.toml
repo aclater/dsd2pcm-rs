@@ -1,5 +1,5 @@
 # lychee link checker settings for .github/workflows/docs.yml. Locally, from the
-# repository root: lychee --config .github/lychee.toml README.md CHANGELOG.md SECURITY.md PROVENANCE.md AGENTS.md 'docs/**/*.md'
+# repository root: lychee --config .github/lychee.toml README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md PROVENANCE.md AGENTS.md 'docs/**/*.md'
 include_fragments = "full"
 max_retries = 4
 retry_wait_time = 10

@@ -1,8 +1,9 @@
 # Docs stay true: links resolve, the README's Quick start works on the latest release, and
 # the version named in the manifests, lock files, changelog and docs is one version.
-# - links: lychee (pinned binary, SHA-256 checked) over README.md, CHANGELOG.md, SECURITY.md,
-#   PROVENANCE.md, AGENTS.md and docs/; relative links and anchors offline, then external
-#   links with retries (.github/lychee.toml). Weekly too: external links rot without a change.
+# - links: lychee (pinned binary, SHA-256 checked) over README.md, CHANGELOG.md,
+#   CONTRIBUTING.md, SECURITY.md, PROVENANCE.md, AGENTS.md and docs/; relative links and
+#   anchors offline, then external links with retries (.github/lychee.toml). Weekly too:
+#   external links rot without a change.
 # - quick start: the README's Quick start block, run literally (.github/scripts/readme-quick-start.sh).
 # - versions: .github/scripts/check-doc-versions.py.
 # Linux only; no secrets.
@@ -56,11 +57,11 @@ jobs:
       - name: Relative links and anchors (offline)
         run: |
           "$RUNNER_TEMP/lychee" --no-progress --offline --config .github/lychee.toml \
-            README.md CHANGELOG.md SECURITY.md PROVENANCE.md AGENTS.md 'docs/**/*.md'
+            README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md PROVENANCE.md AGENTS.md 'docs/**/*.md'
       - name: External links (with retries)
         run: |
           "$RUNNER_TEMP/lychee" --no-progress --config .github/lychee.toml \
-            README.md CHANGELOG.md SECURITY.md PROVENANCE.md AGENTS.md 'docs/**/*.md'
+            README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md PROVENANCE.md AGENTS.md 'docs/**/*.md'
 
   quick-start:
     name: quick start

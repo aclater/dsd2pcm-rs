@@ -1,0 +1,35 @@
+[dsd2pcm-rs](../README.md) › Documentation
+
+# Documentation
+
+The documentation of dsd2pcm: the command-line tool, the Rust crate and the C library.
+Start with the [Quick start](../README.md#quick-start) in the README.
+
+## Install
+
+- [Platforms](../README.md#platforms): release archives, `cargo install dsd2pcm-cli`
+- [C library binary releases](c-api.md#binary-releases): archives, checksums and attestations
+
+## Use
+
+- [User guide](user-guide.md): converting files, rates and filters, formats, troubleshooting
+- [Options](options.md): every command-line option, the environment and the exit status
+
+## Reference
+
+- [Rust API](https://docs.rs/dsd2pcm) on docs.rs
+- [C interface](c-api.md): the C library, its rules and its ABI
+
+## Internals
+
+- [Design](design.md): how the conversion works and why its output is exact
+- [Performance](performance.md): speed against scarletbook-pcm 0.7.0, including the gaps
+- [Fuzzing](fuzzing.md): the fuzz targets and how to run them
+
+## Project
+
+- [Changelog](../CHANGELOG.md) · [Plan](plan.md)
+- [Contributing](../CONTRIBUTING.md) · [Development](development.md) · [Releases](release.md)
+- [Security policy](../SECURITY.md) · [Provenance](../PROVENANCE.md)
+
+Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).

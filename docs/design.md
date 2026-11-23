@@ -1,4 +1,9 @@
+[dsd2pcm-rs](../README.md) › [Documentation](README.md) › Design
+
 # Design
+
+How dsd2pcm converts DSD to PCM, why its output is byte-identical on every CPU, and
+how it is made fast without changing a byte. Each section names the code it describes.
 
 ## Data flow
 
@@ -98,7 +103,7 @@ contraction and per-CPU clones; up to 7 LSB apart on its test vectors).
 
 ## Frame runs (`frames`)
 
-`frames::Converter::convert` takes a run of Super Audio CD frames (one buffer, or one
+`frames::Converter::convert` takes a run of SACD frames (one buffer, or one
 buffer per frame), the frame before and after it (`None` at an area edge: idle), and writes
 interleaved `i32` or 3-byte little-endian samples with per-frame and per-channel clip
 counts; types and semantics follow scarletbook-pcm 0.7.0's public API so that a caller can
@@ -211,3 +216,12 @@ Parsers check every size against the file length, cap allocations (DSF metadata 
 block size 1 MiB; FLAC one decoded block) and return errors instead of panicking. The tests
 truncate and corrupt valid files byte by byte, and cargo-fuzz targets cover every reader
 (see [fuzzing.md](fuzzing.md)).
+
+## See also
+
+- [User guide](user-guide.md): what the conversion offers
+- [Performance](performance.md): the measured speed
+- [Provenance](../PROVENANCE.md): where the ported code comes from
+- [Fuzzing](fuzzing.md): how the readers are tested against bad input
+
+Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).

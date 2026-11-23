@@ -1,3 +1,5 @@
+[dsd2pcm-rs](../README.md) › [Documentation](README.md) › Performance
+
 # Performance
 
 Speed of DSD64 to 24-bit PCM with the default filter, against scarletbook-pcm 0.7.0, whose
@@ -114,3 +116,11 @@ One frame per call (`run 1`): 1.03x to 1.14x on the P-core, 1.06x to 1.12x on th
   The same filter is ahead converting frame runs (1.04x to 1.10x) and on the 6-channel file
   (1.05x), so the gap is likely in the whole-file path around the filter (DSF reading, WAV
   writing), not in the filter.
+
+## See also
+
+- [Design](design.md#speed): why it is fast
+- [Development](development.md): building and testing
+- [Changelog](../CHANGELOG.md): the changes behind each release
+
+Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).

@@ -1,3 +1,5 @@
+[dsd2pcm-rs](../README.md) › [Documentation](README.md) › Releasing
+
 # Releasing
 
 A release is one annotated tag, `v` plus the workspace version (for example `v0.1.1`), on a
@@ -137,7 +139,7 @@ no token when there is nothing to publish).
    `publish-update`, for the crates `dsd2pcm` and `dsd2pcm-cli`, expiring in one day.
 2. From a clean clone of the release commit:
 
-   ```
+   ```sh
    git clone https://github.com/aclater/dsd2pcm-rs.git
    cd dsd2pcm-rs
    cargo publish --dry-run --locked -p dsd2pcm -p dsd2pcm-cli
@@ -168,15 +170,15 @@ steps 1 to 5 for that crate alone.
 1. On `main`, through a pull request: set `version` under `[workspace.package]` and the
    `version` of `dsd2pcm` under `[workspace.dependencies]` in `Cargo.toml` to the new
    version (`"0.1.1"` and `"=0.1.1"` for 0.1.1), run `cargo update --workspace` and
-   `cargo update --manifest-path fuzz/Cargo.toml -p dsd2pcm`, give the `## Unreleased`
-   section of CHANGELOG.md the version, and update the version in README and docs (the
+   `cargo update --manifest-path fuzz/Cargo.toml -p dsd2pcm`, turn `## [Unreleased]` in
+   CHANGELOG.md into `## [0.1.1] - 2026-11-23` (the version and the date) with its link, and update the version in README and docs (the
    `versions` check of `docs.yml` lists every place). CI must be green on that commit; the
    Quick start check skips with a notice until the tag is released.
 2. Optional: a dry run of the release workflow on `main` (Actions, release, Run workflow).
 3. Tag the release commit, the `main` commit that CI and the Security Auditor approved, and
    push the tag:
 
-   ```
+   ```sh
    git fetch origin
    git tag -a v0.1.1 -m "dsd2pcm 0.1.1" origin/main
    git push origin v0.1.1
@@ -190,7 +192,7 @@ steps 1 to 5 for that crate alone.
 5. Check: the crates on crates.io, the GitHub release with its 31 files (ten
    archives, their `.sha256` and `.intoto.jsonl` files, and `SHA256SUMS`), and an asset:
 
-   ```
+   ```sh
    gh release download v0.1.1 -R aclater/dsd2pcm-rs -p dsd2pcm-0.1.1-x86_64-linux.tar.gz
    gh attestation verify dsd2pcm-0.1.1-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs --signer-workflow aclater/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.1 --deny-self-hosted-runners
    ```
@@ -198,3 +200,11 @@ steps 1 to 5 for that crate alone.
 If a run fails after the crates job, re-run the failed jobs: published crates are skipped.
 A tag is never moved or re-created (the ruleset forbids it); a broken release gets a new
 patch version.
+
+## See also
+
+- [C interface](c-api.md#binary-releases): what the C library archives hold
+- [Development](development.md): CI and the checks before a release
+- [Security policy](../SECURITY.md): supported versions
+
+Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).

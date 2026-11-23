@@ -1,3 +1,5 @@
+[dsd2pcm-rs](../README.md) › [Documentation](README.md) › Development
+
 # Development
 
 CI (`.github/workflows`) runs fmt, clippy, the docs build and the tests on Linux (x86_64,
@@ -6,7 +8,7 @@ has, plus the minimum Rust version, cargo-deny, a fuzz smoke test, CodeQL and zi
 tests need Rust 1.85 or later (a test-only dependency uses edition 2024); the crates
 themselves build with 1.83. Locally:
 
-```
+```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 CARGO_PROFILE_DEV_OPT_LEVEL=2 .github/scripts/test-simd-levels.sh
@@ -17,7 +19,15 @@ annotated `v*` tag; [docs/release.md](release.md) lists what is published and th
 manual steps.
 
 `.github/workflows/docs.yml` keeps the docs true: it checks every link in the README,
-CHANGELOG, SECURITY.md and `docs/` (lychee, `.github/lychee.toml`), runs the README's
-Quick start block literally on the release it names, and fails when the workspace version,
-the lock files, the newest CHANGELOG section and the release references in the docs
-disagree (`python3 -I .github/scripts/check-doc-versions.py`).
+CHANGELOG, CONTRIBUTING.md, SECURITY.md and `docs/` (lychee, `.github/lychee.toml`), runs
+the README's Quick start block literally on the release it names, and fails when the
+workspace version, the lock files, the newest CHANGELOG section and the release references
+in the docs disagree (`python3 -I .github/scripts/check-doc-versions.py`).
+
+## See also
+
+- [Contributing](../CONTRIBUTING.md): how changes get in
+- [Fuzzing](fuzzing.md): the fuzz targets
+- [Releases](release.md): publishing a version
+
+Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).

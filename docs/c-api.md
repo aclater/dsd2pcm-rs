@@ -1,3 +1,5 @@
+[dsd2pcm-rs](../README.md) › [Documentation](README.md) › C interface
+
 # C interface
 
 `crates/dsd2pcm-capi` builds `libdsd2pcm.so` (`.dylib`, `.dll`) and `libdsd2pcm.a` with
@@ -81,7 +83,7 @@ if (rc != DSD2PCM_OK)
 
 ## Frame runs
 
-The C counterpart of `dsd2pcm::frames::Converter`: Super Audio CD frames (`channels x 4704`
+The C counterpart of `dsd2pcm::frames::Converter`: SACD frames (`channels x 4704`
 bytes, channels interleaved byte by byte, earliest sample in the most significant bit) to
 interleaved 24-bit PCM, a run at a time, with the frames before and after the run as
 context. Any run with its neighbours gives the bytes of that run in a whole-area
@@ -146,7 +148,7 @@ Both run without arguments.
 A minimal program, `crates/dsd2pcm-capi/tests/minimal.c`, converts one stereo frame of
 DSD silence. To build and run it on Linux, from the repository root:
 
-```
+```sh
 cargo build --release -p dsd2pcm-capi
 cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c target/release/libdsd2pcm.a -lpthread -ldl -lm -o minimal
 ./minimal
@@ -155,7 +157,7 @@ cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c t
 It prints `dsd2pcm 0.1.1: 2352 samples per channel, first byte 0`. To link the shared
 library instead (its SONAME is `libdsd2pcm.so.1`, so it needs that name at run time):
 
-```
+```sh
 ln -sf libdsd2pcm.so target/release/libdsd2pcm.so.1
 cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c -L target/release -ldsd2pcm -o minimal
 LD_LIBRARY_PATH=target/release ./minimal
@@ -187,7 +189,7 @@ The `1` in the file names is the ABI version (see [ABI](#abi)). Check a download
 it, and build the example against it, from the folder holding the archive (Linux x86_64
 shown):
 
-```
+```sh
 sha256sum -c libdsd2pcm-0.1.1-x86_64-linux.tar.gz.sha256
 gh attestation verify libdsd2pcm-0.1.1-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs
 tar -xzf libdsd2pcm-0.1.1-x86_64-linux.tar.gz
@@ -200,7 +202,7 @@ On macOS the same with the `aarch64-macos` archive, `shasum -a 256 -c` in place 
 `sha256sum -c`, and `-Wl,-rpath,@executable_path/libdsd2pcm-0.1.1-aarch64-macos/lib`.
 Static linking instead (Linux):
 
-```
+```sh
 cc libdsd2pcm-0.1.1-x86_64-linux/examples/minimal.c $(pkg-config --cflags dsd2pcm) libdsd2pcm-0.1.1-x86_64-linux/lib/libdsd2pcm.a $(pkg-config --libs-only-l --static dsd2pcm | sed 's/-ldsd2pcm//') -o minimal
 ```
 
@@ -208,7 +210,7 @@ To install system-wide, copy `include/` and `lib/` under a prefix such as `/usr/
 pkg-config file needs no change. On Windows, in a Visual Studio developer prompt in the
 unpacked folder:
 
-```
+```bat
 cl /I include examples\minimal.c lib\dsd2pcm.dll.lib
 copy bin\dsd2pcm.dll .
 minimal.exe
@@ -227,3 +229,11 @@ overlapping buffers, cancelling, busy and poisoned handles, allocation after war
 byte identity with the Rust API. They also run under Miri
 (`cargo +nightly miri test -p dsd2pcm-capi`), apart from those that use files or convert
 many frames, which are marked as ignored under Miri.
+
+## See also
+
+- [User guide](user-guide.md): the same conversion from the command line and Rust
+- [Design](design.md#c-interface-cratesdsd2pcm-capi): how the C layer checks its input
+- [Releases](release.md): how the binary archives are built and checked
+
+Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
