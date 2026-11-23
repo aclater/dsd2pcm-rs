@@ -65,9 +65,12 @@ case "$os" in
             echo "static library members marked SHSTK: $marked of $members"
             [[ "$marked" -eq "$members" ]] || { echo "::error::$((members - marked)) of $members objects in libdsd2pcm.a are not marked SHSTK (and only SHSTK)"; exit 1; }
             # A relocatable link merges the property over the objects it takes from the
-            # archive, as a program link does, without the system's start files.
+            # archive, as a program link does, without the system's start files. The program
+            # is compiled first, so that -nostdlib (link only) leaves the C headers alone.
             # shellcheck disable=SC2086
-            $cc -std=c99 -fcf-protection=full -nostdlib -r "${cflags[@]}" -o "$work/minimal-cet.o" "$src" "$a"
+            $cc -std=c99 -fcf-protection=full -c "${cflags[@]}" -o "$work/minimal-cf.o" "$src"
+            # shellcheck disable=SC2086
+            $cc -nostdlib -r -o "$work/minimal-cet.o" "$work/minimal-cf.o" "$a"
             [[ "$(readelf -n "$work/minimal-cet.o" | grep 'x86 feature:')" == *'x86 feature: SHSTK' ]] \
                 || { echo "::error::a program object linked with libdsd2pcm.a is not marked SHSTK"; exit 1; }
             # The shared library must stay unmarked while it carries LLVM's libunwind, which
