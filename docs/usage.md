@@ -59,7 +59,7 @@ output are unchanged.
 ## Command line
 
 ```
-dsd2pcm IN OUT [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread]
+dsd2pcm [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread] [--] IN OUT
 ```
 
 The `dsd2pcm` tool converts one DSF or DFF file (DSD64) to a 24-bit WAV file; WAV and FLAC
@@ -69,6 +69,12 @@ the rates, the length of the audio, the time taken and the clipped samples, in a
 channel. Exit status: 0 on success, 1 when the conversion fails, 2 for a usage error, 130
 or 143 when interrupted by SIGINT or SIGTERM.
 `--help` prints the usage.
+
+Options and file names may come in any order. An argument that starts with `-` is an
+option; `--` ends the options, so `dsd2pcm -- -take1.dsf -take1.wav` converts a file whose
+name starts with `-`. File names are passed to the system as they are, in any encoding it
+allows (on Linux any bytes); option values must be UTF-8, and a value that is not is a
+usage error.
 
 ## Build settings for consumers
 

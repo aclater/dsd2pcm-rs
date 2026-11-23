@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Command line: a file name or option value that is not valid UTF-8 (possible on Linux and
+  other Unix systems) no longer ends the tool with a panic. File names are passed to the
+  system as they are; an option value that is not UTF-8 is a usage error (exit status 2).
+
+### Changed
+
+- Command line: `--` ends the options, so a file whose name starts with `-` can be given
+  (`dsd2pcm -- -take1.dsf out.wav`). An unknown argument that starts with `-` is now a usage
+  error; before, one that did not start with `--` was taken as a file name.
+
 ## 0.1.2 (2026-11-23)
 
 This release contains security fixes; upgrading is recommended. Versions 0.1.0 and 0.1.1 are

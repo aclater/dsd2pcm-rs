@@ -1,6 +1,7 @@
-//! `dsd2pcm IN.dsf|IN.dff OUT.wav [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread]`
+//! `dsd2pcm [OPTIONS] [--] IN.dsf|IN.dff OUT.wav`
 
 use dsd2pcm::{convert_file_with, Cutoff, Filter, PcmOptions, PcmRate};
+use std::ffi::OsString;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -8,26 +9,41 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-const USAGE: &str = "usage: dsd2pcm IN.dsf|IN.dff OUT.wav [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread]
+const USAGE: &str = "usage: dsd2pcm [OPTIONS] [--] IN.dsf|IN.dff OUT.wav
+options: [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread]
 
 Converts DSD64 to 24-bit PCM WAV. Defaults: --rate 176400 --cutoff 40 --gain 0.
 Cutoffs: 30 (pass 30 kHz, stop 36 kHz), 40 (pass 40 kHz, stop 48 kHz),
 wide (pass 80 kHz; 176.4 and 352.8 kHz only).
 Filters: default (scarletbook-pcm 0.7.0's), pysacd (pysacd's filter and dithered
 quantiser, bit-exact with its reference; 88200 and 176400 only, fixed response).
---single-thread: convert on the calling thread only (default: all cores).";
+--single-thread: convert on the calling thread only (default: all cores).
+--: every later argument is a file name, even one that starts with '-'.
+File names may be in any encoding the system allows.";
 
-fn parse(args: &[String]) -> Result<(PathBuf, PathBuf, PcmOptions), String> {
+/// Parses the arguments (without the program name). File names stay `OsString`s, so any
+/// name the operating system allows works; option values must be UTF-8. `Err("")` asks for
+/// the usage on standard output.
+fn parse(args: Vec<OsString>) -> Result<(PathBuf, PathBuf, PcmOptions), String> {
     let mut pos = Vec::new();
     let mut opts = PcmOptions::new(PcmRate::Hz176400);
-    let mut it = args.iter();
+    let mut it = args.into_iter();
     while let Some(a) = it.next() {
-        let mut val = |name: &str| {
-            it.next()
-                .cloned()
-                .ok_or_else(|| format!("{name} needs a value"))
+        // A name that is not UTF-8 is never an option.
+        let Some(s) = a.to_str() else {
+            pos.push(PathBuf::from(a));
+            continue;
         };
-        match a.as_str() {
+        let mut val = |name: &str| -> Result<String, String> {
+            let v = it.next().ok_or_else(|| format!("{name} needs a value"))?;
+            v.into_string().map_err(|v| {
+                format!(
+                    "{name}: the value {} is not valid UTF-8",
+                    v.to_string_lossy()
+                )
+            })
+        };
+        match s {
             "--rate" => {
                 let v = val("--rate")?;
                 let hz: u32 = v.parse().map_err(|_| format!("bad rate {v}"))?;
@@ -55,7 +71,15 @@ fn parse(args: &[String]) -> Result<(PathBuf, PathBuf, PcmOptions), String> {
             }
             "--single-thread" => opts.threads = false,
             "-h" | "--help" => return Err(String::new()),
-            s if s.starts_with("--") => return Err(format!("unknown option {s}")),
+            "--" => {
+                pos.extend(it.by_ref().map(PathBuf::from));
+                break;
+            }
+            s if s.starts_with('-') && s.len() > 1 => {
+                return Err(format!(
+                    "unknown option {s} (put -- before file names that start with '-')"
+                ))
+            }
             _ => pos.push(PathBuf::from(a)),
         }
     }
@@ -68,8 +92,7 @@ fn parse(args: &[String]) -> Result<(PathBuf, PathBuf, PcmOptions), String> {
 }
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let (inp, out, opts) = match parse(&args) {
+    let (inp, out, opts) = match parse(std::env::args_os().skip(1).collect()) {
         Ok(v) => v,
         Err(e) if e.is_empty() => {
             println!("{USAGE}");
