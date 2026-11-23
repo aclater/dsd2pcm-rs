@@ -3,7 +3,10 @@
 //! (src/dispatch.rs); Portions Copyright (c) 2026 The scarletbook-rs authors, MIT OR
 //! Apache-2.0 (see PROVENANCE.md).
 //!
-//! The levels: the generic kernels as compiled; on x86 and x86-64, the same safe code built
+//! The levels: the generic kernels as compiled; on aarch64, `neon`: passes in lanes
+//! ([`super::lanes`]) in blocks sized for its 32 vector registers, with fused multiply-adds
+//! in the stages [`super::exact`] proved exact (NEON and FMA are aarch64's baseline: no
+//! `#[target_feature]`, no `unsafe`); on x86 and x86-64, the same safe code built
 //! with SSE2 (`#[target_feature]`), which runs passes in lanes ([`super::lanes`]) in blocks
 //! sized for SSE2, picked when the CPU has no AVX2; the safe code built with AVX2; and that
 //! build with fused multiply-adds in the stages whose sums [`super::exact`] proved exact
@@ -31,6 +34,9 @@ use super::lanes;
 pub enum SimdLevel {
     /// The kernels as compiled.
     Generic,
+    /// aarch64 (always NEON and FMA): passes in lanes in blocks sized for its 32 vector
+    /// registers, fused only in stages proven exact.
+    Neon,
     /// x86 or x86-64 with SSE2 (and no AVX2): passes in lanes, in blocks sized for SSE2.
     Sse2,
     /// x86 or x86-64 with AVX2.
@@ -45,6 +51,7 @@ impl SimdLevel {
         let top = Isa::detect().0;
         [
             SimdLevel::Generic,
+            SimdLevel::Neon,
             SimdLevel::Sse2,
             SimdLevel::Avx2,
             SimdLevel::Avx2Fma,
@@ -54,14 +61,20 @@ impl SimdLevel {
         .collect()
     }
 
-    /// Whether this target has the level at all: SSE2 is a level on x86 and x86-64 only.
+    /// Whether this target has the level at all: NEON is a level on aarch64 only, the
+    /// others above the generic one on x86 and x86-64 only.
     fn on_this_target(self) -> bool {
-        self != SimdLevel::Sse2 || cfg!(any(target_arch = "x86", target_arch = "x86_64"))
+        if self == SimdLevel::Neon {
+            cfg!(target_arch = "aarch64")
+        } else {
+            self == SimdLevel::Generic || cfg!(any(target_arch = "x86", target_arch = "x86_64"))
+        }
     }
 
     fn parse(s: &str) -> Option<SimdLevel> {
         match s.trim().to_ascii_lowercase().as_str() {
             "generic" | "scalar" => Some(SimdLevel::Generic),
+            "neon" => Some(SimdLevel::Neon),
             "sse2" => Some(SimdLevel::Sse2),
             "avx2" => Some(SimdLevel::Avx2),
             "avx2fma" | "avx2+fma" | "fma" => Some(SimdLevel::Avx2Fma),
@@ -116,6 +129,9 @@ impl Isa {
         if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
             // x86-64 always has SSE2; on 32-bit x86 it was checked above.
             Isa(SimdLevel::Sse2)
+        } else if cfg!(target_arch = "aarch64") {
+            // aarch64 always has NEON and FMA.
+            Isa(SimdLevel::Neon)
         } else {
             Isa(SimdLevel::Generic)
         }
@@ -132,7 +148,7 @@ impl Isa {
     }
 
     /// The level to use now: the detected one, capped by the environment variable
-    /// `DSD2PCM_SIMD` (`generic`, `sse2`, `avx2` or `avx2fma`) and by [`with_simd_level`].
+    /// `DSD2PCM_SIMD` (`generic`, `neon`, `sse2`, `avx2` or `avx2fma`) and by [`with_simd_level`].
     pub(crate) fn current() -> Isa {
         static ENV: std::sync::OnceLock<Option<SimdLevel>> = std::sync::OnceLock::new();
         let mut isa = Isa::detect();
@@ -196,6 +212,8 @@ pub(crate) fn fir1(isa: Isa, s: &Sym, x: &[f64], out: &mut [f64]) {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees SSE2 (see above).
         SimdLevel::Sse2 => unsafe { sse2::fir1(s, x, out) },
+        #[cfg(target_arch = "aarch64")]
+        SimdLevel::Neon if s.fused => neon::fir1(s, x, out),
         _ => kernel::fir1::<{ kernel::L_FIR1 }, Plain>(s, x, out),
     }
 }
@@ -212,6 +230,8 @@ pub(crate) fn dec2(isa: Isa, s: &Sym, xe: &[f64], xo: &[f64], out: &mut [f64]) {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees SSE2 (see above).
         SimdLevel::Sse2 => unsafe { sse2::dec2(s, xe, xo, out) },
+        #[cfg(target_arch = "aarch64")]
+        SimdLevel::Neon if s.fused => neon::dec2(s, xe, xo, out),
         _ => kernel::dec2::<{ kernel::L }, Plain>(s, xe, xo, out),
     }
 }
@@ -228,14 +248,17 @@ pub(crate) fn interp2_odd(isa: Isa, s: &Sym, w: &[f64], out: &mut [f64]) {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees SSE2 (see above).
         SimdLevel::Sse2 => unsafe { sse2::interp2_odd(s, w, out) },
+        #[cfg(target_arch = "aarch64")]
+        SimdLevel::Neon if s.fused => neon::interp2_odd(s, w, out),
         _ => kernel::interp2_odd::<{ kernel::L }, Plain>(s, w, out),
     }
 }
 
 /// Whether passes may run in lanes ([`lanes::run`]) at `isa`: x86-64 with AVX2 and FMA, and
-/// the `sse2` level (on 32-bit x86 the AVX2 levels run the ordered kernels).
+/// the `sse2` and `neon` levels (on 32-bit x86 the AVX2 levels run the ordered kernels).
 pub(super) fn lanes_level(isa: Isa) -> bool {
-    (cfg!(target_arch = "x86_64") && isa.0 == SimdLevel::Avx2Fma) || isa.0 == SimdLevel::Sse2
+    (cfg!(target_arch = "x86_64") && isa.0 == SimdLevel::Avx2Fma)
+        || matches!(isa.0, SimdLevel::Sse2 | SimdLevel::Neon)
 }
 
 /// Whether passes run in lanes from fewer outputs at `isa` (`super::LANES_MIN_SSE2`): at
@@ -277,6 +300,8 @@ pub(super) fn lanes<'b>(
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees SSE2 (see above).
         SimdLevel::Sse2 => unsafe { sse2::run_lanes(p, pad, bufs) },
+        #[cfg(target_arch = "aarch64")]
+        SimdLevel::Neon => neon::run_lanes(p, pad, bufs),
         _ => lanes::run::<Plain, 8, 8, false>(p, pad, bufs),
     }
 }
@@ -416,28 +441,33 @@ mod avx2 {
     }
 }
 
+/// A fused multiply-add (one rounding). The only `mul_add` of the crate is here, used only
+/// by the fused builds below ([`avx2fma`], [`neon`]) and only for stages with `Sym::fused`
+/// (and the lanes, which take only such stages: [`lanes::takes`]), so no other stage can
+/// fuse.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
+struct Fused;
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
+impl kernel::Mac for Fused {
+    #[inline(always)]
+    fn mac(acc: f64, h: f64, x: f64) -> f64 {
+        h.mul_add(x, acc)
+    }
+}
+
 /// The FIR kernels built with AVX2 and FMA, with fused multiply-adds. Used only for stages
-/// with `Sym::fused`; callers must have checked that the CPU has AVX2 and FMA. The only
-/// `mul_add` of the crate is here, so no other build can fuse.
+/// with `Sym::fused`; callers must have checked that the CPU has AVX2 and FMA.
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod avx2fma {
-    use super::kernel::{self, Mac, Sym};
+    use super::kernel::{self, Sym};
     #[cfg(target_arch = "x86_64")]
     use super::lanes;
+    use super::Fused;
 
     /// Outputs per block of the ordered kernels: 8 vectors of AVX, 8 independent chains to
     /// cover the FMA latency.
     const L: usize = 32;
-
-    /// A fused multiply-add (one rounding).
-    struct Fused;
-
-    impl Mac for Fused {
-        #[inline(always)]
-        fn mac(acc: f64, h: f64, x: f64) -> f64 {
-            h.mul_add(x, acc)
-        }
-    }
 
     #[target_feature(enable = "avx2,fma")]
     pub(super) unsafe fn fir1(s: &Sym, x: &[f64], out: &mut [f64]) {
@@ -462,6 +492,45 @@ mod avx2fma {
         bufs: &'b mut lanes::Bufs,
     ) -> &'b [lanes::Lanes] {
         lanes::run::<Fused, 8, 8, false>(p, pad, bufs)
+    }
+}
+
+/// The `neon` level of aarch64: the ordered FIR kernels fused (stages with `Sym::fused`
+/// only) and the lanes in blocks of [`neon::SV1`] and [`neon::SV2`] output vectors (2 NEON
+/// registers each), sized for its 32 vector registers. NEON and FMA are the target's
+/// baseline, so these are plain safe functions.
+#[cfg(target_arch = "aarch64")]
+mod neon {
+    use super::kernel::{self, Sym};
+    use super::{lanes, Fused};
+
+    /// Outputs per block of the ordered fused kernels.
+    const L: usize = 16;
+    /// Output vectors per block of the lanes in Fir1 and Interp2.
+    pub(super) const SV1: usize = 8;
+    /// Output vectors per block of the lanes in Dec2.
+    pub(super) const SV2: usize = 8;
+    /// Whether the lanes load whole windows (`lanes::pairs`).
+    const WHOLE: bool = true;
+
+    pub(super) fn fir1(s: &Sym, x: &[f64], out: &mut [f64]) {
+        kernel::fir1::<L, Fused>(s, x, out)
+    }
+
+    pub(super) fn dec2(s: &Sym, xe: &[f64], xo: &[f64], out: &mut [f64]) {
+        kernel::dec2::<L, Fused>(s, xe, xo, out)
+    }
+
+    pub(super) fn interp2_odd(s: &Sym, w: &[f64], out: &mut [f64]) {
+        kernel::interp2_odd::<L, Fused>(s, w, out)
+    }
+
+    pub(super) fn run_lanes<'b>(
+        p: &lanes::Pass<'_>,
+        pad: usize,
+        bufs: &'b mut lanes::Bufs,
+    ) -> &'b [lanes::Lanes] {
+        lanes::run::<Fused, SV1, SV2, WHOLE>(p, pad, bufs)
     }
 }
 

@@ -1119,6 +1119,11 @@ mod tests {
             let sse2 = std::arch::is_x86_feature_detected!("sse2");
             assert_eq!(levels.contains(&SimdLevel::Sse2), sse2);
         }
+        // aarch64 always has NEON and FMA: the `neon` level.
+        assert_eq!(
+            levels.contains(&SimdLevel::Neon),
+            cfg!(target_arch = "aarch64")
+        );
         for &level in &levels {
             let plan = with_simd_level(level, || Plan::new(PcmRate::Hz88200, Cutoff::Standard))
                 .unwrap()
