@@ -1,0 +1,98 @@
+# Checks for long-lived processes, on Linux x86_64 with a pinned nightly (docs/testing.md):
+# - miri (capi, core): the C interface's Rust tests and the core crate's Miri-feasible
+#   tests (undefined behaviour, use after free, leaks at exit), kernels at the generic level;
+# - tsan: the threaded whole-file path, the frame-run tests, the soak test (short) and the
+#   C interface's tests under ThreadSanitizer, with std rebuilt instrumented (-Zbuild-std).
+# Every week, by hand, and Miri on pull requests that touch the C interface.
+name: sanitizers
+
+on:
+  pull_request:
+    paths:
+      - "crates/dsd2pcm-capi/**"
+      - ".github/workflows/sanitizers.yml"
+      - ".github/scripts/miri-core.sh"
+  schedule:
+    - cron: "17 5 * * 3"  # Wednesdays, 05:17 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}  # a new push supersedes the old PR run
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_NIGHTLY: nightly-2026-11-01  # Miri and the sanitizers need a nightly
+
+jobs:
+  # Miri, in two jobs that run side by side: the C interface, the core crate.
+  miri:
+    name: miri (${{ matrix.part }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [capi, core]
+    container:
+      # UBI 10 (ubi10/ubi 10.3), pinned by digest.
+      image: registry.access.redhat.com/ubi10/ubi@sha256:1e9193f051ac70582821c8a941325c5053488c54c75cd0c31b577d871ac29dba
+    defaults:
+      run:
+        shell: bash
+    env:
+      # The generic kernels (Miri runs no SIMD); forwarded into Miri's isolated environment.
+      DSD2PCM_SIMD: generic
+      MIRIFLAGS: -Zmiri-env-forward=DSD2PCM_SIMD
+    steps:
+      - name: Packages
+        run: dnf -y -q --setopt=install_weak_deps=False install git-core gcc && dnf clean all
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust (.github/scripts/rust-setup.sh)
+        run: .github/scripts/rust-setup.sh "$RUST_NIGHTLY" miri,rust-src
+      - name: Miri setup
+        run: cargo miri setup
+      - name: C interface (dsd2pcm-capi)
+        if: matrix.part == 'capi'
+        run: cargo miri test --locked -p dsd2pcm-capi
+      - name: Core crate (.github/scripts/miri-core.sh)
+        if: matrix.part == 'core'
+        run: .github/scripts/miri-core.sh
+
+  tsan:
+    name: tsan
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    container:
+      # UBI 10 (ubi10/ubi 10.3), pinned by digest.
+      image: registry.access.redhat.com/ubi10/ubi@sha256:1e9193f051ac70582821c8a941325c5053488c54c75cd0c31b577d871ac29dba
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTFLAGS: -Zsanitizer=thread
+      RUSTDOCFLAGS: -Zsanitizer=thread
+      TSAN_OPTIONS: halt_on_error=1 second_deadlock_stack=1
+      CARGO_PROFILE_DEV_OPT_LEVEL: "2"
+      DSD2PCM_SOAK_ITERATIONS: "100"
+      DSD2PCM_SOAK_RSS_REPORT_ONLY: "1"  # TSan's shadow memory grows with the run
+    steps:
+      - name: Packages
+        run: dnf -y -q --setopt=install_weak_deps=False install git-core gcc && dnf clean all
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust (.github/scripts/rust-setup.sh)
+        run: .github/scripts/rust-setup.sh "$RUST_NIGHTLY" rust-src
+      - name: ThreadSanitizer, core crate (threaded whole-file path, frame runs, soak)
+        run: |
+          cargo test -Zbuild-std --target x86_64-unknown-linux-gnu --locked -p dsd2pcm \
+            --test progress --test frames --test soak -- --include-ignored --nocapture
+      - name: ThreadSanitizer, C interface (busy handles, threaded file conversion)
+        run: cargo test -Zbuild-std --target x86_64-unknown-linux-gnu --locked -p dsd2pcm-capi --lib
