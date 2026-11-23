@@ -8,7 +8,7 @@ on:
   pull_request:
     paths: [".github/**"]
   push:
-    branches: [main, ci]
+    branches: [main]
     paths: [".github/**"]
   workflow_dispatch:
 

@@ -5,7 +5,7 @@ name: cargo-deny
 on:
   pull_request:
   push:
-    branches: [main, ci]
+    branches: [main]
   schedule:
     - cron: "37 5 * * 1"  # weekly: new advisories appear without a code change
   workflow_dispatch:
@@ -49,7 +49,13 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: The workspace
         run: cargo-deny --log-level warn --all-features check advisories bans licenses sources
-      - name: The fuzz targets' own lock file (with the workspace's deny.toml)
+      # fuzz/deny.toml when present (libfuzzer-sys carries LLVM's NCSA licence, which the
+      # fuzz targets may allow: they are never shipped), else the workspace's.
+      - name: The fuzz targets' own lock file
         if: hashFiles('fuzz/Cargo.lock') != ''
         working-directory: fuzz
-        run: cargo-deny --log-level warn --all-features check --config ../deny.toml advisories bans licenses sources
+        run: |
+          config=../deny.toml
+          [[ -f deny.toml ]] && config=deny.toml
+          echo "config: fuzz/$config"
+          cargo-deny --log-level warn --all-features check --config "$config" advisories bans licenses sources
