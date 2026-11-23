@@ -1,0 +1,14 @@
+[package]
+name = "dsd2pcm"
+description = "DSD to PCM conversion with DSF, DFF and WAV reading and writing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+scarletbook-pcm = "=0.7.0"
+sha2 = "0.10"

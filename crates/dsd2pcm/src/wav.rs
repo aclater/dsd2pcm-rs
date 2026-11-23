@@ -1,0 +1,265 @@
+//! WAV (RIFF/WAVE) reader and a small writer.
+//!
+//! The reader accepts PCM integer samples of 16, 24 or 32 bits and IEEE float samples of 32
+//! or 64 bits, in plain or `WAVE_FORMAT_EXTENSIBLE` form, 1 to 6 channels. Samples are
+//! returned as `f64` with digital full scale at +-1.0; non-finite float samples read as 0.
+
+use crate::error::{format_err, unsupported, Result};
+use crate::io::{le_u16, le_u32, read_exact_arr, PcmInfo, PcmRead};
+use std::io::{Read, Seek, SeekFrom, Write};
+
+/// Sample encoding of a WAV file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WavFormat {
+    /// Signed integer, 16 bits.
+    I16,
+    /// Signed integer, 24 bits.
+    I24,
+    /// Signed integer, 32 bits.
+    I32,
+    /// IEEE float, 32 bits.
+    F32,
+    /// IEEE float, 64 bits.
+    F64,
+}
+
+impl WavFormat {
+    /// Bytes per sample.
+    pub fn bytes(self) -> usize {
+        match self {
+            WavFormat::I16 => 2,
+            WavFormat::I24 => 3,
+            WavFormat::I32 | WavFormat::F32 => 4,
+            WavFormat::F64 => 8,
+        }
+    }
+    fn is_float(self) -> bool {
+        matches!(self, WavFormat::F32 | WavFormat::F64)
+    }
+}
+
+/// WAV reader.
+#[derive(Debug)]
+pub struct WavReader<R> {
+    r: R,
+    info: PcmInfo,
+    format: WavFormat,
+    remaining: u64,
+    buf: Vec<u8>,
+}
+
+impl<R: Read + Seek> WavReader<R> {
+    /// Parses the headers and positions the reader at the first sample.
+    pub fn new(mut r: R) -> Result<Self> {
+        let file_len = r.seek(SeekFrom::End(0))?;
+        r.seek(SeekFrom::Start(0))?;
+        let hdr: [u8; 12] = read_exact_arr(&mut r)?;
+        if &hdr[0..4] != b"RIFF" || &hdr[8..12] != b"WAVE" {
+            return format_err("not a WAV file (no RIFF/WAVE header)");
+        }
+        let mut pos = 12u64;
+        let mut fmt: Option<(WavFormat, u16, u32)> = None;
+        loop {
+            if pos + 8 > file_len {
+                return format_err("WAV file has no 'data' chunk");
+            }
+            let ck: [u8; 8] = read_exact_arr(&mut r)?;
+            let size = u64::from(le_u32(&ck, 4));
+            let body = pos + 8;
+            match &ck[0..4] {
+                b"fmt " => {
+                    if !(16..=1024).contains(&size) || body + size > file_len {
+                        return format_err("WAV 'fmt ' chunk size is invalid");
+                    }
+                    let mut f = vec![0u8; size as usize];
+                    r.read_exact(&mut f)?;
+                    let mut tag = le_u16(&f, 0);
+                    let channels = le_u16(&f, 2);
+                    let rate = le_u32(&f, 4);
+                    let align = le_u16(&f, 12);
+                    let bits = le_u16(&f, 14);
+                    if tag == 0xFFFE {
+                        if size < 40 {
+                            return format_err("WAV extensible 'fmt ' chunk is too small");
+                        }
+                        tag = le_u16(&f, 24);
+                    }
+                    let format = match (tag, bits) {
+                        (1, 16) => WavFormat::I16,
+                        (1, 24) => WavFormat::I24,
+                        (1, 32) => WavFormat::I32,
+                        (3, 32) => WavFormat::F32,
+                        (3, 64) => WavFormat::F64,
+                        _ => return unsupported(format!("WAV format tag {tag} with {bits} bits")),
+                    };
+                    if !(1..=6).contains(&channels) {
+                        return format_err(format!("WAV channel count {channels} is not 1..6"));
+                    }
+                    if rate == 0 {
+                        return format_err("WAV sample rate is 0");
+                    }
+                    if usize::from(align) != usize::from(channels) * format.bytes() {
+                        return format_err("WAV block alignment does not match the format");
+                    }
+                    fmt = Some((format, channels, rate));
+                }
+                b"data" => {
+                    let Some((format, channels, rate)) = fmt else {
+                        return format_err("WAV 'data' chunk before 'fmt '");
+                    };
+                    // Streamed files may carry a placeholder size; read to the end then.
+                    let avail = file_len - body;
+                    let len = if size == 0xFFFF_FFFF || size > avail {
+                        avail
+                    } else {
+                        size
+                    };
+                    let frame = (usize::from(channels) * format.bytes()) as u64;
+                    let frames = len / frame;
+                    return Ok(WavReader {
+                        r,
+                        info: PcmInfo {
+                            channels,
+                            sample_rate: rate,
+                            frames,
+                        },
+                        format,
+                        remaining: frames,
+                        buf: Vec::new(),
+                    });
+                }
+                _ => {}
+            }
+            pos = body + size + (size & 1);
+            r.seek(SeekFrom::Start(pos))?;
+        }
+    }
+
+    /// Sample encoding.
+    pub fn format(&self) -> WavFormat {
+        self.format
+    }
+}
+
+fn sample(format: WavFormat, b: &[u8]) -> f64 {
+    let v = match format {
+        WavFormat::I16 => f64::from(i16::from_le_bytes([b[0], b[1]])) * (1.0 / 32768.0),
+        WavFormat::I24 => {
+            f64::from(i32::from_le_bytes([0, b[0], b[1], b[2]]) >> 8) * (1.0 / 8_388_608.0)
+        }
+        WavFormat::I32 => {
+            f64::from(i32::from_le_bytes([b[0], b[1], b[2], b[3]])) * (1.0 / 2_147_483_648.0)
+        }
+        WavFormat::F32 => f64::from(f32::from_le_bytes([b[0], b[1], b[2], b[3]])),
+        WavFormat::F64 => f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]),
+    };
+    if format.is_float() && !v.is_finite() {
+        0.0
+    } else {
+        v
+    }
+}
+
+impl<R: Read + Seek> PcmRead for WavReader<R> {
+    fn info(&self) -> PcmInfo {
+        self.info
+    }
+
+    fn read_frames(&mut self, max_frames: usize, out: &mut [Vec<f64>]) -> Result<usize> {
+        let ch = usize::from(self.info.channels);
+        if out.len() != ch {
+            return Err(crate::Error::InvalidArgument(
+                "output channel count mismatch".into(),
+            ));
+        }
+        let n = (max_frames.max(1) as u64).min(self.remaining) as usize;
+        if n == 0 {
+            return Ok(0);
+        }
+        let bs = self.format.bytes();
+        self.buf.resize(n * ch * bs, 0);
+        self.r.read_exact(&mut self.buf)?;
+        for frame in self.buf.chunks_exact(ch * bs) {
+            for (c, o) in out.iter_mut().enumerate() {
+                o.push(sample(self.format, &frame[c * bs..(c + 1) * bs]));
+            }
+        }
+        self.remaining -= n as u64;
+        Ok(n)
+    }
+}
+
+/// WAV writer for interleaved sample bytes already in the target encoding: a 16-byte
+/// `fmt ` chunk with format tag 1 (integer PCM) or 3 (IEEE float).
+#[derive(Debug)]
+pub struct WavWriter<W: Write + Seek> {
+    w: W,
+    data_len: u64,
+    finished: bool,
+}
+
+impl<W: Write + Seek> WavWriter<W> {
+    /// Starts a WAV file.
+    pub fn new(mut w: W, format: WavFormat, channels: u16, rate: u32) -> Result<Self> {
+        if !(1..=6).contains(&channels) || rate == 0 {
+            return Err(crate::Error::InvalidArgument(
+                "WAV writer: 1..6 channels, rate > 0".into(),
+            ));
+        }
+        let bs = format.bytes() as u16;
+        let tag: u16 = if format.is_float() { 3 } else { 1 };
+        let mut h = Vec::with_capacity(44);
+        h.extend_from_slice(b"RIFF");
+        h.extend_from_slice(&0u32.to_le_bytes());
+        h.extend_from_slice(b"WAVEfmt ");
+        h.extend_from_slice(&16u32.to_le_bytes());
+        h.extend_from_slice(&tag.to_le_bytes());
+        h.extend_from_slice(&channels.to_le_bytes());
+        h.extend_from_slice(&rate.to_le_bytes());
+        h.extend_from_slice(&(rate * u32::from(channels) * u32::from(bs)).to_le_bytes());
+        h.extend_from_slice(&(channels * bs).to_le_bytes());
+        h.extend_from_slice(&(bs * 8).to_le_bytes());
+        h.extend_from_slice(b"data");
+        h.extend_from_slice(&0u32.to_le_bytes());
+        w.write_all(&h)?;
+        Ok(WavWriter {
+            w,
+            data_len: 0,
+            finished: false,
+        })
+    }
+
+    /// Appends interleaved sample bytes.
+    pub fn write_raw(&mut self, bytes: &[u8]) -> Result<()> {
+        self.w.write_all(bytes)?;
+        self.data_len += bytes.len() as u64;
+        Ok(())
+    }
+
+    /// Patches the chunk sizes. Fails if the data exceeds the 4 GiB RIFF limit.
+    pub fn finish(&mut self) -> Result<()> {
+        if self.finished {
+            return Ok(());
+        }
+        if self.data_len % 2 == 1 {
+            self.w.write_all(&[0])?;
+        }
+        let riff = 36 + self.data_len + (self.data_len & 1);
+        if riff > u64::from(u32::MAX) {
+            return unsupported("WAV output over 4 GiB (RF64 is not supported yet)");
+        }
+        self.w.seek(SeekFrom::Start(4))?;
+        self.w.write_all(&(riff as u32).to_le_bytes())?;
+        self.w.seek(SeekFrom::Start(40))?;
+        self.w.write_all(&(self.data_len as u32).to_le_bytes())?;
+        self.w.seek(SeekFrom::End(0))?;
+        self.w.flush()?;
+        self.finished = true;
+        Ok(())
+    }
+
+    /// Returns the inner writer (after [`WavWriter::finish`]).
+    pub fn into_inner(self) -> W {
+        self.w
+    }
+}
