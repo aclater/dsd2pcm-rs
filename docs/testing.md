@@ -46,20 +46,23 @@ DSD2PCM_SOAK_SECONDS=3600 cargo test --release -p dsd2pcm --test soak -- --ignor
 `DSD2PCM_SOAK_RSS_REPORT_ONLY=1` prints the memory figures without the check, for sanitizer
 builds, whose shadow memory grows with the run.
 
-Before 0.1.2, on an Intel Core i9-13900H, 4 cores (`taskset -c 0-3`, so 4 worker threads):
+Before 0.1.2, with the live-heap check, one hour each:
 
-| Run | Iterations | Conversions (threaded) | Live heap | Resident set (MiB, each tenth of the run) | Threads |
+| CPU, worker threads | Iterations | Conversions (threaded) | Live heap | Resident set (MiB, each tenth of the run) | Threads |
 |---|---|---|---|---|---|
-| 1 hour | 387 206 | 2 690 931 (236 628) | not yet measured | 150 155 166 166 166 172 178 159 188 185; second half 147 to 193, median 174 | 2 before, 2 after, and after every threaded run |
-| 20 minutes | 129 548 | 901 448 (79 170) | 119 277 KiB at every tenth of the run, to the byte | 165 150 166 166 166 171 171 175 172 172; second half 155 to 190, median 175 | 2 before, 2 after, and after every threaded run |
+| AMD Ryzen AI Max+ 395, 16 (`taskset -c 0-15`) | 511 238 | 3 551 370 (312 425) | 119 277 KiB at every tenth of the run, to the byte | 324 316 361 366 380 376 380 380 393 393; second half 353 to 407, median 384 | 2 before, 2 after, and after every threaded run |
+
+Shorter runs on an Intel Core i9-13900H with 4 worker threads agree: 20 minutes (129 548
+iterations), the same live heap to the byte, resident set 150 to 190 MiB; and one hour
+before the live-heap check (387 206 iterations), resident set 147 to 193 MiB.
 
 The live heap is the 40 converters the test keeps (one per valid setting and gain, their
 buffers grown to the longest run they met, 230 frames) and the test's own arrays of
 samples (64 MiB, allocated before the run): it stops moving once every kept converter has
-met its longest run, and stays there to the byte. The one-hour run predates the live-heap
-check; its resident set passed the earlier, tighter bound (5 % or 16 MiB). The peak
-resident set (`time -v`) was 286 MiB and 282 MiB, during the 230-frame six-channel
-iterations.
+met its longest run, and stays there to the byte. The resident set grows with the number of
+worker threads (each has its own allocator arena) and wanders within them; the peak (`time
+-v`) was 497 MiB with 16 workers and 282 to 286 MiB with 4, during the 230-frame
+six-channel iterations.
 
 ## C leak loop
 
