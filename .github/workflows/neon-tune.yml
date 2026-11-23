@@ -1,0 +1,64 @@
+# TEMPORARY: tuning runs of the neon level on GitHub-hosted runners (indicative). Removed
+# before merge.
+name: neon-tune
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_STABLE: 1.100.0
+
+jobs:
+  tune:
+    name: tune (${{ matrix.tune }})
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        tune:
+          - "8,8,1,16,0"
+          - "8,8,0,16,0"
+          - "4,4,1,16,0"
+          - "16,8,1,16,0"
+          - "8,16,1,16,0"
+          - "8,8,1,32,1"
+          - "8,8,1,16,1"
+          - "8,8,1,0,0"
+          - "8,8,1,16,4"
+          - "generic"
+    container:
+      image: registry.access.redhat.com/ubi10/ubi@sha256:1e9193f051ac70582821c8a941325c5053488c54c75cd0c31b577d871ac29dba
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Packages
+        run: dnf -y -q --setopt=install_weak_deps=False install git-core gcc python3 && dnf clean all
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust (.github/scripts/rust-setup.sh)
+        run: .github/scripts/rust-setup.sh "$RUST_STABLE"
+      - name: Build the examples (release)
+        run: cargo build --release --locked -p dsd2pcm --examples
+      - name: Rounds
+        env:
+          TUNE: ${{ matrix.tune }}
+        run: |
+          if [ "$TUNE" = generic ]; then export DSD2PCM_SIMD=generic; else export DSD2PCM_NEON_TUNE="$TUNE"; fi
+          .github/scripts/bench-rounds.sh "$RUNNER_TEMP/bench/logs" 3 20
+      - name: Summary
+        env:
+          TUNE: ${{ matrix.tune }}
+        run: python3 -I .github/scripts/bench-summary.py "$RUNNER_TEMP/bench/logs" "neon tune $TUNE" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        if: always()
+        with:
+          name: tune-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/bench/logs
+          retention-days: 7

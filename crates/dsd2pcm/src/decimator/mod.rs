@@ -385,7 +385,15 @@ impl Plan {
             pass,
             win: (0, 0),
             lanes,
-            lanes_min: if dispatch::short_lanes(isa) {
+            lanes_min: if let Some(t) = dispatch::neon_lmin(isa) {
+                match t {
+                    1 => LANES_MIN_SSE2[usize::from(cutoff == Cutoff::Wide)],
+                    2 => 16 * PAD,
+                    3 => 64 * PAD,
+                    4 => usize::MAX,
+                    _ => LANES_MIN,
+                }
+            } else if dispatch::short_lanes(isa) {
                 LANES_MIN_SSE2[usize::from(cutoff == Cutoff::Wide)]
             } else {
                 LANES_MIN
