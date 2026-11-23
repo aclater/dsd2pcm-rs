@@ -1,5 +1,5 @@
-# The release. On a version tag (v0.1.0, ...), annotated, signed and verified by GitHub, on a
-# commit on main (.github/scripts/release-preflight.sh):
+# The release. On a version tag (v0.1.0, ...), annotated, on a commit on main, equal to the
+# workspace version (.github/scripts/release-preflight.sh):
 #   1. build and test the command-line tool `dsd2pcm` for Linux x86_64, aarch64 and i686
 #      (glibc 2.17 or later), macOS arm64 and Windows x86_64; every packed binary converts the
 #      same test file, and all five outputs must be byte-identical;
@@ -43,7 +43,7 @@ defaults:
     shell: bash
 
 jobs:
-  # Cheap checks first: a version mismatch, an unsigned tag or one off main stops the release
+  # Cheap checks first: a version mismatch, a lightweight tag or one off main stops the release
   # before anything is built.
   preflight:
     name: version and tag
@@ -59,7 +59,7 @@ jobs:
         run: |
           rustup toolchain install "$RUST_STABLE" --profile minimal
           rustup default "$RUST_STABLE"
-      - name: Versions, tag signature and branch (.github/scripts/release-preflight.sh)
+      - name: Versions, annotated tag, on main (.github/scripts/release-preflight.sh)
         id: check
         env:
           REF_TYPE: ${{ github.ref_type }}
