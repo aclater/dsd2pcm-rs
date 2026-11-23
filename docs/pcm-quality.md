@@ -519,7 +519,9 @@ venv/bin/python tools/quality/report.py --filters out/filters.json --results out
 
 The inputs are generated, not downloaded; with the same versions the DSD files, the
 decoded WAVs and the numbers are identical on every run. Without SoX-DSD the multitone and
-J-Test charts lose their SoX-DSD line. Only the charts are committed.
+J-Test charts lose their SoX-DSD line, and the scarletbook-pcm comparison covers 224
+outputs instead of 272. These commands were run in a fresh clone on 2026-11-23: every other
+chart and every table came out identical. Only the charts are committed.
 
 ## See also
 
