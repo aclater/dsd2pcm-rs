@@ -18,6 +18,8 @@
 set -euo pipefail
 
 version=$1 name=$2 libdir=$3 outdir=$4 static_libs=$5
+[[ -n "$static_libs" && "$static_libs" =~ ^[-[:alnum:]_.:/\ ]+$ ]] \
+    || { echo "::error::unexpected static library list: '$static_libs'"; exit 1; }
 abi=$(sed -n 's/^#define DSD2PCM_ABI_VERSION \([0-9]*\).*/\1/p' crates/dsd2pcm-capi/include/dsd2pcm.h)
 [[ "$abi" =~ ^[0-9]+$ ]] || { echo "::error::no DSD2PCM_ABI_VERSION in the header"; exit 1; }
 

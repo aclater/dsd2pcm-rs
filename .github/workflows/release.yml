@@ -141,10 +141,12 @@ jobs:
       # The C library (shared, SONAME libdsd2pcm.so.1 from its build.rs, and static), and the
       # system libraries the static one needs, for the pkg-config file.
       - name: The C library, linked against glibc 2.17
+        env:
+          CARGO_TERM_COLOR: never  # rustc's notes plain: the library list goes into dsd2pcm.pc
         run: |
           cargo-zigbuild rustc --release --locked -p dsd2pcm-capi --lib --target "$TARGET.$GLIBC_MAX" \
             -- --print native-static-libs 2>&1 | tee "$RUNNER_TEMP/capi.log"
-          sed -n 's/.*native-static-libs: //p' "$RUNNER_TEMP/capi.log" | tail -n 1 > "$RUNNER_TEMP/static-libs"
+          sed -e 's/\x1b\[[0-9;]*m//g' -n -e 's/.*native-static-libs: //p' "$RUNNER_TEMP/capi.log" | tail -n 1 > "$RUNNER_TEMP/static-libs"
           cat "$RUNNER_TEMP/static-libs"
       - name: glibc 2.17 or later, stripped
         run: |
@@ -232,13 +234,15 @@ jobs:
       # @rpath/libdsd2pcm.1.dylib at link time (no install_name_tool afterwards, which would
       # break the linker's ad-hoc signature), and the file is shipped under that name.
       - name: The C library
+        env:
+          CARGO_TERM_COLOR: never  # rustc's notes plain: the library list goes into dsd2pcm.pc
         run: |
           abi=$(sed -n 's/^#define DSD2PCM_ABI_VERSION \([0-9]*\).*/\1/p' crates/dsd2pcm-capi/include/dsd2pcm.h)
           cargo rustc --release --locked -p dsd2pcm-capi --lib -- --print native-static-libs \
             -C link-arg=-Wl,-install_name,@rpath/libdsd2pcm.$abi.dylib \
             -C link-arg=-Wl,-compatibility_version,$abi -C link-arg=-Wl,-current_version,${VERSION%%-*} \
             2>&1 | tee "$RUNNER_TEMP/capi.log"
-          sed -n 's/.*native-static-libs: //p' "$RUNNER_TEMP/capi.log" | tail -n 1 > "$RUNNER_TEMP/static-libs"
+          sed -e 's/\x1b\[[0-9;]*m//g' -n -e 's/.*native-static-libs: //p' "$RUNNER_TEMP/capi.log" | tail -n 1 > "$RUNNER_TEMP/static-libs"
           cat "$RUNNER_TEMP/static-libs"
           otool -D target/release/libdsd2pcm.dylib
           otool -L target/release/libdsd2pcm.dylib
@@ -315,9 +319,11 @@ jobs:
       # The C library: dsd2pcm.dll with its import library dsd2pcm.dll.lib, and the static
       # dsd2pcm.lib (static C runtime, /MT, like everything in this job).
       - name: The C library
+        env:
+          CARGO_TERM_COLOR: never  # rustc's notes plain: the library list goes into dsd2pcm.pc
         run: |
           cargo rustc --release --locked -p dsd2pcm-capi --lib -- --print native-static-libs 2>&1 | tee "$RUNNER_TEMP/capi.log"
-          sed -n 's/.*native-static-libs: //p' "$RUNNER_TEMP/capi.log" | tail -n 1 | tr -d '\r' > "$RUNNER_TEMP/static-libs"
+          sed -e 's/\x1b\[[0-9;]*m//g' -n -e 's/.*native-static-libs: //p' "$RUNNER_TEMP/capi.log" | tail -n 1 | tr -d '\r' > "$RUNNER_TEMP/static-libs"
           cat "$RUNNER_TEMP/static-libs"
           ls -l target/release/dsd2pcm.dll target/release/dsd2pcm.dll.lib target/release/dsd2pcm.lib
       - name: No Visual C++ runtime DLL among the imports
