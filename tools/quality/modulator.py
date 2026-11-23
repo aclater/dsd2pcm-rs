@@ -35,12 +35,24 @@ MAX_GAIN = 1.3
 ORDER = 5
 
 
-def _ntf_for(wn, fs):
-    zeros = [1.0]
-    for r in (0.5385, 0.9062):
+def _zero_positions(order):
+    """NTF zeros as fractions of BAND: the roots of the Legendre polynomial of the order
+    (Schreier and Temes, sec. 4.3). The 5th order keeps the rounded values it has always
+    used, so its bitstreams do not change."""
+    if order == 5:
+        return [0.0, 0.5385, -0.5385, 0.9062, -0.9062]
+    return list(np.polynomial.legendre.leggauss(order)[0])
+
+
+def _ntf_for(wn, fs, order=None):
+    order = order or ORDER
+    zeros = []
+    for r in _zero_positions(order):
         w = 2 * math.pi * r * BAND / fs
-        zeros += [complex(math.cos(w), math.sin(w)), complex(math.cos(w), -math.sin(w))]
-    _, poles, _ = signal.butter(ORDER, wn, "high", output="zpk")
+        zeros.append(complex(math.cos(w), math.sin(w)))
+    _, poles, _ = signal.butter(order, wn, "high", output="zpk")
+    if order == 5:
+        zeros = [1.0] + [z for z in zeros if z.imag > 0 for z in (z, z.conjugate())]
     return np.array(zeros), poles
 
 
@@ -50,20 +62,22 @@ def _max_gain(z, p):
     return float(np.max(np.abs(h)))
 
 
-def design(fs=None, max_gain=None):
-    """The NTF at ``fs`` (default FS) with the largest gain ``max_gain`` (default
-    MAX_GAIN), as (zeros, poles, b, a, corner_hz); b and a are monic polynomials in z^-1."""
+def design(fs=None, max_gain=None, order=None):
+    """The NTF at ``fs`` (default FS) of order ``order`` (default ORDER) with the largest
+    gain ``max_gain`` (default MAX_GAIN), as (zeros, poles, b, a, corner_hz); b and a are
+    monic polynomials in z^-1."""
+    order = order or ORDER
     fs = fs or FS
     max_gain = max_gain or MAX_GAIN
     lo, hi = 1e-4, 0.9
     for _ in range(80):
         mid = 0.5 * (lo + hi)
-        z, p = _ntf_for(mid, fs)
+        z, p = _ntf_for(mid, fs, order)
         if _max_gain(z, p) > max_gain:
             hi = mid
         else:
             lo = mid
-    z, p = _ntf_for(lo, fs)
+    z, p = _ntf_for(lo, fs, order)
     b = np.real(np.poly(z))
     a = np.real(np.poly(p))
     return z, p, b, a, lo * fs / 2
@@ -117,3 +131,39 @@ def modulate(x, b=None, a=None, limit=8.0):
     if b is None:
         _, _, b, a, _ = design()
     return Modulator(b, a, limit).process(x)
+
+
+class ModulatorN:
+    """``Modulator`` for any order (the same error-feedback loop, written for N taps)."""
+
+    def __init__(self, b, a, limit=8.0):
+        self.c = [float(bk - ak) for bk, ak in zip(b[1:], a[1:])]
+        self.d = [float(ak) for ak in a[1:]]
+        self.n_ = len(self.c)
+        self.e = [0.0] * self.n_
+        self.r = [0.0] * self.n_
+        self.limit = limit
+        self.n = 0
+
+    def process(self, x):
+        c, d, e, r, limit, n_ = self.c, self.d, self.e, self.r, self.limit, self.n_
+        rng = range(n_)
+        out = bytearray(len(x))
+        for n, xn in enumerate(x.tolist() if hasattr(x, "tolist") else x):
+            acc = 0.0
+            for k in rng:
+                acc += c[k] * e[k] - d[k] * r[k]
+            u = xn + acc
+            if u >= 0.0:
+                v = 1.0
+                out[n] = 1
+            else:
+                v = -1.0
+            if u > limit or u < -limit:
+                raise RuntimeError(f"modulator unstable at sample {self.n + n} (|u| = {abs(u):.1f})")
+            e.insert(0, v - u)
+            e.pop()
+            r.insert(0, acc)
+            r.pop()
+        self.n += len(out)
+        return np.frombuffer(bytes(out), dtype=np.uint8)

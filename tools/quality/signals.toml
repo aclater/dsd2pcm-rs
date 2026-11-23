@@ -217,3 +217,31 @@ desc = "DSD silence, then from 0.5 s the pattern 0xEE (75 % ones: +50 % modulati
 source = "bits"
 bits = "step"
 seconds = 2
+
+# A very quiet source for the filter floor: an 8th-order modulator (NTF zeros at the
+# 8th-order Legendre roots across 20 kHz, Butterworth poles, largest NTF gain 1.45;
+# at 1.5 it went unstable within 4 s at 0 dB SACD),
+# defined at the DSD rate (no 24-bit PCM step, whose dither would mask the floor). Its loop
+# state legitimately reaches larger values than the 5th order's, so the instability check
+# trips at |u| > 50 instead of 8.
+
+[[signal]]
+id = "quiet_sine1k"
+desc = "1 kHz at 0 dB SACD (-6.02 dBFS) from an 8th-order modulator"
+source = "dsd"
+dsd_rates = [64]
+ntf_order = 8
+ntf_gain = 1.45
+ntf_limit = 50
+seconds = 5
+left = [{ sine = 1000, dbfs = -6.02 }]
+
+[[signal]]
+id = "quiet_alias"
+desc = "Tones at 170, 345, 530, 700, 880, 1050 and 1230 kHz, -26.02 dBFS (-20 dB SACD), 2.5 s each, from an 8th-order modulator"
+source = "dsd"
+dsd_rates = [64]
+ntf_order = 8
+ntf_gain = 1.45
+ntf_limit = 50
+left = [{ freq_steps = [170000, 345000, 530000, 700000, 880000, 1050000, 1230000], dbfs = -26.02, step_seconds = 2.5 }]

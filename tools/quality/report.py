@@ -142,6 +142,23 @@ def foobar_tables(R):
     return "\n".join(out)
 
 
+def floor_table(R, F):
+    rows = [("source/quiet_sine1k-dsd-dsd64-ref", "The source itself (bitstream)")]
+    rows += [(f"dsd2pcm/{st}/quiet_sine1k-dsd-dsd64-ref", "dsd2pcm %s kHz, %s" % label(st)) for st in SETTINGS]
+    rows += [(f"pysacd/{st}/quiet_sine1k-dsd-dsd64-ref", f"pysacd preset {NAMES[st]} kHz") for st in ("88k2", "176k4")]
+    rows += [(f"taps-f64/176k4-{c}/quiet_sine1k-dsd-dsd64-ref", f"taps in 64-bit float, 176.4 kHz, {c}") for c in ("30", "40", "wide", "pysacd")]
+    out = ["| Converter | SINAD (dB) | Noise and distortion (dBFS) | THD (dB) |", "|---|---:|---:|---:|"]
+    for k, lab in rows:
+        v = R.get(k)
+        if v and "thdn_db" in v:
+            out.append(f"| {lab} | {-v['thdn_db']:.1f} | {v['residual_dbfs']:.1f} | {v['thd_db']:.1f} |")
+    out += ["", "| Rate (kHz) | Filter | Rejection of each band folding onto 0-20 kHz (band in kHz: dB) |", "|---:|---|---|"]
+    for r in F["filters"]:
+        bands = ", ".join(f"{b['lo_hz'] / 1000:g}-{b['hi_hz'] / 1000:g}: {b['rejection_db']:.1f}" for b in r.get("alias_bands", [])[:8])
+        out.append(f"| {r['rate'] / 1000:g} | {r['cutoff']} | {bands} |")
+    return "\n".join(out)
+
+
 def identity(R):
     same = differ = 0
     bad = []
@@ -172,6 +189,9 @@ def main():
     print(rmaa_table(R))
     print("\n## Extras\n")
     print(extras_table(R))
+    if any("quiet_sine1k" in k for k in R):
+        print("\n## Filter floor (quiet source)\n")
+        print(floor_table(R, F))
     if any(k.startswith("foobar/") for k in R):
         print("\n## foobar2000\n")
         print(foobar_tables(R))

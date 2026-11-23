@@ -16,7 +16,7 @@ dsd2pcm crate; the decoders are run by path.
 | `decode.py` | DSF files | One WAV per decoder, setting and signal, and `runs.json` (commands, exit status, SHA-256 of inputs and outputs) |
 | `postfilter.py` | WAV files | The same, through a separate reference linear-phase low-pass (for the 30 kHz comparison) |
 | `analyse.py` | WAV files (and DSF sources) | `results.json` (metrics) and `curves.json` (plot data); the analysis settings are written into `results.json` |
-| `filters.py` | `tables.rs`, `pysacd_taps.rs` | `filters.json`: the filters' exact response, from their taps |
+| `filters.py` | `tables.rs`, `pysacd_taps.rs` | `filters.json`: the filters' exact response, from their taps; with `--apply`, the same filter in 64-bit floating point run on a DSF file (a reference decoder without rounding or word length) |
 | `plot.py` | JSON | SVG charts |
 | `report.py` | JSON | The Markdown tables of the page |
 | `sbpcm/` | raw DSD | scarletbook-pcm 0.7.0 as a command-line decoder (a separate Cargo project) |
@@ -33,7 +33,16 @@ cargo build --release --manifest-path tools/quality/sbpcm/Cargo.toml
 venv/bin/python tools/quality/gen_signals.py --out out/sig --no-sox
 venv/bin/python tools/quality/decode.py --signals-dir out/sig --out out/dec --tool dsd2pcm=target/release/dsd2pcm --tool sbpcm=tools/quality/sbpcm/target/release/sbpcm-ref
 venv/bin/python tools/quality/postfilter.py --in out/dec/dsd2pcm/352k8-wide --out out/dec/lp30-ref/352k8
-venv/bin/python tools/quality/analyse.py --signals-dir out/sig --decoded out/dec --out out/results.json --curves out/curves.json --sources idle,silence,sine1k_0,level_steps,smpte,ccif,fr_tones,xtalk_l,alias_steps,multitone,jtest
+mkdir -p out/dec/taps-f64/176k4-30 out/dec/taps-f64/176k4-40 out/dec/taps-f64/176k4-wide out/dec/taps-f64/176k4-pysacd
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --apply out/sig/dsd/quiet_sine1k-dsd-dsd64-ref.dsf --rate 176400 --cutoff 30 --out out/dec/taps-f64/176k4-30/quiet_sine1k-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --apply out/sig/dsd/quiet_alias-dsd-dsd64-ref.dsf --rate 176400 --cutoff 30 --out out/dec/taps-f64/176k4-30/quiet_alias-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --apply out/sig/dsd/quiet_sine1k-dsd-dsd64-ref.dsf --rate 176400 --cutoff 40 --out out/dec/taps-f64/176k4-40/quiet_sine1k-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --apply out/sig/dsd/quiet_alias-dsd-dsd64-ref.dsf --rate 176400 --cutoff 40 --out out/dec/taps-f64/176k4-40/quiet_alias-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --apply out/sig/dsd/quiet_sine1k-dsd-dsd64-ref.dsf --rate 176400 --cutoff wide --out out/dec/taps-f64/176k4-wide/quiet_sine1k-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --apply out/sig/dsd/quiet_alias-dsd-dsd64-ref.dsf --rate 176400 --cutoff wide --out out/dec/taps-f64/176k4-wide/quiet_alias-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --apply out/sig/dsd/quiet_sine1k-dsd-dsd64-ref.dsf --rate 176400 --cutoff pysacd --out out/dec/taps-f64/176k4-pysacd/quiet_sine1k-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --apply out/sig/dsd/quiet_alias-dsd-dsd64-ref.dsf --rate 176400 --cutoff pysacd --out out/dec/taps-f64/176k4-pysacd/quiet_alias-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/analyse.py --signals-dir out/sig --decoded out/dec --out out/results.json --curves out/curves.json --sources idle,silence,sine1k_0,level_steps,smpte,ccif,fr_tones,xtalk_l,alias_steps,multitone,jtest,quiet_sine1k,quiet_alias
 venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --out out/filters.json
 venv/bin/python tools/quality/plot.py --filters out/filters.json --results out/results.json --curves out/curves.json --out docs/assets/quality
 venv/bin/python tools/quality/report.py --filters out/filters.json --results out/results.json

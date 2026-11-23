@@ -29,9 +29,10 @@ At every rate and filter:
 - **DSD silence converts to exact digital zero**; the polarity is preserved; identical channels give identical samples.
 - **No clipping at 0 dB gain** up to +4.5 dB SACD, past the +3.1 dB SACD peak level the Scarlet Book allows.
 - **24-bit output, rounded, not dithered.** The rounding noise (-153 dBFS in 20 Hz-20 kHz at 176.4 kHz) is 30 dB below the DSD64 test signal's own noise.
+- **Filter floor:** with a very quiet DSD64 source the filters themselves limit the audio band to about -128 dBFS (-122 dBFS with `wide`): a stopband limit, measured and explained [below](#filter-floor-with-very-quiet-sources).
 - **Against the foobar2000 SACD plug-in** (2.0.27): equal in the audio band within 0.6 dB, the plug-in slightly quieter; dsd2pcm keeps DSD silence and timing exact and passes far less ultrasonic noise than the plug-in's default mode ([details](#comparisons)).
 
-The measured figures are limited by the test signal, not by the converter: THD+N, noise and
+With the 5th-order test signals the figures are limited by the test signal, not by the converter: THD+N, noise and
 dynamic range are within 0.1 to 0.6 dB of what the DSD itself contains, except the wide
 filter's in-band noise (3 dB higher; see [bandwidth](#bandwidth-and-ultrasonic-noise)). The
 filter figures match the published response of scarletbook-pcm 0.7.0 exactly.
@@ -55,13 +56,18 @@ what the source contained. Where a figure is limited by the test signal rather t
 converter, this page says so.
 
 **The test signals.** The set follows what reviewers publish, so results can be compared
-like for like: the DSD-to-PCM comparison of Archimago
+like for like. The method follows the DSD-to-PCM comparison of
+[Archimago](https://archimago.blogspot.com/)
 ([2015](https://archimago.blogspot.com/2015/04/analysis-dsd-to-pcm-2015-foobar-sacd.html)),
 his DSD test signals and level rules
 ([2021](https://archimago.blogspot.com/2021/10/measurements-look-at-dsd-and-using-sox.html),
 [2022](https://archimago.blogspot.com/2022/06/notes-on-dac-dsd-1-bit-pdm-measurements.html)),
-the RightMark Audio Analyzer (RMAA) summary, and AES17 for the measurement bandwidth
-(20 Hz to 20 kHz), A-weighting and the dynamic range method. No RMAA or other closed tool is
+the [RightMark Audio Analyzer](http://audio.rightmark.org/) (RMAA) summary, and AES17 for
+the measurement bandwidth (20 Hz to 20 kHz), A-weighting and the dynamic range method. The
+measurement practice of [Audio Science Review](https://www.audiosciencereview.com/) and of
+John Atkinson at [Stereophile](https://www.stereophile.com/content/measurements-maps-precision)
+(multitone, J-Test, linearity, raw-sample impulse plots) was the reference for the
+remaining tests. No RMAA or other closed tool is
 used: the analysis is our own script, and every setting is written into its output.
 The definitions are in [`signals.toml`](../tools/quality/signals.toml).
 
@@ -89,15 +95,15 @@ The definitions are in [`signals.toml`](../tools/quality/signals.toml).
 | `silence` | 24-bit TPDF-dithered digital silence, 15 s | noise level, ultrasonic noise, DC |
 | `idle` | the SACD silence pattern `0x69` | digital silence |
 | `sine1k_0` | 1 kHz at 0 dB SACD (-6.02 dBFS), 10 s | THD, THD+N, gain, channel matching |
-| `sine1k_peak` | 1 kHz at +3.1 dB SACD (-2.92 dBFS) after 3 s of silence and a 2 s ramp | headroom (Archimago 2022) |
+| `sine1k_peak` | 1 kHz at +3.1 dB SACD (-2.92 dBFS) after 3 s of silence and a 2 s ramp | headroom ([Archimago 2022](https://archimago.blogspot.com/2022/06/notes-on-dac-dsd-1-bit-pdm-measurements.html)) |
 | `level_steps` | 1 kHz from -3 to -126 dBFS in 3 dB steps | THD+N against level, linearity, dynamic range (-60 dB SACD step) |
 | `freq_steps` | 20 Hz to 20 kHz at 0 dB SACD | THD+N against frequency |
 | `smpte`, `ccif` | 60 Hz + 7 kHz (4:1), 19 + 20 kHz (1:1), peak 0 dB SACD | intermodulation |
 | `fr_tones` | 35 tones, 20 Hz to 40 kHz, -40 dBFS each | frequency response |
 | `xtalk_l`, `xtalk_r` | 100 Hz, 1, 10, 20 kHz in one channel, silence in the other | crosstalk |
-| `multitone` | 32 tones, 17.6 Hz to 21.4 kHz, peak 0 dB SACD (crest factor 13.2 dB), after silence and a ramp | distortion-free range (Archimago 2021) |
-| `jtest` | 24-bit J-Test: fs/4 at -3 dBFS and a 1-LSB square at fs/192, after silence and a ramp | arithmetic artefacts (Archimago 2021) |
-| `sine15k` | 15 kHz at -12 dBFS | time-domain view (Archimago 2015) |
+| `multitone` | 32 tones, 17.6 Hz to 21.4 kHz, peak 0 dB SACD (crest factor 13.2 dB), after silence and a ramp | distortion-free range ([Archimago 2021](https://archimago.blogspot.com/2021/10/measurements-look-at-dsd-and-using-sox.html)) |
+| `jtest` | 24-bit J-Test: fs/4 at -3 dBFS and a 1-LSB square at fs/192, after silence and a ramp | arithmetic artefacts ([Archimago 2021](https://archimago.blogspot.com/2021/10/measurements-look-at-dsd-and-using-sox.html)) |
+| `sine15k` | 15 kHz at -12 dBFS | time-domain view ([Archimago 2015](https://archimago.blogspot.com/2015/04/analysis-dsd-to-pcm-2015-foobar-sacd.html)) |
 | `impulse`, `step`, `polarity` | one 0 dB SACD sample, a step, a positive half-sine pulse | ringing, polarity |
 | `alias_steps` | 50 to 200 kHz at -20 dB SACD, defined at the DSD rate | aliasing |
 | `hot_ramp` | 1 kHz rising from -12 to -1.5 dBFS (+4.5 dB SACD) | clipping and headroom |
@@ -114,8 +120,8 @@ steady part skipped, and tones moved to exact FFT bins (multiples of 352 800 / 2
 
 dsd2pcm maps 100 % DSD modulation (a stream of all ones) to 24-bit full scale at 0 dB
 gain: between stages samples live on a grid where 100 % is 2^26, and the quantiser scales
-that by 1/8 to 2^23 and rounds. So, with the Scarlet Book's levels (as Archimago restates
-them, 2022):
+that by 1/8 to 2^23 and rounds. So, with the Scarlet Book's levels (as
+[Archimago restates them, 2022](https://archimago.blogspot.com/2022/06/notes-on-dac-dsd-1-bit-pdm-measurements.html)):
 
 | DSD level | Modulation | dsd2pcm output, gain 0 dB | With `--gain +6` |
 |---|---:|---:|---:|
@@ -267,8 +273,9 @@ specification.
   modulated silence is -121.9 dBFS (-123.8 dB(A)); the test DSD itself has -122.5 dBFS.
   Relative to 0 dB SACD that is a noise level of -117.8 dB(A), and the dynamic range by the
   AES17 method (a -60 dB SACD tone) is 107.0 dB(A), against 107.1 dB(A) in the source. A
-  good SACD master has a lower floor than this test modulator; the converter would not limit
-  it before about -131 dBFS (the folded noise above) and -153 dBFS (the rounding).
+  good SACD master has a lower floor than this test modulator; the converter's own floor is
+  about -128 dBFS ([filter floor](#filter-floor-with-very-quiet-sources)) and the rounding's
+  -153 dBFS.
 - **24 bits are more than enough.** The rounding to 24 bits adds -146 dBFS of noise over the
   whole band at 176.4 kHz, -153 dBFS of it in 20 Hz-20 kHz: 30 dB below the source's noise.
 - **Rounding, not truncation.** Every stage rounds half to even. Truncation would add a
@@ -308,7 +315,8 @@ noise modulation. Bottom: measured minus requested level.*
 
 ## RMAA-style summary
 
-In the layout of RMAA's summary, as Archimago used it in 2015, measured with our own script
+In the layout of [RMAA](http://audio.rightmark.org/)'s summary, as
+[Archimago used it in 2015](https://archimago.blogspot.com/2015/04/analysis-dsd-to-pcm-2015-foobar-sacd.html), measured with our own script
 (no RMAA). Our conventions, stated exactly: levels relative to 0 dB SACD (RMAA normalises to
 its own reference level; ours is 0 dB SACD, -6.02 dBFS); 20 Hz to 20 kHz; noise level is
 A-weighted modulated silence; dynamic range is 60 dB plus the A-weighted noise and
@@ -363,7 +371,7 @@ the odd harmonics of fs/192 (500 Hz) around the 24 kHz tone rise above the DSD's
 
 ![15 kHz sine](assets/quality/sine15k.svg)
 
-*Archimago's 2015 time-domain view: 15 kHz at -12 dBFS, the actual output samples. With
+*[Archimago's 2015](https://archimago.blogspot.com/2015/04/analysis-dsd-to-pcm-2015-foobar-sacd.html) time-domain view: 15 kHz at -12 dBFS, the actual output samples. With
 the 30 and 40 kHz filters the sine is clean; with the wide filter DSD64's ultrasonic noise
 rides on it, as it does on any wide DSD64 decode.*
 
@@ -372,9 +380,61 @@ rides on it, as it does on any wide DSD64 decode.*
 *A single 24/96 sample at 0 dB SACD, encoded to DSD64 and converted. The ringing is that
 of the 24/96 impulse itself (it is band-limited to 48 kHz) and of each filter.*
 
+## Filter floor with very quiet sources
+
+The figures above are limited by the test signal. With a much quieter DSD64 source the
+filters' own floor shows: about -128 dBFS in the audio band, -122 dBFS with the wide
+filter. This is a measured limit of the filters, reproduced here after an external
+measurement found it.
+
+**The source.** An 8th-order version of the reference modulator: noise transfer function
+zeros at the roots of the 8th-order Legendre polynomial across 20 kHz, Butterworth poles,
+largest noise gain 1.45 (at 1.5 it went unstable within 4 s at 0 dB SACD). It is defined at
+the DSD rate, with no 24-bit PCM step. Its own THD+N for 1 kHz at 0 dB SACD, measured on the
+bitstream, is -146.9 dB, a residual of -152.9 dBFS.
+
+| Converter | SINAD, 1 kHz at 0 dB SACD (20 Hz-20 kHz) | Noise and distortion (dBFS) | THD (dB) |
+|---|---:|---:|---:|
+| The source itself (bitstream) | 146.9 dB | -152.9 | -163.5 |
+| dsd2pcm, 30 or 40 kHz filter, any rate | 122.0 to 122.1 dB | -128.1 to -128.2 | -146 to -154 |
+| dsd2pcm, wide filter (176.4 or 352.8 kHz) | 116.1 dB | -122.1 | -139 to -143 |
+| pysacd preset, 88.2 / 176.4 kHz | 127.3 / 127.8 dB | -133.3 / -133.9 | -151 to -152 |
+| The same taps in 64-bit floating point, no rounding, no word length (176.4 kHz: 30, 40, wide, pysacd) | 122.1, 122.1, 116.1, 128.3 dB | -128.2, -128.2, -122.1, -134.3 | -142 to -152 |
+
+(scarletbook-pcm 0.7.0 gives the same samples as dsd2pcm here too.)
+
+**The cause is the stopband, not the word length or distortion.** The exact taps in
+floating point, with no rounding and no 24-bit output, give the same floor as the converter,
+and the distortion (THD) is more than 20 dB below it. What remains is DSD64's ultrasonic noise
+folding into the audio band from the bands around multiples of the output rates, where the
+stopband is about 111 to 116 dB deep and DSD64's noise is at its loudest. Rejection of each
+band that folds onto 0-20 kHz, from the taps (the smallest value in each band):
+
+| Band (kHz) | 30 and 40 kHz filters | wide filter | pysacd preset |
+|---|---:|---:|---:|
+| 68-108 (88.2 kHz output only) | 111.5 / 111.9 dB | – | 127.2 dB |
+| 156-196 (all but `wide` at 352.8 kHz) | 127.8 dB | 115.5 dB (176.4 kHz) | 135.5 dB |
+| 333-373 | 115.6 dB | 111.3 dB | 114.7 dB |
+| 686-726 | 114.5 dB | 111.0 dB | 126.0 dB |
+| 1038-1078 | 116.3 dB | 111.3 dB | 130.2 dB |
+
+Tones at those frequencies (-20 dB SACD, same quiet modulator) confirm it end to end. At
+176.4 kHz the 700 kHz tone came out 121.8 dB down with the 40 kHz filter (taps: 122.0 dB at
+that frequency), the 1050 kHz tone 124.9 dB down (taps: 125.0 dB), and with the wide filter
+118.3 dB (taps: 117.9 dB). Where the taps put a tone near a null of the stopband the
+measurement reads less deep than the taps (345 kHz: 124.8 against 130.7 dB); the band's
+smallest value above is the specification.
+
+**What it means.** The converter's floor in the audio band is about -128 dBFS (-122 dBFS
+with `wide`), relative to a full scale at which 0 dB SACD reads -6.02 dBFS. It is below the
+in-band noise of the 5th-order test signals on this page (-122.5 dBFS) and only shows with
+a source that is quieter than that. A deeper stopband in the bands above would lower it;
+that would mean new filters and therefore new output bytes, which this crate changes only
+with a major version.
+
 ## The 30 kHz filter against a separate low-pass
 
-Archimago found in 2015 that a converter's built-in 30 kHz mode measured worse than a wide
+[Archimago found in 2015](https://archimago.blogspot.com/2015/04/analysis-dsd-to-pcm-2015-foobar-sacd.html) that a converter's built-in 30 kHz mode measured worse than a wide
 decode followed by a separate, high-quality 30 kHz low-pass. The same test here: the
 352.8 kHz wide output, filtered by a 583-tap Kaiser-windowed linear-phase low-pass (pass
 30 kHz, stop 36 kHz, 150 dB, in 64-bit floating point; `postfilter.py`), against dsd2pcm's
@@ -598,7 +658,16 @@ cargo build --release --manifest-path tools/quality/sbpcm/Cargo.toml
 venv/bin/python tools/quality/gen_signals.py --out out/sig --no-sox
 venv/bin/python tools/quality/decode.py --signals-dir out/sig --out out/dec --tool dsd2pcm=target/release/dsd2pcm --tool sbpcm=tools/quality/sbpcm/target/release/sbpcm-ref
 venv/bin/python tools/quality/postfilter.py --in out/dec/dsd2pcm/352k8-wide --out out/dec/lp30-ref/352k8
-venv/bin/python tools/quality/analyse.py --signals-dir out/sig --decoded out/dec --out out/results.json --curves out/curves.json --sources idle,silence,sine1k_0,level_steps,smpte,ccif,fr_tones,xtalk_l,alias_steps,multitone,jtest
+mkdir -p out/dec/taps-f64/176k4-30 out/dec/taps-f64/176k4-40 out/dec/taps-f64/176k4-wide out/dec/taps-f64/176k4-pysacd
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --apply out/sig/dsd/quiet_sine1k-dsd-dsd64-ref.dsf --rate 176400 --cutoff 30 --out out/dec/taps-f64/176k4-30/quiet_sine1k-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --apply out/sig/dsd/quiet_alias-dsd-dsd64-ref.dsf --rate 176400 --cutoff 30 --out out/dec/taps-f64/176k4-30/quiet_alias-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --apply out/sig/dsd/quiet_sine1k-dsd-dsd64-ref.dsf --rate 176400 --cutoff 40 --out out/dec/taps-f64/176k4-40/quiet_sine1k-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --apply out/sig/dsd/quiet_alias-dsd-dsd64-ref.dsf --rate 176400 --cutoff 40 --out out/dec/taps-f64/176k4-40/quiet_alias-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --apply out/sig/dsd/quiet_sine1k-dsd-dsd64-ref.dsf --rate 176400 --cutoff wide --out out/dec/taps-f64/176k4-wide/quiet_sine1k-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --apply out/sig/dsd/quiet_alias-dsd-dsd64-ref.dsf --rate 176400 --cutoff wide --out out/dec/taps-f64/176k4-wide/quiet_alias-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --apply out/sig/dsd/quiet_sine1k-dsd-dsd64-ref.dsf --rate 176400 --cutoff pysacd --out out/dec/taps-f64/176k4-pysacd/quiet_sine1k-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --apply out/sig/dsd/quiet_alias-dsd-dsd64-ref.dsf --rate 176400 --cutoff pysacd --out out/dec/taps-f64/176k4-pysacd/quiet_alias-dsd-dsd64-ref.wav
+venv/bin/python tools/quality/analyse.py --signals-dir out/sig --decoded out/dec --out out/results.json --curves out/curves.json --sources idle,silence,sine1k_0,level_steps,smpte,ccif,fr_tones,xtalk_l,alias_steps,multitone,jtest,quiet_sine1k,quiet_alias
 venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --out out/filters.json
 venv/bin/python tools/quality/plot.py --filters out/filters.json --results out/results.json --curves out/curves.json --out docs/assets/quality
 venv/bin/python tools/quality/report.py --filters out/filters.json --results out/results.json
@@ -613,6 +682,23 @@ decoded WAVs and the numbers are identical on every run. Without SoX-DSD the mul
 J-Test charts lose their SoX-DSD line, and the scarletbook-pcm comparison covers 224
 outputs instead of 272. These commands were run in a fresh clone on 2026-11-23: every other
 chart and every table came out identical. Only the charts are committed.
+
+## References
+
+- Archimago, [Archimago's Musings](https://archimago.blogspot.com/):
+  [DSD to PCM, 2015](https://archimago.blogspot.com/2015/04/analysis-dsd-to-pcm-2015-foobar-sacd.html);
+  [DSD and SoX-DSD, 2021](https://archimago.blogspot.com/2021/10/measurements-look-at-dsd-and-using-sox.html);
+  [DAC DSD (1-bit PDM) measurements, 2022](https://archimago.blogspot.com/2022/06/notes-on-dac-dsd-1-bit-pdm-measurements.html). The method followed here.
+- [RightMark Audio Analyzer](http://audio.rightmark.org/) (RMAA): the summary layout.
+- [Audio Science Review](https://www.audiosciencereview.com/) and John Atkinson,
+  [Stereophile](https://www.stereophile.com/content/measurements-maps-precision): references
+  for measurement practice.
+- AES17, *AES standard method for digital audio engineering: measurement of digital audio
+  equipment*: bandwidth, A-weighting, dynamic range.
+- R. Schreier and G. C. Temes, *Understanding Delta-Sigma Data Converters*, Wiley-IEEE,
+  2005: the reference modulator's design.
+- E. Janssen, *Look-ahead sigma-delta modulation and its application to Super Audio CD*,
+  TU Eindhoven, 2010, doi:10.6100/IR691188.
 
 ## See also
 

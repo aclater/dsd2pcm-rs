@@ -257,8 +257,10 @@ def run_job(job, cfg, out, sox, force):
         os.replace(path + ".tmp", path)
         return name, meta
     meta["ntf_gain"] = gain
-    zs, ps, b, a, corner = modulator.design(rate, gain)
+    order = sig.get("ntf_order", 5)
+    zs, ps, b, a, corner = modulator.design(rate, gain, order)
     meta["ntf_corner_hz"] = corner
+    meta["ntf_order"] = order
     n_out = round(layout(sig)[2] * rate)
     block = 1 << 20
     packed = []
@@ -266,7 +268,8 @@ def run_job(job, cfg, out, sox, force):
         interp = dsdio.Interpolator(fs, rate)
         meta["interpolator"] = {"taps": int(len(interp.h)), "kaiser_beta": float(interp.beta), "up": interp.up, "down": interp.down}
     for c in range(2):
-        m = modulator.Modulator(b, a)
+        lim = sig.get("ntf_limit", 8.0)
+        m = modulator.Modulator(b, a, lim) if order == 5 else modulator.ModulatorN(b, a, lim)
         if src != "dsd":
             gen = interp.blocks(q[c].astype(np.float64) * 2.0**-23, n_out, block)
         else:

@@ -27,7 +27,12 @@ import json
 import re
 import struct
 
+import os
+import sys
+
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 FS = 2_822_400
 NFFT = 1 << 22
@@ -146,6 +151,14 @@ def analyse(rate, cut, plan):
         "worst_alias_pass_db": float(-alpb.max()),
         "taps_2m8": int(len(h)),
     }
+    # Rejection of each band that folds onto 0-20 kHz of the output: k x out_rate +- 20 kHz.
+    bands = []
+    for k in range(1, int(FS / 2 // out_rate) + 1):
+        lo, hi = k * out_rate - 20000, k * out_rate + 20000
+        sel = (f >= lo) & (f <= min(hi, FS / 2))
+        if sel.any():
+            bands.append({"lo_hz": lo, "hi_hz": hi, "rejection_db": float(-db[sel].max())})
+    res["alias_bands"] = bands
     if plan["interp"] is not None:
         # Images of the 176.4 kHz signal around 176.4 kHz, weighted by the interpolator.
         fi = f[(f > 88200) & (f < 176400)]
@@ -187,12 +200,42 @@ def analyse(rate, cut, plan):
     return res
 
 
+def apply(plan, dsf, rate, out):
+    """The composite filter in 64-bit floating point, with no rounding between stages and
+    no output word length, applied to a DSF file: a reference that shows what the taps
+    alone allow (decimating plans only)."""
+    import dsdio
+
+    chans, fs, n = dsdio.read_dsf(dsf)
+    assert fs == FS and plan["interp"] is None
+    h = chain(plan["stages"])
+    c = (len(h) - 1) // 2
+    d = FS // rate
+    from scipy.signal import fftconvolve
+
+    ys = []
+    for ch in chans:
+        x = np.unpackbits(ch)[:n].astype(np.float64) * 2 - 1
+        y = fftconvolve(x, h)[c:c + n]  # y[i] centred on input sample i
+        ys.append(y[::d])
+    dsdio.write_wav_float(out, np.stack(ys, 1), rate)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--tables", required=True, help="dsd2pcm's crates/dsd2pcm/src/decimator/tables.rs")
     ap.add_argument("--pysacd", help="dsd2pcm's crates/dsd2pcm/src/filters/pysacd_taps.rs")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", required=True, help="filters.json, or with --apply the output WAV")
+    ap.add_argument("--apply", help="a DSF file to filter with the exact composite in floating point")
+    ap.add_argument("--rate", type=int, default=176400)
+    ap.add_argument("--cutoff", default="40", help="30, 40, wide or pysacd")
     a = ap.parse_args()
+    if a.apply:
+        p, _ = plans(parse_tables(a.tables))
+        if a.pysacd:
+            p.update(pysacd_plans(parse_pysacd(a.pysacd))[0])
+        apply(p[(a.rate, a.cutoff)], a.apply, a.rate, a.out)
+        return
     p, dc = plans(parse_tables(a.tables))
     out = {"stage_dc_gain": dc, "filters": []}
     for (rate, cut), plan in sorted(p.items()):

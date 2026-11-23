@@ -213,7 +213,7 @@ def analyse_file(path, meta, key):
         enbw_hz = fs / n * n * np.sum(w**2) / np.sum(w) ** 2
         curves["noise_log"] = logcurve(f, p, 20, 400, "mean", density=enbw_hz)
         curves["noise_lin"] = lincurve(f, p, fs / 2, 700, density=enbw_hz)
-    elif sid in ("sine1k_0", "sine1k_peak", "sine15k", "sine20k_0"):
+    elif sid in ("sine1k_0", "sine1k_peak", "sine15k", "sine20k_0", "quiet_sine1k"):
         f0 = meta["channels"][0]["tones"][0]["hz"]
         s = seg(L, fs, st + 0.5, n18)
         r = tone_metrics(s, fs, f0)
@@ -231,7 +231,7 @@ def analyse_file(path, meta, key):
         if sid == "sine15k":
             a = int(round((st + 1.0) * fs))
             curves["time"] = {"fs": fs, "v": L[a:a + int(0.001 * fs) + 1].tolist()}
-        if sid == "sine1k_0":
+        if sid in ("sine1k_0", "quiet_sine1k"):
             # Wider band THD+N (to 80 kHz where the rate allows) and ultrasonic noise with a tone.
             if fs >= 176400:
                 res["thdn_80k_db"] = tone_metrics(s, fs, f0, band=(20.0, 80000.0))["thdn_db"]
@@ -369,7 +369,7 @@ def analyse_file(path, meta, key):
             res["post_ring_60_ms"] = float((idx[-1] - k) / fs * 1e3)
             res["symmetric_about_peak"] = bool(np.allclose(v[k - 50:k], v[k + 50:k:-1], atol=2 / 2**23)) if k >= 50 else None
         curves["time"] = {"fs": fs, "t0_ms": (lo - a) / fs * 1e3, "v": v.tolist()}
-    elif sid == "alias_steps":
+    elif sid in ("alias_steps", "quiet_alias"):
         steps = meta["channels"][0]["steps"]
         out = []
         for stp in steps:
