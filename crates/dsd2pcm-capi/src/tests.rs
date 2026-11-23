@@ -884,8 +884,8 @@ fn busy_and_poisoned_handles() {
             )
         }
     };
-    // SAFETY (test): live handle; only a shared reference.
-    let handle = unsafe { &*h };
+    // SAFETY (test): `h` is NULL or a live handle; only a shared reference.
+    let handle = unsafe { h.as_ref() }.expect("a live handle");
     {
         let _held = handle.conv.lock().unwrap();
         assert_eq!(call(&mut out), DSD2PCM_E_BUSY);
