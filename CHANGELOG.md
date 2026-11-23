@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Speed in a consumer's release profile (codegen units 16, no LTO, overflow checks on, as
+  a dependency): it was up to 25 % slower than with ours, now within 1 % on the measured
+  CPUs. CI checks it on every pull request. Output bytes unchanged.
 - `frames::Converter`: the first-stage values kept between calls cost next to nothing
   when consecutive calls are not adjacent runs (pooled converters): only the bytes the next
   run could share are kept. Output bytes unchanged.
