@@ -501,59 +501,28 @@ mod avx2fma {
 /// baseline, so these are plain safe functions.
 #[cfg(target_arch = "aarch64")]
 mod neon {
-    use super::kernel::{self, Plain, Sym};
+    use super::kernel::{self, Sym};
     use super::{lanes, Fused};
 
-    /// TEMPORARY tuning: DSD2PCM_NEON_TUNE="sv1,sv2,whole,l,lmin".
-    #[derive(Clone, Copy)]
-    pub(crate) struct Tune {
-        pub sv1: usize,
-        pub sv2: usize,
-        pub whole: bool,
-        pub l: usize,
-        pub lmin: usize,
-    }
-
-    pub(crate) fn tune() -> Tune {
-        static T: std::sync::OnceLock<Tune> = std::sync::OnceLock::new();
-        *T.get_or_init(|| {
-            let v: Vec<usize> = std::env::var("DSD2PCM_NEON_TUNE")
-                .unwrap_or_else(|_| "8,8,1,16,0".into())
-                .split(',')
-                .map(|x| x.trim().parse().unwrap())
-                .collect();
-            Tune {
-                sv1: v[0],
-                sv2: v[1],
-                whole: v[2] == 1,
-                l: v[3],
-                lmin: v[4],
-            }
-        })
-    }
+    /// Outputs per block of the ordered fused kernels.
+    const L: usize = 16;
+    /// Output vectors per block of the lanes in Fir1 and Interp2.
+    pub(super) const SV1: usize = 8;
+    /// Output vectors per block of the lanes in Dec2.
+    pub(super) const SV2: usize = 8;
+    /// Whether the lanes load whole windows (`lanes::pairs`).
+    const WHOLE: bool = true;
 
     pub(super) fn fir1(s: &Sym, x: &[f64], out: &mut [f64]) {
-        match tune().l {
-            32 => kernel::fir1::<32, Fused>(s, x, out),
-            0 => kernel::fir1::<{ kernel::L }, Plain>(s, x, out),
-            _ => kernel::fir1::<16, Fused>(s, x, out),
-        }
+        kernel::fir1::<L, Fused>(s, x, out)
     }
 
     pub(super) fn dec2(s: &Sym, xe: &[f64], xo: &[f64], out: &mut [f64]) {
-        match tune().l {
-            32 => kernel::dec2::<32, Fused>(s, xe, xo, out),
-            0 => kernel::dec2::<{ kernel::L }, Plain>(s, xe, xo, out),
-            _ => kernel::dec2::<16, Fused>(s, xe, xo, out),
-        }
+        kernel::dec2::<L, Fused>(s, xe, xo, out)
     }
 
     pub(super) fn interp2_odd(s: &Sym, w: &[f64], out: &mut [f64]) {
-        match tune().l {
-            32 => kernel::interp2_odd::<32, Fused>(s, w, out),
-            0 => kernel::interp2_odd::<{ kernel::L }, Plain>(s, w, out),
-            _ => kernel::interp2_odd::<16, Fused>(s, w, out),
-        }
+        kernel::interp2_odd::<L, Fused>(s, w, out)
     }
 
     pub(super) fn run_lanes<'b>(
@@ -561,31 +530,8 @@ mod neon {
         pad: usize,
         bufs: &'b mut lanes::Bufs,
     ) -> &'b [lanes::Lanes] {
-        let t = tune();
-        match (t.sv1, t.sv2, t.whole) {
-            (4, 4, true) => lanes::run::<Fused, 4, 4, true>(p, pad, bufs),
-            (4, 4, false) => lanes::run::<Fused, 4, 4, false>(p, pad, bufs),
-            (2, 4, true) => lanes::run::<Fused, 2, 4, true>(p, pad, bufs),
-            (4, 2, true) => lanes::run::<Fused, 4, 2, true>(p, pad, bufs),
-            (2, 2, true) => lanes::run::<Fused, 2, 2, true>(p, pad, bufs),
-            (4, 8, true) => lanes::run::<Fused, 4, 8, true>(p, pad, bufs),
-            (8, 8, false) => lanes::run::<Fused, 8, 8, false>(p, pad, bufs),
-            (16, 8, true) => lanes::run::<Fused, 16, 8, true>(p, pad, bufs),
-            (8, 16, true) => lanes::run::<Fused, 8, 16, true>(p, pad, bufs),
-            (4, 16, true) => lanes::run::<Fused, 4, 16, true>(p, pad, bufs),
-            _ => lanes::run::<Fused, 8, 8, true>(p, pad, bufs),
-        }
+        lanes::run::<Fused, SV1, SV2, WHOLE>(p, pad, bufs)
     }
-}
-
-/// TEMPORARY tuning: the lane threshold choice at the `neon` level.
-pub(super) fn neon_lmin(isa: Isa) -> Option<usize> {
-    #[cfg(target_arch = "aarch64")]
-    if isa.0 == SimdLevel::Neon {
-        return Some(neon::tune().lmin);
-    }
-    let _ = isa;
-    None
 }
 
 // pysacd's filter (`crate::filters::pysacd`): the same safe kernels, built with AVX2. No
