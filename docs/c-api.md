@@ -140,6 +140,26 @@ the commands), and `tests/smoke.c` uses every function. Both run without argumen
   `dsd2pcm_frames_config` 32, `dsd2pcm_run` 80, `dsd2pcm_stats` 64 bytes (checked when the
   library is built).
 
+## Building from source
+
+A minimal program, `crates/dsd2pcm-capi/tests/minimal.c`, converts one stereo frame of
+DSD silence. To build and run it on Linux, from the repository root:
+
+```
+cargo build --release -p dsd2pcm-capi
+cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c target/release/libdsd2pcm.a -lpthread -ldl -lm -o minimal
+./minimal
+```
+
+It prints `dsd2pcm 0.1.0: 2352 samples per channel, first byte 0`. To link the shared
+library instead (its SONAME is `libdsd2pcm.so.1`, so it needs that name at run time):
+
+```
+ln -sf libdsd2pcm.so target/release/libdsd2pcm.so.1
+cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c -L target/release -ldsd2pcm -o minimal
+LD_LIBRARY_PATH=target/release ./minimal
+```
+
 ## Binary releases
 
 Each GitHub release has the C library built for five platforms, next to the command-line
