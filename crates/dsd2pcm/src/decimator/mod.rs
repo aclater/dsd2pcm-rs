@@ -18,6 +18,7 @@
 mod dispatch;
 mod exact;
 mod kernel;
+mod stagger;
 mod tables;
 
 pub(crate) use dispatch::Isa;

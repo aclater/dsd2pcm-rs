@@ -143,6 +143,20 @@ run property the bytes equal one call.
   sum is the same integer.
 - The FIR kernels compute blocks of independent outputs (16 generic, 32 with AVX2), so
   the compiler puts them in vector lanes; each output keeps its own sum in tap order.
+- Staggered kernels (`decimator/stagger.rs`, x86-64 with AVX2 and FMA, proven stages with
+  32 to 128 tap offsets: the 30, 40 and 80 kHz filters). The ordered kernels load two
+  unaligned input vectors per tap pair and vector, which makes them bound by loads (and by
+  loads that cross cache lines). The staggered kernels split each block of up to 1024
+  outputs into 4 lanes of consecutive outputs and copy the input once into aligned
+  vectors whose lane `w` is lane `w`'s input; one loaded vector then serves every (output,
+  tap) pair with the same sum of indices, so a group of 4 taps and 4 output vectors loads
+  7 vectors per side instead of 32. Each group's products go into a partial sum that is
+  added to the output's sum, so that groups do not wait on the FMA latency. The terms are
+  summed in another order and grouping, which gives the same integer only because the
+  stage is proven exact; `staggered_matches_ordered` checks it at the proven input bounds.
+  The half-band stages stay on the ordered kernels (8 odd taps: the copy costs more than
+  it saves); x86 (32-bit) and the generic level do too (fewer registers: the groups would
+  spill).
 - Run-time dispatch (`decimator/dispatch.rs`, the crate's only `unsafe`): generic, AVX2,
   and AVX2 with FMA. FMA is used only in stages that `decimator/exact.rs` proves exact from
   the tables and stage plan (every product and partial sum an integer below 2^53); the
