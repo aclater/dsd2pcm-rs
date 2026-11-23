@@ -11,7 +11,8 @@ crates.io, in this order (each crate after the one it depends on):
 
 1. `dsd2pcm`, the library.
 2. `dsd2pcm-capi`, the C library, only when its `Cargo.toml` allows publishing. For 0.1.0 it
-   has `publish = false`: the C library ships as source in the repository, not on crates.io.
+   has `publish = false`: the C library ships as GitHub release assets (below), not on
+   crates.io.
 3. `dsd2pcm-cli`, the command-line tool (`cargo install dsd2pcm-cli` installs `dsd2pcm`).
 
 `.github/scripts/publish-crates.sh` holds this order. A crate that can be published but is not
@@ -27,10 +28,22 @@ The GitHub release, with these assets:
 | `dsd2pcm-0.1.0-i686-linux.tar.gz` | Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later |
 | `dsd2pcm-0.1.0-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon; not signed or notarised |
 | `dsd2pcm-0.1.0-x86_64-windows.zip` | Windows 10 and 11, x86_64; C runtime linked in; not code-signed |
+| `libdsd2pcm-0.1.0-x86_64-linux.tar.gz` | C library, Linux x86_64, glibc 2.17 or later |
+| `libdsd2pcm-0.1.0-aarch64-linux.tar.gz` | C library, Linux aarch64, glibc 2.17 or later |
+| `libdsd2pcm-0.1.0-i686-linux.tar.gz` | C library, Linux 32-bit x86, glibc 2.17 or later |
+| `libdsd2pcm-0.1.0-aarch64-macos.tar.gz` | C library, macOS 11 or later, Apple silicon |
+| `libdsd2pcm-0.1.0-x86_64-windows.zip` | C library, Windows 10 and 11, x86_64 |
 
-Each archive holds `dsd2pcm` (or `dsd2pcm.exe`), `README.md`, `LICENSE-MIT` and
-`LICENSE-APACHE`, and has a `.sha256` file and a build provenance attestation
-(`.intoto.jsonl`, also stored with GitHub). `SHA256SUMS` lists every archive.
+A `dsd2pcm-` archive holds `dsd2pcm` (or `dsd2pcm.exe`), `README.md`, `LICENSE-MIT` and
+`LICENSE-APACHE`. A `libdsd2pcm-` archive holds `include/dsd2pcm.h`, the shared library
+under its ABI-versioned name (`libdsd2pcm.so.1` with a `libdsd2pcm.so` link, SONAME
+`libdsd2pcm.so.1`; `libdsd2pcm.1.dylib` with a `libdsd2pcm.dylib` link, install name
+`@rpath/libdsd2pcm.1.dylib`; `bin/dsd2pcm.dll` with the import library
+`lib/dsd2pcm.dll.lib`), the static library, `lib/pkgconfig/dsd2pcm.pc` (not on Windows),
+`examples/minimal.c`, a README taken from [docs/c-api.md](c-api.md#binary-releases) and the
+licences. Every archive has a `.sha256` file and a build provenance attestation
+(`.intoto.jsonl`, also stored with GitHub). `SHA256SUMS` lists every archive: 31 files in
+all.
 
 ## How the workflow runs
 
@@ -40,10 +53,13 @@ Each archive holds `dsd2pcm` (or `dsd2pcm.exe`), `README.md`, `LICENSE-MIT` and
    the run's commit, and that commit is on `main` (`git merge-base --is-ancestor` against a
    fresh fetch of `main`). Then `cargo publish --dry-run` packages and verifies every crate.
 2. **binary (five platforms)**: build and test on each platform's own runner (Linux with
-   cargo-zigbuild against glibc 2.17's symbols), pack, and convert a generated test file
-   with the packed binary.
-3. **same output everywhere**: every archive matches its `.sha256`, and all five binaries
-   made byte-identical output from the test file.
+   cargo-zigbuild against glibc 2.17's symbols), pack the tool and the C library, convert
+   a generated test file with the packed tool, and build and run
+   `crates/dsd2pcm-capi/tests/minimal.c` against the packed C library, shared and static
+   (through its pkg-config file on Linux and macOS, with MSVC on Windows), checking the
+   SONAME (Linux) or install name (macOS).
+3. **same output everywhere**: all ten archives are there and match their `.sha256`, and
+   all five binaries made byte-identical output from the test file.
 4. **publish to crates.io** (tag only): in the GitHub environment `release`, so it waits for
    a required reviewer's approval. Trusted publishing: the job's OIDC token is exchanged for
    a crates.io token valid for 30 minutes and revoked when the job ends. No crates.io token
@@ -135,7 +151,7 @@ steps 1 to 5 for that crate alone.
    Check first that `git log -1 origin/main` is the approved commit.
 4. Approve the `release` environment when the crates.io job waits (Actions, the run, Review
    deployments).
-5. Check: the crates on crates.io, the GitHub release with its sixteen files (five
+5. Check: the crates on crates.io, the GitHub release with its 31 files (ten
    archives, their `.sha256` and `.intoto.jsonl` files, and `SHA256SUMS`), and an asset:
 
    ```

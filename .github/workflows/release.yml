@@ -1,14 +1,16 @@
 # The release. On a version tag (v0.1.0, ...), annotated, on a commit on main, equal to the
 # workspace version (.github/scripts/release-preflight.sh):
-#   1. build and test the command-line tool `dsd2pcm` for Linux x86_64, aarch64 and i686
-#      (glibc 2.17 or later), macOS arm64 and Windows x86_64; every packed binary converts the
-#      same test file, and all five outputs must be byte-identical;
+#   1. build and test the command-line tool `dsd2pcm` and the C library (dsd2pcm-capi) for
+#      Linux x86_64, aarch64 and i686 (glibc 2.17 or later), macOS arm64 and Windows x86_64;
+#      every packed binary converts the same test file, and all five outputs must be
+#      byte-identical; every packed C library builds and runs a C program;
 #   2. publish the crates to crates.io with trusted publishing (OIDC, no stored token), in
-#      dependency order: dsd2pcm, then dsd2pcm-capi if it is publishable, then dsd2pcm-cli
-#      (.github/scripts/publish-crates.sh). This job runs in the GitHub environment `release`,
-#      whose required reviewers approve it;
-#   3. create the GitHub release with the five archives, a .sha256 file for each, SHA256SUMS
-#      and a build provenance attestation (Sigstore) for each archive.
+#      dependency order: dsd2pcm, then dsd2pcm-capi if it is publishable (not for 0.1.0),
+#      then dsd2pcm-cli (.github/scripts/publish-crates.sh). This job runs in the GitHub
+#      environment `release`, whose required reviewers approve it;
+#   3. create the GitHub release with ten archives (dsd2pcm-<v>-<platform> and
+#      libdsd2pcm-<v>-<platform>), a .sha256 file for each, SHA256SUMS and a build
+#      provenance attestation (Sigstore) for each archive.
 # Any other run (a pull request that changes the release files, or a manual run) is a dry run:
 # the same builds and checks, and `cargo publish --dry-run`, with nothing published.
 # The steps that need a person are in docs/release.md.
@@ -25,6 +27,7 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "crates/*/Cargo.toml"
+      - "crates/dsd2pcm-capi/build.rs"
 
 permissions:
   contents: read
@@ -135,32 +138,46 @@ jobs:
           zig version
           cargo zigbuild --release --locked -p dsd2pcm-cli --target "$TARGET.$GLIBC_MAX"
           cargo-zigbuild test --release --locked --workspace --target "$TARGET.$GLIBC_MAX"
+      # The C library (shared, SONAME libdsd2pcm.so.1 from its build.rs, and static), and the
+      # system libraries the static one needs, for the pkg-config file.
+      - name: The C library, linked against glibc 2.17
+        run: |
+          cargo-zigbuild rustc --release --locked -p dsd2pcm-capi --lib --target "$TARGET.$GLIBC_MAX" \
+            -- --print native-static-libs 2>&1 | tee "$RUNNER_TEMP/capi.log"
+          sed -n 's/.*native-static-libs: //p' "$RUNNER_TEMP/capi.log" | tail -n 1 > "$RUNNER_TEMP/static-libs"
+          cat "$RUNNER_TEMP/static-libs"
       - name: glibc 2.17 or later, stripped
         run: |
-          bin="target/$TARGET/release/dsd2pcm"
-          file "$bin"
-          readelf -d "$bin" | grep NEEDED
-          max=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -n 1)
-          echo "newest glibc symbol version: $max"
-          if [[ "$(printf '%s\n' "$max" "$GLIBC_MAX" | sort -V | tail -n 1)" != "$GLIBC_MAX" ]]; then
-            echo "::error::the binary needs glibc $max, newer than $GLIBC_MAX"; exit 1
-          fi
-          if readelf -S "$bin" | grep -q '\.symtab'; then
-            echo "::error::the binary is not stripped"; exit 1
-          fi
+          for bin in "target/$TARGET/release/dsd2pcm" "target/$TARGET/release/libdsd2pcm.so"; do
+            file "$bin"
+            readelf -d "$bin" | grep -E 'NEEDED|SONAME'
+            max=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -n 1)
+            echo "newest glibc symbol version: $max"
+            if [[ "$(printf '%s\n' "$max" "$GLIBC_MAX" | sort -V | tail -n 1)" != "$GLIBC_MAX" ]]; then
+              echo "::error::$bin needs glibc $max, newer than $GLIBC_MAX"; exit 1
+            fi
+            if readelf -S "$bin" | grep -q '\.symtab'; then
+              echo "::error::$bin is not stripped"; exit 1
+            fi
+          done
       - name: Package
         run: |
           pkg="dsd2pcm-$VERSION-$NAME"
           mkdir -p "dist/$pkg"
           install -m 0755 "target/$TARGET/release/dsd2pcm" "dist/$pkg/dsd2pcm"
           install -m 0644 README.md LICENSE-MIT LICENSE-APACHE "dist/$pkg/"
+          # The C library's archive (.github/scripts/stage-capi.sh).
+          cpkg=$(.github/scripts/stage-capi.sh "$VERSION" "$NAME" "target/$TARGET/release" dist "$(cat "$RUNNER_TEMP/static-libs")")
           # Reproducible: fixed order, owner and times (the commit's), no gzip timestamp.
           mtime=$(git log -1 --format=%ct)
-          tar -C dist --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$mtime" \
-            -cf - "$pkg" | gzip -n -9 > "dist/$pkg.tar.gz"
-          rm -rf "dist/$pkg"
-          (cd dist && sha256sum "$pkg.tar.gz" > "$pkg.tar.gz.sha256" && cat "$pkg.tar.gz.sha256")
+          for p in "$pkg" "$cpkg"; do
+            tar -C dist --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$mtime" \
+              -cf - "$p" | gzip -n -9 > "dist/$p.tar.gz"
+            rm -rf "dist/$p"
+            (cd dist && sha256sum "$p.tar.gz" > "$p.tar.gz.sha256" && cat "$p.tar.gz.sha256")
+          done
           echo "PKG=$pkg" >> "$GITHUB_ENV"
+          echo "CPKG=$cpkg" >> "$GITHUB_ENV"
       - name: The packed binary converts the test file
         run: |
           mkdir -p "$RUNNER_TEMP/check"
@@ -168,6 +185,13 @@ jobs:
           python3 -I .github/scripts/make-test-dsf.py "$RUNNER_TEMP/test.dsf"
           "$RUNNER_TEMP/check/$PKG/dsd2pcm" "$RUNNER_TEMP/test.dsf" "$RUNNER_TEMP/test.wav"
           (cd "$RUNNER_TEMP" && sha256sum test.wav) | tee "dist/smoke-$NAME.sha256"
+      - name: The packed C library builds and runs a C program (pkg-config, SONAME)
+        env:
+          CC: ${{ matrix.target == 'i686-unknown-linux-gnu' && 'gcc -m32' || 'gcc' }}
+        run: |
+          tar -C "$RUNNER_TEMP/check" -xzf "dist/$CPKG.tar.gz"
+          ls -lR "$RUNNER_TEMP/check/$CPKG"
+          .github/scripts/check-capi-archive.sh "$RUNNER_TEMP/check/$CPKG"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: bin-${{ matrix.name }}
@@ -204,6 +228,21 @@ jobs:
         run: |
           cargo build --release --locked -p dsd2pcm-cli
           cargo test --release --locked --workspace
+      # The C library. The shared one gets the ABI-versioned install name
+      # @rpath/libdsd2pcm.1.dylib at link time (no install_name_tool afterwards, which would
+      # break the linker's ad-hoc signature), and the file is shipped under that name.
+      - name: The C library
+        run: |
+          abi=$(sed -n 's/^#define DSD2PCM_ABI_VERSION \([0-9]*\).*/\1/p' crates/dsd2pcm-capi/include/dsd2pcm.h)
+          cargo rustc --release --locked -p dsd2pcm-capi --lib -- --print native-static-libs \
+            -C link-arg=-Wl,-install_name,@rpath/libdsd2pcm.$abi.dylib \
+            -C link-arg=-Wl,-compatibility_version,$abi -C link-arg=-Wl,-current_version,${VERSION%%-*} \
+            2>&1 | tee "$RUNNER_TEMP/capi.log"
+          sed -n 's/.*native-static-libs: //p' "$RUNNER_TEMP/capi.log" | tail -n 1 > "$RUNNER_TEMP/static-libs"
+          cat "$RUNNER_TEMP/static-libs"
+          otool -D target/release/libdsd2pcm.dylib
+          otool -L target/release/libdsd2pcm.dylib
+          codesign -v target/release/libdsd2pcm.dylib
       - name: Package
         run: |
           pkg="dsd2pcm-$VERSION-$NAME"
@@ -212,14 +251,19 @@ jobs:
           install -m 0644 README.md LICENSE-MIT LICENSE-APACHE "dist/$pkg/"
           lipo -archs "dist/$pkg/dsd2pcm"
           otool -L "dist/$pkg/dsd2pcm"
+          # The C library's archive (.github/scripts/stage-capi.sh).
+          cpkg=$(.github/scripts/stage-capi.sh "$VERSION" "$NAME" target/release dist "$(cat "$RUNNER_TEMP/static-libs")")
           # Fixed order, owner and times (the commit's), no gzip timestamp.
           stamp=$(date -r "$(git log -1 --format=%ct)" +%Y%m%d%H%M.%S)
-          find "dist/$pkg" -exec touch -h -t "$stamp" {} +
-          (cd dist && find "$pkg" | LC_ALL=C sort > files.txt \
-            && tar --uid 0 --gid 0 --no-recursion -cf - -T files.txt | gzip -n -9 > "$pkg.tar.gz" \
-            && rm -rf files.txt "$pkg")
-          (cd dist && shasum -a 256 "$pkg.tar.gz" > "$pkg.tar.gz.sha256" && cat "$pkg.tar.gz.sha256")
+          for p in "$pkg" "$cpkg"; do
+            find "dist/$p" -exec touch -h -t "$stamp" {} +
+            (cd dist && find "$p" | LC_ALL=C sort > files.txt \
+              && tar --uid 0 --gid 0 --no-recursion -cf - -T files.txt | gzip -n -9 > "$p.tar.gz" \
+              && rm -rf files.txt "$p")
+            (cd dist && shasum -a 256 "$p.tar.gz" > "$p.tar.gz.sha256" && cat "$p.tar.gz.sha256")
+          done
           echo "PKG=$pkg" >> "$GITHUB_ENV"
+          echo "CPKG=$cpkg" >> "$GITHUB_ENV"
       - name: The packed binary converts the test file
         run: |
           mkdir -p "$RUNNER_TEMP/check"
@@ -227,6 +271,13 @@ jobs:
           python3 -I .github/scripts/make-test-dsf.py "$RUNNER_TEMP/test.dsf"
           "$RUNNER_TEMP/check/$PKG/dsd2pcm" "$RUNNER_TEMP/test.dsf" "$RUNNER_TEMP/test.wav"
           (cd "$RUNNER_TEMP" && shasum -a 256 test.wav) | tee "dist/smoke-$NAME.sha256"
+      - name: The packed C library builds and runs a C program (pkg-config, install name)
+        env:
+          CC: clang
+        run: |
+          tar -C "$RUNNER_TEMP/check" -xzf "dist/$CPKG.tar.gz"
+          ls -lR "$RUNNER_TEMP/check/$CPKG"
+          .github/scripts/check-capi-archive.sh "$RUNNER_TEMP/check/$CPKG"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: bin-aarch64-macos
@@ -261,23 +312,38 @@ jobs:
         run: |
           cargo build --release --locked -p dsd2pcm-cli
           cargo test --release --locked --workspace
+      # The C library: dsd2pcm.dll with its import library dsd2pcm.dll.lib, and the static
+      # dsd2pcm.lib (static C runtime, /MT, like everything in this job).
+      - name: The C library
+        run: |
+          cargo rustc --release --locked -p dsd2pcm-capi --lib -- --print native-static-libs 2>&1 | tee "$RUNNER_TEMP/capi.log"
+          sed -n 's/.*native-static-libs: //p' "$RUNNER_TEMP/capi.log" | tail -n 1 | tr -d '\r' > "$RUNNER_TEMP/static-libs"
+          cat "$RUNNER_TEMP/static-libs"
+          ls -l target/release/dsd2pcm.dll target/release/dsd2pcm.dll.lib target/release/dsd2pcm.lib
       - name: No Visual C++ runtime DLL among the imports
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $dumpbin = & $vswhere -latest -find "VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
-          $deps = (& $dumpbin /nologo /dependents target\release\dsd2pcm.exe) -join "`n"
-          $deps
-          if ($deps -match "(?i)vcruntime|msvcp|api-ms-win-crt") { throw "depends on the Visual C++ runtime" }
+          foreach ($f in "target\release\dsd2pcm.exe", "target\release\dsd2pcm.dll") {
+            $deps = (& $dumpbin /nologo /dependents $f) -join "`n"
+            $deps
+            if ($deps -match "(?i)vcruntime|msvcp|api-ms-win-crt") { throw "$f depends on the Visual C++ runtime" }
+          }
       - name: Package
         run: |
           pkg="dsd2pcm-$VERSION-$NAME"
           mkdir -p "dist/$pkg"
           cp target/release/dsd2pcm.exe README.md LICENSE-MIT LICENSE-APACHE "dist/$pkg/"
-          python -I .github/scripts/pack-zip.py "dist/$pkg.zip" "dist/$pkg" "$(git log -1 --format=%ct)"
-          rm -rf "dist/$pkg"
-          (cd dist && sha256sum "$pkg.zip" > "$pkg.zip.sha256" && cat "$pkg.zip.sha256")
+          # The C library's archive (.github/scripts/stage-capi.sh).
+          cpkg=$(.github/scripts/stage-capi.sh "$VERSION" "$NAME" target/release dist "$(cat "$RUNNER_TEMP/static-libs")")
+          for p in "$pkg" "$cpkg"; do
+            python -I .github/scripts/pack-zip.py "dist/$p.zip" "dist/$p" "$(git log -1 --format=%ct)"
+            rm -rf "dist/$p"
+            (cd dist && sha256sum "$p.zip" > "$p.zip.sha256" && cat "$p.zip.sha256")
+          done
           echo "PKG=$pkg" >> "$GITHUB_ENV"
+          echo "CPKG=$cpkg" >> "$GITHUB_ENV"
       - name: The packed binary converts the test file
         run: |
           mkdir -p "$RUNNER_TEMP/check"
@@ -285,6 +351,26 @@ jobs:
           python -I .github/scripts/make-test-dsf.py "$RUNNER_TEMP/test.dsf"
           "$RUNNER_TEMP/check/$PKG/dsd2pcm.exe" "$RUNNER_TEMP/test.dsf" "$RUNNER_TEMP/test.wav"
           (cd "$RUNNER_TEMP" && sha256sum test.wav) | tee "dist/smoke-$NAME.sha256"
+      # MSVC, in a copy of the unpacked archive: the example against the DLL's import library,
+      # and against the static library with the system libraries rustc listed.
+      - name: The packed C library builds and runs a C program (MSVC)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $d = Join-Path $env:RUNNER_TEMP "capi"
+          Expand-Archive "dist\$env:CPKG.zip" $d
+          Set-Location (Join-Path $d $env:CPKG)
+          Get-ChildItem -Recurse | Select-Object -ExpandProperty FullName
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $static = (Get-Content (Join-Path $env:RUNNER_TEMP "static-libs")).Trim()
+          $vcvars = Join-Path $vs "VC\Auxiliary\Build\vcvars64.bat"
+          cmd /c "`"$vcvars`" >nul && cl /nologo /W3 /I include examples\minimal.c /Fe:minimal.exe /link lib\dsd2pcm.dll.lib && cl /nologo /W3 /MT /I include examples\minimal.c /Fe:minimal-static.exe /link lib\dsd2pcm.lib $static"
+          if ($LASTEXITCODE -ne 0) { throw "cl: $LASTEXITCODE" }
+          Copy-Item bin\dsd2pcm.dll .
+          .\minimal.exe
+          if ($LASTEXITCODE -ne 0) { throw "minimal.exe: $LASTEXITCODE" }
+          .\minimal-static.exe
+          if ($LASTEXITCODE -ne 0) { throw "minimal-static.exe: $LASTEXITCODE" }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: bin-x86_64-windows
@@ -316,6 +402,7 @@ jobs:
           n=$(wc -l < hashes)
           [[ "$n" -eq 1 ]] || { echo "::error::the platforms' binaries converted the test file to $n different outputs"; exit 1; }
           [[ $(ls smoke-*.sha256 | wc -l) -eq 5 ]] || { echo "::error::expected five platforms' outputs"; exit 1; }
+          [[ $(ls ./*.tar.gz ./*.zip | wc -l) -eq 10 ]] || { echo "::error::expected ten archives (the tool and the C library, five platforms)"; exit 1; }
           echo "all five binaries: the same output"
       - name: What a tag would publish
         if: github.ref_type != 'tag'
@@ -418,6 +505,8 @@ jobs:
             echo "- \`dsd2pcm-$VERSION-i686-linux.tar.gz\`: Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later."
             echo "- \`dsd2pcm-$VERSION-aarch64-macos.tar.gz\`: macOS 11 or later on Apple silicon. Not signed or notarised."
             echo "- \`dsd2pcm-$VERSION-x86_64-windows.zip\`: Windows 10 or 11, x86_64. Not code-signed."
+            echo
+            echo "The C library (\`include/dsd2pcm.h\`, shared and static libraries, a pkg-config file; ABI version 1), \`libdsd2pcm-$VERSION-<platform>\` for the same five platforms: \`.tar.gz\`, and \`.zip\` for Windows. See [docs/c-api.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/c-api.md#binary-releases)."
             echo
             echo "Verify a download: \`sha256sum -c <asset>.sha256\` and \`gh attestation verify <asset> -R $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml --source-ref refs/tags/v$VERSION --deny-self-hosted-runners\`."
             echo
