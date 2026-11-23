@@ -3,8 +3,8 @@
 #
 # - every crate of the workspace has the workspace's version, in Cargo.toml and Cargo.lock,
 #   and the crates that depend on dsd2pcm pin exactly that version;
-# - on a tag (REF_TYPE=tag): the tag is vVERSION; it is an annotated tag whose signature
-#   GitHub verified (a key on a maintainer's account); and its commit is on main.
+# - on a tag (REF_TYPE=tag): the tag is vVERSION, it is an annotated tag, and its commit is
+#   on main.
 #
 # Environment: REF_TYPE, REF_NAME (github.ref_type, github.ref_name), and on a tag GH_REPO,
 # GH_TOKEN (read access) and TAG_SHA (the commit). Prints the version and, under GitHub
@@ -45,19 +45,20 @@ echo "version: $version"
 if [[ "${REF_TYPE:-}" == tag ]]; then
     [[ "$REF_NAME" == "v$version" ]] || fail "tag $REF_NAME does not match the workspace version $version (expected v$version)"
 
-    # Annotated and signed: GitHub's verification of the tag object.
+    # Annotated (a tag object, as `git tag -a` makes), pointing at this run's commit. Tags are
+    # not signed: trust comes from the tag ruleset (no update or delete) and the attestations.
     ref=$(gh api "repos/$GH_REPO/git/ref/tags/$REF_NAME" --jq '.object.type + " " + .object.sha')
-    [[ "${ref%% *}" == tag ]] || fail "$REF_NAME is a lightweight tag: release tags are annotated and signed (git tag -s)"
-    verified=$(gh api "repos/$GH_REPO/git/tags/${ref#* }" --jq '.verification.verified, .verification.reason, .object.sha')
-    read -r ok reason commit <<< "$(echo "$verified" | tr '\n' ' ')"
-    [[ "$ok" == true ]] || fail "the signature of tag $REF_NAME is not verified by GitHub ($reason): see docs/release.md, \"Tag signing\""
+    [[ "${ref%% *}" == tag ]] || fail "$REF_NAME is a lightweight tag: release tags are annotated (git tag -a)"
+    commit=$(gh api "repos/$GH_REPO/git/tags/${ref#* }" --jq '.object.sha')
     [[ "$commit" == "$TAG_SHA" ]] || fail "tag $REF_NAME points at $commit, the run at $TAG_SHA"
-    echo "tag $REF_NAME: annotated, signature verified ($reason)"
+    echo "tag $REF_NAME: annotated, on $commit"
 
     # On main: never a commit only on a pull request's branch, or one never pushed.
-    # The workflow checks out with full history (fetch-depth: 0), which includes origin/main.
-    git rev-parse --verify --quiet refs/remotes/origin/main > /dev/null \
-        || git fetch --quiet --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+    # main as it is now, with its history (the checkout's fetch-depth: 0 already has it; the
+    # fetch, anonymous on a public repository, updates it).
+    git fetch --quiet --no-tags origin "+refs/heads/main:refs/remotes/origin/main" \
+        || echo "::warning::could not fetch main; using the checkout's copy"
+    git rev-parse --verify --quiet refs/remotes/origin/main > /dev/null || fail "no origin/main to check the tag against"
     git merge-base --is-ancestor "$TAG_SHA" refs/remotes/origin/main \
         || fail "tag $REF_NAME ($TAG_SHA) is not on main"
     echo "tag $REF_NAME: on main"

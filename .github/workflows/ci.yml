@@ -121,7 +121,9 @@ jobs:
       - name: Tests at every SIMD level
         run: .github/scripts/test-simd-levels.sh --target "$TARGET"
       - name: The CLI is a 32-bit x86 program
-        run: file "target/$TARGET/debug/dsd2pcm" | tee /dev/stderr | grep -q 'ELF 32-bit.*Intel'
+        run: |
+          cargo build --locked -p dsd2pcm-cli --target "$TARGET"
+          file "target/$TARGET/debug/dsd2pcm" | tee /dev/stderr | grep -q 'ELF 32-bit.*Intel'
 
   # macOS arm64 and Windows x86_64, on the runners' own rustup.
   test-other:
