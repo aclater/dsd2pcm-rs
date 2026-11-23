@@ -1,10 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.1.1
 
+Faster, same output: every output byte is unchanged from 0.1.0 at every SIMD level.
+
+- Speed (x86_64 with AVX2 and FMA): passes run in four lanes of output runs, the first stage
+  reads two outputs per lookup from byte tables that fit in the L1 cache, and a
+  `frames::Converter` reuses first-stage values between calls when the input bytes are the
+  same. One-frame-per-call conversion is now ahead of scarletbook-pcm 0.7.0 on the measured
+  Intel P- and E-cores and on Zen 2 ([performance](docs/performance.md)).
 - 32-bit x86: a new SIMD level, `sse2` (`DSD2PCM_SIMD=sse2`), picked on CPUs without AVX2
   such as Atom: 1.1x to 1.3x the speed of scarletbook-pcm 0.7.0 where the generic level ran
-  at 0.9x to 1.0x. Output bytes unchanged.
+  at 0.9x to 1.0x.
+- Releases: the macOS tool and C library are signed (Developer ID, hardened runtime) and
+  notarized. Windows builds are still not code-signed.
+- Docs: README in the DSD Toolbox layout; usage and development notes in `docs/`.
 
 ## 0.1.0
 
