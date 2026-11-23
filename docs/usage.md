@@ -28,7 +28,7 @@ cutoff and gain; the tests compare the two on synthetic and real input. Every sa
 exact integer computation, so the output is the same on every CPU and build profile.
 The DSD idle pattern (0x69) converts to exact zeros. On x86 the filters use AVX2 and FMA
 when the CPU has them, chosen at run time, with the same output; the environment variable
-`DSD2PCM_SIMD` (`generic`, `sse2` on 32-bit x86, `avx2` or `avx2fma`) caps the level.
+`DSD2PCM_SIMD` (`generic`, `sse2` on x86 and x86_64, `avx2` or `avx2fma`) caps the level.
 
 Options: `--gain DB` (-120 to +24, default 0), `--single-thread`, `--filter pysacd`.
 

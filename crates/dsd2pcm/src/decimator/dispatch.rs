@@ -3,9 +3,9 @@
 //! (src/dispatch.rs); Portions Copyright (c) 2026 The scarletbook-rs authors, MIT OR
 //! Apache-2.0 (see PROVENANCE.md).
 //!
-//! The levels: the generic kernels as compiled; on 32-bit x86, the same safe code built with
-//! SSE2 (`#[target_feature]`), which runs long passes in lanes ([`super::lanes`]) in blocks
-//! sized for SSE2; the safe code built with AVX2; and that build with fused multiply-adds in
+//! The levels: the generic kernels as compiled; on x86 and x86-64, the same safe code built
+//! with SSE2 (`#[target_feature]`), which runs passes in lanes ([`super::lanes`]) in blocks
+//! sized for SSE2, picked when the CPU has no AVX2; the safe code built with AVX2; and that build with fused multiply-adds in
 //! the stages whose sums [`super::exact`] proved exact (`Sym::fused`). None changes an
 //! output: the builds do the same IEEE-754 operations in the same order per output (the
 //! compiler never fuses or reorders floating-point operations on its own), a fused
@@ -31,7 +31,7 @@ use super::lanes;
 pub enum SimdLevel {
     /// The kernels as compiled.
     Generic,
-    /// 32-bit x86 with SSE2: long passes in lanes, in blocks sized for 8 vector registers.
+    /// x86 or x86-64 with SSE2 (and no AVX2): passes in lanes, in blocks sized for SSE2.
     Sse2,
     /// x86 or x86-64 with AVX2.
     Avx2,
@@ -54,10 +54,9 @@ impl SimdLevel {
         .collect()
     }
 
-    /// Whether this target has the level at all: SSE2 is a level on 32-bit x86 only (x86-64
-    /// always has it: there it is the generic level).
+    /// Whether this target has the level at all: SSE2 is a level on x86 and x86-64 only.
     fn on_this_target(self) -> bool {
-        self != SimdLevel::Sse2 || cfg!(target_arch = "x86")
+        self != SimdLevel::Sse2 || cfg!(any(target_arch = "x86", target_arch = "x86_64"))
     }
 
     fn parse(s: &str) -> Option<SimdLevel> {
@@ -114,7 +113,8 @@ impl Isa {
             }
             return Isa(SimdLevel::Avx2);
         }
-        if cfg!(target_arch = "x86") {
+        if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
+            // x86-64 always has SSE2; on 32-bit x86 it was checked above.
             Isa(SimdLevel::Sse2)
         } else {
             Isa(SimdLevel::Generic)
@@ -176,7 +176,7 @@ pub(crate) fn s1(
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees AVX2 (see above).
         SimdLevel::Avx2 | SimdLevel::Avx2Fma => unsafe { avx2::s1(lut, bytes, start, stride, out) },
-        #[cfg(target_arch = "x86")]
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees SSE2 (see above).
         SimdLevel::Sse2 => unsafe { sse2::s1(lut, bytes, start, stride, out) },
         _ => kernel::s1(lut, bytes, start, stride, out),
@@ -192,7 +192,7 @@ pub(crate) fn fir1(isa: Isa, s: &Sym, x: &[f64], out: &mut [f64]) {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees AVX2 (see above).
         SimdLevel::Avx2 | SimdLevel::Avx2Fma => unsafe { avx2::fir1(s, x, out) },
-        #[cfg(target_arch = "x86")]
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees SSE2 (see above).
         SimdLevel::Sse2 => unsafe { sse2::fir1(s, x, out) },
         _ => kernel::fir1::<{ kernel::L_FIR1 }, Plain>(s, x, out),
@@ -208,7 +208,7 @@ pub(crate) fn dec2(isa: Isa, s: &Sym, xe: &[f64], xo: &[f64], out: &mut [f64]) {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees AVX2 (see above).
         SimdLevel::Avx2 | SimdLevel::Avx2Fma => unsafe { avx2::dec2(s, xe, xo, out) },
-        #[cfg(target_arch = "x86")]
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees SSE2 (see above).
         SimdLevel::Sse2 => unsafe { sse2::dec2(s, xe, xo, out) },
         _ => kernel::dec2::<{ kernel::L }, Plain>(s, xe, xo, out),
@@ -224,18 +224,23 @@ pub(crate) fn interp2_odd(isa: Isa, s: &Sym, w: &[f64], out: &mut [f64]) {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees AVX2 (see above).
         SimdLevel::Avx2 | SimdLevel::Avx2Fma => unsafe { avx2::interp2_odd(s, w, out) },
-        #[cfg(target_arch = "x86")]
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees SSE2 (see above).
         SimdLevel::Sse2 => unsafe { sse2::interp2_odd(s, w, out) },
         _ => kernel::interp2_odd::<{ kernel::L }, Plain>(s, w, out),
     }
 }
 
-/// Whether passes may run in lanes ([`lanes::run`]) at `isa`: x86-64 with AVX2 and FMA,
-/// and 32-bit x86 with SSE2 (not above: the AVX2 builds run the ordered kernels there).
+/// Whether passes may run in lanes ([`lanes::run`]) at `isa`: x86-64 with AVX2 and FMA, and
+/// the `sse2` level (on 32-bit x86 the AVX2 levels run the ordered kernels).
 pub(super) fn lanes_level(isa: Isa) -> bool {
-    (cfg!(target_arch = "x86_64") && isa.0 == SimdLevel::Avx2Fma)
-        || (cfg!(target_arch = "x86") && isa.0 == SimdLevel::Sse2)
+    (cfg!(target_arch = "x86_64") && isa.0 == SimdLevel::Avx2Fma) || isa.0 == SimdLevel::Sse2
+}
+
+/// Whether passes run in lanes from fewer outputs at `isa` (`super::LANES_MIN_SSE2`): at
+/// the `sse2` level.
+pub(super) fn short_lanes(isa: Isa) -> bool {
+    isa.0 == SimdLevel::Sse2
 }
 
 /// The layout of the S1 tables at `isa`: bytes on 32-bit targets below AVX2 (small
@@ -268,10 +273,10 @@ pub(super) fn lanes<'b>(
         #[cfg(target_arch = "x86_64")]
         // SAFETY: the level guarantees AVX2 and FMA (see above).
         SimdLevel::Avx2Fma => unsafe { avx2fma::run_lanes(p, pad, bufs) },
-        #[cfg(target_arch = "x86")]
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees SSE2 (see above).
         SimdLevel::Sse2 => unsafe { sse2::run_lanes(p, pad, bufs) },
-        _ => lanes::run::<Plain, 8, 8>(p, pad, bufs),
+        _ => lanes::run::<Plain, 8, 8, false>(p, pad, bufs),
     }
 }
 
@@ -281,7 +286,7 @@ pub(crate) fn quantise(isa: Isa, v: &[f64], gain: f64, q: &mut [i32]) -> u64 {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees AVX2 (see above).
         SimdLevel::Avx2 | SimdLevel::Avx2Fma => unsafe { avx2::quantise(v, gain, q) },
-        #[cfg(target_arch = "x86")]
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees SSE2 (see above).
         SimdLevel::Sse2 => unsafe { sse2::quantise(v, gain, q) },
         _ => kernel::quantise(v, gain, q),
@@ -294,26 +299,28 @@ pub(crate) fn pack24(isa: Isa, q: &[&[i32]], out: &mut [u8]) {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees AVX2 (see above).
         SimdLevel::Avx2 | SimdLevel::Avx2Fma => unsafe { avx2::pack24(q, out) },
-        #[cfg(target_arch = "x86")]
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees SSE2 (see above).
         SimdLevel::Sse2 => unsafe { sse2::pack24(q, out) },
         _ => kernel::pack24(q, out),
     }
 }
 
-/// The kernels built with SSE2 (which 32-bit x86 targets need not assume), without fused
-/// multiply-adds, and the lanes in blocks of [`sse2::SV1`] and [`sse2::SV2`] output vectors, sized so that the
-/// sums and a step's operands fit in the 8 SSE2 registers of 32-bit x86. Each is the safe
-/// generic kernel; callers must have checked that the CPU has SSE2.
-#[cfg(target_arch = "x86")]
+/// The kernels built with SSE2 (which 32-bit x86 targets need not assume; x86-64 always has
+/// it), without fused multiply-adds, and the lanes in blocks of [`sse2::SV1`] and
+/// [`sse2::SV2`] output vectors, sized for the SSE2 registers of the target. Each is the
+/// safe generic kernel; callers must have checked that the CPU has SSE2.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod sse2 {
     use super::kernel::{self, Plain, S1Lut, Sym};
     use super::lanes;
 
     /// Output vectors per block of the lanes (2 SSE2 registers each) in Fir1 and Interp2:
-    /// 4 sums and the operands of a step in the 8 registers.
-    pub(super) const SV1: usize = 2;
-    /// Output vectors per block of the lanes in Dec2, which measured faster with 8 sums.
+    /// on 32-bit x86, 4 sums and the operands of a step in its 8 registers; on x86-64, with
+    /// 16 registers, 8 sums.
+    pub(super) const SV1: usize = if cfg!(target_arch = "x86") { 2 } else { 4 };
+    /// Output vectors per block of the lanes in Dec2: 8 sums (faster than 4 on 32-bit x86;
+    /// 16 measured slower on x86-64).
     pub(super) const SV2: usize = 4;
 
     #[target_feature(enable = "sse2")]
@@ -358,7 +365,7 @@ mod sse2 {
         pad: usize,
         bufs: &'b mut lanes::Bufs,
     ) -> &'b [lanes::Lanes] {
-        lanes::run::<Plain, SV1, SV2>(p, pad, bufs)
+        lanes::run::<Plain, SV1, SV2, true>(p, pad, bufs)
     }
 }
 
@@ -453,7 +460,7 @@ mod avx2fma {
         pad: usize,
         bufs: &'b mut lanes::Bufs,
     ) -> &'b [lanes::Lanes] {
-        lanes::run::<Fused, 8, 8>(p, pad, bufs)
+        lanes::run::<Fused, 8, 8, false>(p, pad, bufs)
     }
 }
 

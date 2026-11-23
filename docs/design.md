@@ -188,8 +188,15 @@ run property the bytes equal one call.
   faster in lanes there. The AVX2 levels on 32-bit x86 and the generic level keep the
   ordered kernels. An SSSE3 build measured within noise of SSE2 (only the 24-bit packing
   could use `pshufb`), so there is no SSSE3 level.
+- Lanes on x86-64 without AVX2 (level `sse2`, e.g. the Goldmont and Tremont cores of
+  Celeron and Pentium NAS chips): the same loop as on 32-bit x86, with blocks of 4 output
+  vectors (8 sums in the 16 SSE2 registers) in every stage, the paired S1 tables and the
+  frame carry (64-bit additions are cheap there), and lanes from 1024 outputs (2048 wide).
+  An SSE4.2 build measured within noise of SSE2, so there is no SSE4 level. AVX2 CPUs never
+  pick this level; their loop loads vectors through slices, which measured 10-15 % faster
+  with AVX2 than the whole-vector form.
 - Run-time dispatch (`decimator/dispatch.rs`, the crate's only `unsafe`): generic, SSE2
-  (32-bit x86 only), AVX2, and AVX2 with FMA. FMA is used only in stages that `decimator/exact.rs` proves exact from
+  (picked on x86 and x86-64 CPUs without AVX2), AVX2, and AVX2 with FMA. FMA is used only in stages that `decimator/exact.rs` proves exact from
   the tables and stage plan (every product and partial sum an integer below 2^53); the
   test `sums_are_exact` fails if a table or stage change breaks the proof, and such a stage
   runs unfused. `DSD2PCM_SIMD=generic|sse2|avx2|avx2fma` caps the level; the golden hashes in
