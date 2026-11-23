@@ -261,6 +261,16 @@ pub struct WavWriter<W: Write + Seek> {
     finished: bool,
 }
 
+/// Bytes before the first sample in a file from [`WavWriter`] of `format` and `channels`:
+/// 44, or 68 with `WAVE_FORMAT_EXTENSIBLE`.
+pub fn header_len(format: WavFormat, channels: u16) -> u64 {
+    if channels > 2 || format.bytes() > 2 {
+        68
+    } else {
+        44
+    }
+}
+
 /// `KSDATAFORMAT_SUBTYPE_PCM` and `KSDATAFORMAT_SUBTYPE_IEEE_FLOAT` share these 14 bytes
 /// after their 2-byte format code.
 const SUBTYPE_TAIL: [u8; 14] = [
@@ -294,7 +304,7 @@ impl<W: Write + Seek> WavWriter<W> {
             .checked_mul(u32::from(channels) * u32::from(bs))
             .ok_or_else(|| crate::Error::InvalidArgument("WAV writer: rate too high".into()))?;
         let code: u16 = if format.is_float() { 3 } else { 1 };
-        let extensible = channels > 2 || bs > 2;
+        let extensible = header_len(format, channels) == 68;
         let mut h = Vec::with_capacity(68);
         h.extend_from_slice(b"RIFF");
         h.extend_from_slice(&0u32.to_le_bytes());

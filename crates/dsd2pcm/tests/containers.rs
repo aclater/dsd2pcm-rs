@@ -394,3 +394,25 @@ fn wav_decode_matches_the_reader() {
         }
     }
 }
+
+/// `wav::header_len` is where WavWriter's samples start, for every format and channel count.
+#[test]
+fn wav_header_len_matches_the_writer() {
+    use dsd2pcm::wav::{header_len, WavFormat, WavWriter};
+    for format in [
+        WavFormat::I16,
+        WavFormat::I24,
+        WavFormat::I32,
+        WavFormat::F32,
+        WavFormat::F64,
+    ] {
+        for ch in 1..=6u16 {
+            let w = WavWriter::new(Cursor::new(Vec::new()), format, ch, 88_200).unwrap();
+            assert_eq!(w.data_offset(), header_len(format, ch), "{format:?} {ch}");
+            assert_eq!(
+                w.into_inner().into_inner().len() as u64,
+                header_len(format, ch)
+            );
+        }
+    }
+}

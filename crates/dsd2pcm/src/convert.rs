@@ -137,7 +137,9 @@ pub fn convert_file_with(
     }
     let info = r.info();
     let data = decimator::output_len(info.samples, opts.rate) * u64::from(info.channels) * 3;
-    if 36 + data + (data & 1) > u64::from(u32::MAX) {
+    // The RIFF size: everything after its own 8 bytes.
+    let header = crate::wav::header_len(WavFormat::I24, info.channels);
+    if header - 8 + data + (data & 1) > u64::from(u32::MAX) {
         return Err(Error::Unsupported(
             "WAV output over 4 GiB (RF64 is not supported yet)".into(),
         ));
