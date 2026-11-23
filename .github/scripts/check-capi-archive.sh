@@ -1,5 +1,6 @@
 #!/bin/bash
-# Check an unpacked C library archive (Linux or macOS) the way a user builds against it:
+# Check an unpacked C library archive (Linux with glibc or musl, macOS, or Windows with
+# MinGW-w64 under MSYS2) the way a user builds against it:
 #
 #     .github/scripts/check-capi-archive.sh DIR
 #
@@ -7,7 +8,13 @@
 #   links against the shared library and runs (CC, default cc; for example "gcc -m32");
 # - the shared library's name is the ABI-versioned one: SONAME libdsd2pcm.so.1 on Linux,
 #   install name @rpath/libdsd2pcm.1.dylib on macOS, and the program depends on that name;
-# - the same program links against the static library with Libs.private and runs.
+#   on Windows the program imports dsd2pcm.dll;
+# - the same program links against the static library with Libs.private and runs;
+# - the static library embeds in a shared library of the user's own, built with its symbols
+#   hidden as docs/c-api.md says (--exclude-libs; -exported_symbols_list on macOS): this
+#   fails if the static library is not position-independent (-z text), and that shared
+#   library must export the user's function and nothing of libdsd2pcm.a. A program linked
+#   against it runs.
 set -euo pipefail
 
 dir=$(cd "$1" && pwd)
@@ -16,6 +23,8 @@ src=$dir/examples/minimal.c
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 abi=$(sed -n 's/^#define DSD2PCM_ABI_VERSION \([0-9]*\).*/\1/p' "$dir/include/dsd2pcm.h")
+os=$(uname -s)
+case "$os" in MINGW* | MSYS* | CYGWIN*) os=Windows ;; esac
 
 export PKG_CONFIG_PATH=$dir/lib/pkgconfig
 pkg-config --version
@@ -25,12 +34,17 @@ read -r -a libs <<< "$(pkg-config --libs dsd2pcm)"
 read -r -a private <<< "$(pkg-config --libs --static dsd2pcm | sed 's/-ldsd2pcm//')"
 echo "cflags: ${cflags[*]}"
 echo "libs: ${libs[*]}"
+echo "static: ${private[*]}"
 
+# Windows has no rpath: a program finds a DLL in its own folder.
+rpath=() erpath=()
+if [[ "$os" != Windows ]]; then
+    rpath=("-Wl,-rpath,$dir/lib") erpath=("-Wl,-rpath,$work")
+fi
 # shellcheck disable=SC2086 # CC may hold flags (gcc -m32)
-$cc -std=c99 -Wall -Wextra -Werror "${cflags[@]}" -o "$work/minimal" "$src" "${libs[@]}" -Wl,-rpath,"$dir/lib"
-"$work/minimal"
+$cc -std=c99 -Wall -Wextra -Werror "${cflags[@]}" -o "$work/minimal" "$src" "${libs[@]}" "${rpath[@]}"
 
-case "$(uname -s)" in
+case "$os" in
     Linux)
         so=$dir/lib/libdsd2pcm.so.$abi
         soname=$(readelf -d "$so" | sed -n 's/.*(SONAME).*\[\(.*\)\]/\1/p')
@@ -38,6 +52,28 @@ case "$(uname -s)" in
         [[ "$soname" == "libdsd2pcm.so.$abi" ]] || { echo "::error::SONAME is '$soname', not libdsd2pcm.so.$abi"; exit 1; }
         readelf -d "$work/minimal" | grep -q "NEEDED.*\[libdsd2pcm.so.$abi\]" \
             || { echo "::error::the program does not depend on libdsd2pcm.so.$abi"; exit 1; }
+        readelf -d "$so" | grep NEEDED
+        # x86-64: every object of the static library carries the CET shadow-stack property
+        # (.github/scripts/clib-shstk.py), so a program built with -fcf-protection keeps it
+        # when it links the library; with glibc, the shared library carries it too
+        # (.github/scripts/relink-shstk.sh). Never IBT: Rust's standard library has no ENDBR64.
+        if readelf -h "$so" | grep -q 'Machine:.*X86-64'; then
+            a=$dir/lib/libdsd2pcm.a
+            members=$(ar t "$a" | wc -l)
+            marked=$(readelf -n "$a" | grep -c 'x86 feature: SHSTK$' || true)
+            echo "static library members marked SHSTK: $marked of $members"
+            [[ "$marked" -eq "$members" ]] || { echo "::error::$((members - marked)) of $members objects in libdsd2pcm.a are not marked SHSTK (and only SHSTK)"; exit 1; }
+            # A relocatable link merges the property over the objects it takes from the
+            # archive, as a program link does, without the system's start files.
+            # shellcheck disable=SC2086
+            $cc -std=c99 -fcf-protection=full -nostdlib -r "${cflags[@]}" -o "$work/minimal-cet.o" "$src" "$a"
+            [[ "$(readelf -n "$work/minimal-cet.o" | grep 'x86 feature:')" == *'x86 feature: SHSTK' ]] \
+                || { echo "::error::a program object linked with libdsd2pcm.a is not marked SHSTK"; exit 1; }
+            if readelf -d "$so" | grep -q 'NEEDED.*\[libc\.so\.6\]'; then
+                readelf -n "$so" | grep -q 'x86 feature: SHSTK$' || { echo "::error::$so is not marked SHSTK"; exit 1; }
+                echo "shared library marked SHSTK"
+            fi
+        fi
         ;;
     Darwin)
         id=$(otool -D "$dir/lib/libdsd2pcm.$abi.dylib" | tail -n 1)
@@ -46,9 +82,51 @@ case "$(uname -s)" in
         otool -L "$work/minimal" | grep -q "@rpath/libdsd2pcm.$abi.dylib" \
             || { echo "::error::the program does not depend on @rpath/libdsd2pcm.$abi.dylib"; exit 1; }
         ;;
+    Windows)
+        objdump -p "$dir/bin/dsd2pcm.dll" | grep 'DLL Name'
+        objdump -p "$work/minimal.exe" | grep -q 'DLL Name: dsd2pcm.dll' \
+            || { echo "::error::the program does not import dsd2pcm.dll"; exit 1; }
+        cp "$dir/bin/dsd2pcm.dll" "$work/"
+        ;;
 esac
+"$work/minimal"
 
 # shellcheck disable=SC2086
 $cc -std=c99 -Wall -Wextra -Werror "${cflags[@]}" -o "$work/minimal-static" "$src" "$dir/lib/libdsd2pcm.a" "${private[@]}"
 "$work/minimal-static"
-echo "C library archive: shared and static programs built and ran"
+
+# Embedded: minimal.c's main renamed minimal_main, in a shared library with libdsd2pcm.a.
+echo "global symbols defined in libdsd2pcm.a: $(nm -g --defined-only "$dir/lib/libdsd2pcm.a" 2> /dev/null | grep -c ' [A-Z] ')"
+printf 'int minimal_main(void);\nint main(void) { return minimal_main(); }\n' > "$work/main.c"
+case "$os" in
+    Linux)
+        # shellcheck disable=SC2086
+        $cc -std=c99 -fPIC -shared -Dmain=minimal_main "${cflags[@]}" -o "$work/libembed.so" "$src" \
+            "$dir/lib/libdsd2pcm.a" -Wl,--exclude-libs,libdsd2pcm.a -Wl,-z,text -Wl,-z,defs "${private[@]}"
+        exports=$(nm -D --defined-only "$work/libembed.so" | awk '{print $NF}')
+        lib=$work/libembed.so
+        ;;
+    Darwin)
+        echo _minimal_main > "$work/exports.txt"
+        # shellcheck disable=SC2086
+        $cc -std=c99 -dynamiclib -Dmain=minimal_main "${cflags[@]}" -o "$work/libembed.dylib" "$src" \
+            "$dir/lib/libdsd2pcm.a" -Wl,-exported_symbols_list,"$work/exports.txt" "${private[@]}"
+        exports=$(nm -gU "$work/libembed.dylib" | awk '{print $NF}' | sed 's/^_//')
+        lib=$work/libembed.dylib
+        ;;
+    Windows)
+        # shellcheck disable=SC2086
+        $cc -std=c99 -shared -Dmain=minimal_main "${cflags[@]}" -o "$work/embed.dll" "$src" \
+            "$dir/lib/libdsd2pcm.a" -Wl,--exclude-libs,libdsd2pcm.a -Wl,--out-implib,"$work/libembed.dll.a" "${private[@]}"
+        exports=$(objdump -p "$work/embed.dll" | awk '/\[Ordinal\/Name Pointer\] Table/ {on = 1; next} on && !NF {exit} on && /^[[:space:]]*\[/ {print $NF}')
+        lib=$work/embed.dll
+        ;;
+esac
+echo "exported by the embedding library: $(tr '\n' ' ' <<< "$exports")"
+extra=$(grep -Ev '^(minimal_main|_init|_fini|_edata|_end|__bss_start)$' <<< "$exports" || true)
+[[ -z "$extra" ]] || { echo "::error::$lib exports libdsd2pcm.a's symbols: $(head -n 5 <<< "$extra" | tr '\n' ' ')"; exit 1; }
+grep -qx minimal_main <<< "$exports" || { echo "::error::$lib does not export minimal_main"; exit 1; }
+# shellcheck disable=SC2086
+$cc -o "$work/embedded" "$work/main.c" -L"$work" -lembed "${erpath[@]}"
+"$work/embedded"
+echo "C library archive: shared, static and embedded programs built and ran"

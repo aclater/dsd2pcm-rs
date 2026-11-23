@@ -26,24 +26,33 @@ The GitHub release, with these assets:
 | `dsd2pcm-0.1.2-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
 | `dsd2pcm-0.1.2-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
 | `dsd2pcm-0.1.2-i686-linux.tar.gz` | Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later |
+| `dsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | Linux x86_64, statically linked (musl): any Linux |
+| `dsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | Linux aarch64, statically linked (musl): any Linux |
 | `dsd2pcm-0.1.2-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon; signed (Developer ID) and notarised |
+| `dsd2pcm-0.1.2-x86_64-macos.tar.gz` | macOS 11 or later, Intel; signed (Developer ID) and notarised |
 | `dsd2pcm-0.1.2-x86_64-windows.zip` | Windows 10 and 11, x86_64; C runtime linked in; not code-signed |
-| `libdsd2pcm-0.1.2-x86_64-linux.tar.gz` | C library, Linux x86_64, glibc 2.17 or later |
+| `libdsd2pcm-0.1.2-x86_64-linux.tar.gz` | C library, Linux x86_64, glibc 2.17 or later; marked for the CET shadow stack |
 | `libdsd2pcm-0.1.2-aarch64-linux.tar.gz` | C library, Linux aarch64, glibc 2.17 or later |
 | `libdsd2pcm-0.1.2-i686-linux.tar.gz` | C library, Linux 32-bit x86, glibc 2.17 or later |
+| `libdsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | C library, Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later); static library marked for the CET shadow stack |
+| `libdsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | C library, Linux aarch64, musl 1.2.3 or later |
 | `libdsd2pcm-0.1.2-aarch64-macos.tar.gz` | C library, macOS 11 or later, Apple silicon; `libdsd2pcm.1.dylib` signed and notarised |
-| `libdsd2pcm-0.1.2-x86_64-windows.zip` | C library, Windows 10 and 11, x86_64 |
+| `libdsd2pcm-0.1.2-x86_64-macos.tar.gz` | C library, macOS 11 or later, Intel; `libdsd2pcm.1.dylib` signed and notarised |
+| `libdsd2pcm-0.1.2-x86_64-windows.zip` | C library, Windows 10 and 11, x86_64, for MSVC |
+| `libdsd2pcm-0.1.2-x86_64-windows-gnu.zip` | C library, Windows 10 and 11, x86_64, for MinGW-w64 gcc (msvcrt) |
 
 A `dsd2pcm-` archive holds `dsd2pcm` (or `dsd2pcm.exe`), `README.md`, `LICENSE-MIT` and
 `LICENSE-APACHE`. A `libdsd2pcm-` archive holds `include/dsd2pcm.h`, the shared library
 under its ABI-versioned name (`libdsd2pcm.so.1` with a `libdsd2pcm.so` link, SONAME
 `libdsd2pcm.so.1`; `libdsd2pcm.1.dylib` with a `libdsd2pcm.dylib` link, install name
 `@rpath/libdsd2pcm.1.dylib`; `bin/dsd2pcm.dll` with the import library
-`lib/dsd2pcm.dll.lib`), the static library, `lib/pkgconfig/dsd2pcm.pc` (not on Windows),
-`examples/minimal.c`, a README taken from [docs/c-api.md](c-api.md#binary-releases) and the
-licences. Every archive has a `.sha256` file and a build provenance attestation
-(`.intoto.jsonl`, also stored with GitHub). `SHA256SUMS` lists every archive: 31 files in
-all.
+`lib/dsd2pcm.dll.lib`, or `lib/libdsd2pcm.dll.a` for MinGW-w64), the static library,
+`lib/pkgconfig/dsd2pcm.pc` (not for MSVC), `examples/minimal.c`, a README taken from
+[docs/c-api.md](c-api.md#binary-releases) and the licences. The command-line tool has eight
+platforms and the C library nine: the MinGW-w64 build is the C library only (the MSVC
+`dsd2pcm.exe` serves Windows). Every archive has a `.sha256` file and a build provenance
+attestation (`.intoto.jsonl`, also stored with GitHub). `SHA256SUMS` lists every archive:
+52 files in all (17 archives, 17 `.sha256`, 17 `.intoto.jsonl`, `SHA256SUMS`).
 
 ## How the workflow runs
 
@@ -52,27 +61,48 @@ all.
    `dsd2pcm.workspace = true`), the tag is `v` plus that version, it is an annotated tag on
    the run's commit, and that commit is on `main` (`git merge-base --is-ancestor` against a
    fresh fetch of `main`). Then `cargo publish --dry-run` packages and verifies every crate.
-2. **binary (five platforms)**: build and test on each platform's own runner (Linux with
-   cargo-zigbuild against glibc 2.17's symbols), pack the tool and the C library, convert
-   a generated test file with the packed tool, and build and run
+2. **binary (nine platforms)**: build and test on each platform's own runner (Linux with
+   cargo-zigbuild against glibc 2.17's symbols or zig's musl), pack the tool and the C
+   library, convert a generated test file with the tool, and build and run
    `crates/dsd2pcm-capi/tests/minimal.c` against the packed C library, shared and static
-   (through its pkg-config file on Linux and macOS, with MSVC on Windows), checking the
-   SONAME (Linux) or install name (macOS).
-   On macOS this is three jobs. `binary (aarch64-macos)` builds and tests, with no secrets.
-   `sign and notarise (aarch64-macos)` runs on a tag in the environment `release` (so it
-   waits for approval too): it signs `dsd2pcm` and `libdsd2pcm.1.dylib` with the Developer ID
-   certificate (`codesign --options runtime --timestamp`, in a temporary keychain deleted
-   afterwards), sends a zip of both to Apple's notary service (`notarytool submit --wait`),
-   checks the signatures and the notarisation, and packs the archives. The notary
-   submission and its log are kept as the workflow artifact `macos-notarisation`.
-   `check (aarch64-macos)` unpacks the archives on a fresh runner and checks the signatures
+   (through its pkg-config file, with MSVC for the MSVC Windows build), checking the
+   SONAME (Linux) or install name (macOS). The C library is also linked into a shared
+   library of the test's own with its symbols hidden, as [c-api.md](c-api.md#embedding-the-static-library)
+   advises, which fails if the static library is not position-independent
+   (`.github/scripts/check-capi-archive.sh`). Where each runs:
+
+   | Platform | Build and test | C library check |
+   |---|---|---|
+   | x86_64-linux, i686-linux, x86_64-linux-musl | `ubuntu-24.04` | the runner (`gcc -m32` for i686); musl in an Alpine 3.24 container |
+   | aarch64-linux, aarch64-linux-musl | `ubuntu-24.04-arm` | the runner; musl in an Alpine 3.24 container |
+   | aarch64-macos | `macos-15` | `macos-15` |
+   | x86_64-macos | `macos-15-intel` (Intel, native) | `macos-15-intel` |
+   | x86_64-windows | `windows-2025`, MSVC | MSVC `cl` |
+   | x86_64-windows-gnu | `windows-2025`, MSYS2 MINGW64 gcc | MSYS2 MINGW64 gcc and pkgconf |
+
+   GitHub keeps `macos-15-intel` until August 2027; after that the x86_64 macOS build moves
+   to an arm64 runner (cross-compiled, tests under Rosetta).
+   On x86_64 Linux, every object of the static library is marked for the CET shadow stack
+   (`.github/scripts/clib-shstk.py`, from scarletbook-rs) and the glibc shared library is
+   linked again from those objects (`.github/scripts/relink-shstk.sh`); the archive check
+   requires the mark on every object and on the glibc shared library
+   ([c-api.md](c-api.md#intel-cet)).
+   On macOS this is three jobs. `binary (aarch64-macos)` and `binary (x86_64-macos)` build
+   and test, with no secrets. `sign and notarise (macos)` runs on a tag in the environment
+   `release` (so it waits for approval too): it signs `dsd2pcm` and `libdsd2pcm.1.dylib` of
+   both architectures with the Developer ID certificate (`codesign --options runtime
+   --timestamp`, in a temporary keychain deleted afterwards), sends one zip of the four
+   files to Apple's notary service (`notarytool submit --wait`), checks the signatures and
+   the notarisation, and packs the four archives. The notary submission and its log are kept
+   as the workflow artifact `macos-notarisation`. `check (aarch64-macos)` and
+   `check (x86_64-macos)` unpack the archives on a fresh runner of that architecture and check the signatures
    and notarisation again (`.github/scripts/check-macos-signature.sh`: strict signature,
    Developer ID, hardened runtime, timestamp, `codesign --check-notarization`, `spctl`) before
    the smoke tests. Bare Mach-O files cannot be stapled: macOS looks the ticket up online.
    A tag without the signing secrets fails here, before anything is published; a dry run
    skips signing with a notice.
-3. **same output everywhere**: all ten archives are there and match their `.sha256`, and
-   all five binaries made byte-identical output from the test file.
+3. **same output everywhere**: all seventeen archives are there and match their `.sha256`,
+   and all nine binaries made byte-identical output from the test file.
 4. **publish to crates.io** (tag only): in the GitHub environment `release`, so it waits for
    a required reviewer's approval. Trusted publishing: the job's OIDC token is exchanged for
    a crates.io token valid for 30 minutes and revoked when the job ends. No crates.io token
@@ -83,7 +113,7 @@ A pull request that changes the release files, or a manual run (Actions, release
 workflow"), is a dry run: steps 1 to 3, nothing published.
 
 Permissions: every workflow reads only (`contents: read`). Only `sign and notarise
-(aarch64-macos)` sees the six `MACOS_*` secrets, and only in its signing step. The crates job adds
+(macos)` sees the six `MACOS_*` secrets, and only in its signing step. The crates job adds
 `id-token: write` (for crates.io). The release job adds `contents: write` (the release),
 `id-token: write` and `attestations: write` (the attestation). Every action is pinned by
 commit SHA; checkouts keep no credentials.
@@ -184,10 +214,10 @@ steps 1 to 5 for that crate alone.
 
    Check first that `git log -1 origin/main` is the approved commit.
 4. Approve the `release` environment twice when a job waits for it (Actions, the run, Review
-   deployments): `sign and notarise (aarch64-macos)` early in the run, then
+   deployments): `sign and notarise (macos)` early in the run, then
    `publish to crates.io` once every build is checked. Notarisation usually takes a few
    minutes.
-5. Check: the crates on crates.io, the GitHub release with its 31 files (ten
+5. Check: the crates on crates.io, the GitHub release with its 52 files (seventeen
    archives, their `.sha256` and `.intoto.jsonl` files, and `SHA256SUMS`), and an asset:
 
    ```

@@ -1,23 +1,25 @@
 #!/bin/bash
 # Lay out the C library's release archive directory (.github/workflows/release.yml):
 #
-#     .github/scripts/stage-capi.sh VERSION NAME LIBDIR OUTDIR "STATIC_LIBS"
+#     .github/scripts/stage-capi.sh VERSION NAME TARGET LIBDIR OUTDIR "STATIC_LIBS"
 #
 # VERSION is the release version, NAME the platform (x86_64-linux, aarch64-macos, ...),
-# LIBDIR the cargo output directory holding the built dsd2pcm-capi libraries, OUTDIR where
+# TARGET the Rust target (x86_64-unknown-linux-musl, x86_64-pc-windows-gnu, ...), LIBDIR
+# the cargo output directory holding the built dsd2pcm-capi libraries, OUTDIR where
 # OUTDIR/libdsd2pcm-VERSION-NAME/ is made, and STATIC_LIBS the system libraries the static
 # library needs (rustc's --print native-static-libs). Prints the directory's name.
 #
 #   include/dsd2pcm.h
-#   lib/libdsd2pcm.so.1 + lib/libdsd2pcm.so -> libdsd2pcm.so.1        Linux (SONAME libdsd2pcm.so.1)
+#   lib/libdsd2pcm.so.1 + lib/libdsd2pcm.so -> libdsd2pcm.so.1        Linux, glibc or musl (SONAME libdsd2pcm.so.1)
 #   lib/libdsd2pcm.1.dylib + lib/libdsd2pcm.dylib -> libdsd2pcm.1.dylib  macOS (install name @rpath/libdsd2pcm.1.dylib)
-#   bin/dsd2pcm.dll, lib/dsd2pcm.dll.lib (import library)              Windows
-#   lib/libdsd2pcm.a (lib/dsd2pcm.lib on Windows)                      the static library
-#   lib/pkgconfig/dsd2pcm.pc                                           Linux and macOS: prefix-relative
+#   bin/dsd2pcm.dll, lib/dsd2pcm.dll.lib (import library)              Windows, MSVC
+#   bin/dsd2pcm.dll, lib/libdsd2pcm.dll.a (import library)             Windows, MinGW-w64
+#   lib/libdsd2pcm.a (lib/dsd2pcm.lib on Windows, MSVC)                the static library
+#   lib/pkgconfig/dsd2pcm.pc                                           all but MSVC: prefix-relative
 #   examples/minimal.c, README.md (docs/c-api.md, "Binary releases"), LICENSE-MIT, LICENSE-APACHE
 set -euo pipefail
 
-version=$1 name=$2 libdir=$3 outdir=$4 static_libs=$5
+version=$1 name=$2 target=$3 libdir=$4 outdir=$5 static_libs=$6
 [[ -n "$static_libs" && "$static_libs" =~ ^[-[:alnum:]_.:/\ ]+$ ]] \
     || { echo "::error::unexpected static library list: '$static_libs'"; exit 1; }
 abi=$(sed -n 's/^#define DSD2PCM_ABI_VERSION \([0-9]*\).*/\1/p' crates/dsd2pcm-capi/include/dsd2pcm.h)
@@ -33,28 +35,46 @@ mkdir -p "$dir/examples"
 cp crates/dsd2pcm-capi/tests/minimal.c "$dir/examples/"
 
 pc=true
-case "$(uname -s)" in
-    Linux)
+case "$target" in
+    *-linux-gnu | *-linux-musl)
         cp "$libdir/libdsd2pcm.so" "$dir/lib/libdsd2pcm.so.$abi"
         ln -s "libdsd2pcm.so.$abi" "$dir/lib/libdsd2pcm.so"
         cp "$libdir/libdsd2pcm.a" "$dir/lib/"
         chmod 0755 "$dir/lib/libdsd2pcm.so.$abi"
         ;;
-    Darwin)
+    *-apple-darwin)
         cp "$libdir/libdsd2pcm.dylib" "$dir/lib/libdsd2pcm.$abi.dylib"
         ln -s "libdsd2pcm.$abi.dylib" "$dir/lib/libdsd2pcm.dylib"
         cp "$libdir/libdsd2pcm.a" "$dir/lib/"
         chmod 0755 "$dir/lib/libdsd2pcm.$abi.dylib"
         ;;
-    MINGW* | MSYS* | CYGWIN*)
+    *-windows-msvc)
         mkdir -p "$dir/bin"
         cp "$libdir/dsd2pcm.dll" "$dir/bin/"
         cp "$libdir/dsd2pcm.dll.lib" "$libdir/dsd2pcm.lib" "$dir/lib/"
         # MSVC links by file name, not -l flags: no pkg-config file.
         pc=false
         ;;
-    *) echo "::error::unknown system $(uname -s)"; exit 1 ;;
+    *-windows-gnu)
+        # gcc's -ldsd2pcm finds the import library libdsd2pcm.dll.a before libdsd2pcm.a.
+        mkdir -p "$dir/bin"
+        cp "$libdir/dsd2pcm.dll" "$dir/bin/"
+        cp "$libdir/libdsd2pcm.dll.a" "$libdir/libdsd2pcm.a" "$dir/lib/"
+        ;;
+    *) echo "::error::unknown target $target"; exit 1 ;;
 esac
+
+# Without the crate's `flac` feature (off by default), the library holds no third-party code:
+# no claxon symbol in the static library. The names are plain bytes in a .a or .lib.
+if ! sed -n '/^\[features\]/,/^\[/p' crates/dsd2pcm-capi/Cargo.toml | grep -Eq '^default *=.*"flac"'; then
+    for a in "$dir"/lib/*.a "$dir"/lib/*.lib; do
+        [[ -e "$a" ]] || continue
+        if grep -aq claxon "$a"; then
+            echo "::error::$a contains claxon although the flac feature is off by default"; exit 1
+        fi
+    done
+    echo "no claxon in the static library" >&2
+fi
 
 if $pc; then
     mkdir -p "$dir/lib/pkgconfig"
