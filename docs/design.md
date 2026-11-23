@@ -176,7 +176,11 @@ run property the bytes equal one call.
   are the same in both calls: compared byte for byte, never assumed, so a run that jumps,
   repeats or has another neighbour gets fresh values
   (`calls_out_of_order_or_with_other_neighbours`). It saves recomputing the filter margins
-  that the previous call already computed (about 5 % at 88.2 kHz).
+  that the previous call already computed (about 5 % at 88.2 kHz). Only the bytes from where
+  the next adjacent pass starts are kept (a few hundred), and a pass that does not continue
+  the previous one fails the comparison at its first byte, so converters shared out over
+  runs that are not adjacent (`sacdfs_path` mode `pool`) pay next to nothing. Runs of 4096
+  outputs or more (four frames at any rate) run in lanes and do not use the carry.
 - Lanes on 32-bit x86 (level `sse2`): the same 4 runs, with blocks sized for the 8 SSE2
   registers (2 output vectors, 4 sums, in Fir1 and Interp2; 4 output vectors in Dec2,
   which measured faster so). Each tap step slices its windows once and loads whole
