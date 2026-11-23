@@ -1,6 +1,6 @@
 # Releasing
 
-A release is one annotated tag, `v` plus the workspace version (for example `v0.1.0`), on a
+A release is one annotated tag, `v` plus the workspace version (for example `v0.1.1`), on a
 commit on `main`. Pushing the tag runs `.github/workflows/release.yml`, which builds, tests,
 publishes to crates.io and creates the GitHub release. Everything else on this page is done by
 a person (the Orchestrator, who holds the tag, crates.io and repository-admin rights).
@@ -10,8 +10,8 @@ a person (the Orchestrator, who holds the tag, crates.io and repository-admin ri
 crates.io, in this order (each crate after the one it depends on):
 
 1. `dsd2pcm`, the library.
-2. `dsd2pcm-capi`, the C library, only when its `Cargo.toml` allows publishing. For 0.1.0 it
-   has `publish = false`: the C library ships as GitHub release assets (below), not on
+2. `dsd2pcm-capi`, the C library, only when its `Cargo.toml` allows publishing. It has
+   `publish = false`: the C library ships as GitHub release assets (below), not on
    crates.io.
 3. `dsd2pcm-cli`, the command-line tool (`cargo install dsd2pcm-cli` installs `dsd2pcm`).
 
@@ -23,16 +23,16 @@ The GitHub release, with these assets:
 
 | Asset | Platform |
 |---|---|
-| `dsd2pcm-0.1.0-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
-| `dsd2pcm-0.1.0-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
-| `dsd2pcm-0.1.0-i686-linux.tar.gz` | Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later |
-| `dsd2pcm-0.1.0-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon; signed (Developer ID) and notarised |
-| `dsd2pcm-0.1.0-x86_64-windows.zip` | Windows 10 and 11, x86_64; C runtime linked in; not code-signed |
-| `libdsd2pcm-0.1.0-x86_64-linux.tar.gz` | C library, Linux x86_64, glibc 2.17 or later |
-| `libdsd2pcm-0.1.0-aarch64-linux.tar.gz` | C library, Linux aarch64, glibc 2.17 or later |
-| `libdsd2pcm-0.1.0-i686-linux.tar.gz` | C library, Linux 32-bit x86, glibc 2.17 or later |
-| `libdsd2pcm-0.1.0-aarch64-macos.tar.gz` | C library, macOS 11 or later, Apple silicon; `libdsd2pcm.1.dylib` signed and notarised |
-| `libdsd2pcm-0.1.0-x86_64-windows.zip` | C library, Windows 10 and 11, x86_64 |
+| `dsd2pcm-0.1.1-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
+| `dsd2pcm-0.1.1-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
+| `dsd2pcm-0.1.1-i686-linux.tar.gz` | Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later |
+| `dsd2pcm-0.1.1-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon; signed (Developer ID) and notarised |
+| `dsd2pcm-0.1.1-x86_64-windows.zip` | Windows 10 and 11, x86_64; C runtime linked in; not code-signed |
+| `libdsd2pcm-0.1.1-x86_64-linux.tar.gz` | C library, Linux x86_64, glibc 2.17 or later |
+| `libdsd2pcm-0.1.1-aarch64-linux.tar.gz` | C library, Linux aarch64, glibc 2.17 or later |
+| `libdsd2pcm-0.1.1-i686-linux.tar.gz` | C library, Linux 32-bit x86, glibc 2.17 or later |
+| `libdsd2pcm-0.1.1-aarch64-macos.tar.gz` | C library, macOS 11 or later, Apple silicon; `libdsd2pcm.1.dylib` signed and notarised |
+| `libdsd2pcm-0.1.1-x86_64-windows.zip` | C library, Windows 10 and 11, x86_64 |
 
 A `dsd2pcm-` archive holds `dsd2pcm` (or `dsd2pcm.exe`), `README.md`, `LICENSE-MIT` and
 `LICENSE-APACHE`. A `libdsd2pcm-` archive holds `include/dsd2pcm.h`, the shared library
@@ -48,7 +48,7 @@ all.
 ## How the workflow runs
 
 1. **version and tag**: every crate has the workspace version (in `Cargo.toml` and
-   `Cargo.lock`), crates that use `dsd2pcm` pin it exactly (`=0.1.0`, through
+   `Cargo.lock`), crates that use `dsd2pcm` pin it exactly (`=0.1.1`, through
    `dsd2pcm.workspace = true`), the tag is `v` plus that version, it is an annotated tag on
    the run's commit, and that commit is on `main` (`git merge-base --is-ancestor` against a
    fresh fetch of `main`). Then `cargo publish --dry-run` packages and verifies every crate.
@@ -116,14 +116,14 @@ commit SHA; checkouts keep no credentials.
    creations to the Orchestrator (bypass list), restrict updates, restrict deletions.
    Release tags are not signed: this ruleset and the build provenance attestations are what
    make a tag trustworthy.
-3. **Branch ruleset for `main`** once public: pull requests required, with these required
+3. **Branch ruleset for `main`**: pull requests required, branches up to date, with these required
    checks: `fmt + clippy + docs`, `tests (x86_64-linux)`, `tests (aarch64-linux)`,
    `tests (i686-linux)`, `tests (aarch64-macos)`, `tests (x86_64-windows)`, `C library`,
    `msrv`, `cargo-deny`, `zizmor`, `analyze (rust)`, `analyze (actions)`. `fuzz` is not
    required (a fuzzer can find an old bug in any run).
 4. **Actions settings**: workflow permissions "Read repository contents" (the default for new
    repositories); "Allow GitHub Actions to create and approve pull requests" off.
-5. **Code scanning** (CodeQL, Scorecard) works once the repository is public.
+5. **Code scanning** (CodeQL, Scorecard) needs the repository to be public.
 
 ## First publish to crates.io (Orchestrator, launch morning)
 
@@ -167,7 +167,7 @@ steps 1 to 5 for that crate alone.
 
 1. On `main`, through a pull request: set `version` under `[workspace.package]` and the
    `version` of `dsd2pcm` under `[workspace.dependencies]` in `Cargo.toml` to the new
-   version (`"0.1.0"` and `"=0.1.0"` for 0.1.0), run `cargo update --workspace`, and update
+   version (`"0.1.1"` and `"=0.1.1"` for 0.1.1), run `cargo update --workspace`, and update
    README and docs. CI must be green on that commit.
 2. Optional: a dry run of the release workflow on `main` (Actions, release, Run workflow).
 3. Tag the release commit, the `main` commit that CI and the Security Auditor approved, and
@@ -175,8 +175,8 @@ steps 1 to 5 for that crate alone.
 
    ```
    git fetch origin
-   git tag -a v0.1.0 -m "dsd2pcm 0.1.0" origin/main
-   git push origin v0.1.0
+   git tag -a v0.1.1 -m "dsd2pcm 0.1.1" origin/main
+   git push origin v0.1.1
    ```
 
    Check first that `git log -1 origin/main` is the approved commit.
@@ -188,8 +188,8 @@ steps 1 to 5 for that crate alone.
    archives, their `.sha256` and `.intoto.jsonl` files, and `SHA256SUMS`), and an asset:
 
    ```
-   gh release download v0.1.0 -R aclater/dsd2pcm-rs -p dsd2pcm-0.1.0-x86_64-linux.tar.gz
-   gh attestation verify dsd2pcm-0.1.0-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs --signer-workflow aclater/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.0 --deny-self-hosted-runners
+   gh release download v0.1.1 -R aclater/dsd2pcm-rs -p dsd2pcm-0.1.1-x86_64-linux.tar.gz
+   gh attestation verify dsd2pcm-0.1.1-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs --signer-workflow aclater/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.1 --deny-self-hosted-runners
    ```
 
 If a run fails after the crates job, re-run the failed jobs: published crates are skipped.

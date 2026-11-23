@@ -6,10 +6,13 @@ CPUs in [performance.md](performance.md) with the gaps listed there; DSF/DFF/WAV
 DSF/DFF/WAV output; the frame-run interface; the opt-in pysacd filter; the C interface;
 fuzzed readers; golden hashes on x86_64, i686 and aarch64.
 
+Done in 0.1.1: one-frame calls ahead of scarletbook-pcm 0.7.0 on Zen 2 and on the measured
+Intel cores; an `sse2` level for 32-bit x86. Since 0.1.1 (unreleased): the `sse2` level on
+x86-64 CPUs without AVX2. SSSE3 and SSE4.2 builds measured within noise of SSE2, so there
+is no separate level for them ([design.md](design.md#speed)).
+
 Next:
 
-1. Close the remaining speed gaps: one-frame calls on Zen 2, and a dedicated SSE2/SSSE3
-   level for 32-bit x86 and CPUs without AVX2.
-2. PCM output from DSD128 and DSD256; the 48 kHz family; RF64 for WAV over 4 GiB; FLAC
+1. PCM output from DSD128 and DSD256; the 48 kHz family; RF64 for WAV over 4 GiB; FLAC
    output.
-3. A Windows wide-character path API in the C interface.
+2. A Windows wide-character path API in the C interface.

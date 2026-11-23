@@ -16,7 +16,6 @@
   any change to the exported items; `crates/dsd2pcm-capi/check.sh` checks it and runs the C
   tests (gcc, clang, ASan). The C ABI is a contract: only append struct fields and add
   items; anything incompatible bumps `DSD2PCM_ABI_VERSION` and the SONAME (docs/c-api.md).
-- Until the repository is public, changes are committed straight to `main` with fmt, clippy and tests
-  green on every commit; `unsafe`, parsers and untrusted-input handling still get a security review
-  first. Once public, every change goes through a pull request with required checks. Every change
-  updates README and docs where needed.
+- Every change goes through a pull request: the `main` ruleset requires the CI checks and a
+  branch up to date with `main`. `unsafe`, parsers and untrusted-input handling get a
+  security review first. Every change updates README and docs where needed.

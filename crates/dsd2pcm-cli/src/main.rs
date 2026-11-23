@@ -1,4 +1,4 @@
-//! `dsd2pcm IN.dsf|IN.dff OUT.wav [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd]`
+//! `dsd2pcm IN.dsf|IN.dff OUT.wav [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread]`
 
 use dsd2pcm::{convert_file, Cutoff, Filter, PcmOptions, PcmRate};
 use std::path::PathBuf;
@@ -11,7 +11,8 @@ Converts DSD64 to 24-bit PCM WAV. Defaults: --rate 176400 --cutoff 40 --gain 0.
 Cutoffs: 30 (pass 30 kHz, stop 36 kHz), 40 (pass 40 kHz, stop 48 kHz),
 wide (pass 80 kHz; 176.4 and 352.8 kHz only).
 Filters: default (scarletbook-pcm 0.7.0's), pysacd (pysacd's filter and dithered
-quantiser, bit-exact with its reference; 88200 and 176400 only, fixed response).";
+quantiser, bit-exact with its reference; 88200 and 176400 only, fixed response).
+--single-thread: convert on the calling thread only (default: all cores).";
 
 fn parse(args: &[String]) -> Result<(PathBuf, PathBuf, PcmOptions), String> {
     let mut pos = Vec::new();
@@ -67,10 +68,12 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (inp, out, opts) = match parse(&args) {
         Ok(v) => v,
+        Err(e) if e.is_empty() => {
+            println!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
         Err(e) => {
-            if !e.is_empty() {
-                eprintln!("dsd2pcm: {e}");
-            }
+            eprintln!("dsd2pcm: {e}");
             eprintln!("{USAGE}");
             return ExitCode::from(2);
         }
