@@ -136,8 +136,11 @@ jobs:
       CARGO_ZIGBUILD_VERSION: 0.24.0
       MATRIX_RUSTFLAGS: ${{ matrix.rustflags }}
       CAPI_RUSTFLAGS: ${{ matrix.capi_rustflags }}
-      # Alpine 3.24.4 (musl 1.2.5), the image index: the musl C library's check.
-      ALPINE_IMAGE: docker.io/library/alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
+      # The musl C library's check, in the oldest Alpine the docs name (3.17, musl 1.2.3) and
+      # a current one (3.24, musl 1.2.5); image indexes pinned by digest.
+      ALPINE_IMAGES: >-
+        docker.io/library/alpine:3.17.10@sha256:8fc3dacfb6d69da8d44e42390de777e48577085db99aa4e4af35f483eb08b989
+        docker.io/library/alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
       CARGO_PROFILE_RELEASE_STRIP: symbols
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -242,17 +245,24 @@ jobs:
           tar -C "$RUNNER_TEMP/check" -xzf "dist/$CPKG.tar.gz"
           ls -lR "$RUNNER_TEMP/check/$CPKG"
           if [[ "$LIBC" == musl ]]; then
-            # In Alpine (musl), with its gcc; the archive and the script mounted read-only.
-            docker run --rm -e CC=gcc \
-              -v "$RUNNER_TEMP/check/$CPKG:/archive:ro" -v "$GITHUB_WORKSPACE/.github/scripts:/scripts:ro" \
-              "$ALPINE_IMAGE" sh -euc 'apk add --no-cache -q bash binutils gcc musl-dev pkgconf
-                echo "Alpine $(cat /etc/alpine-release)"; { /lib/ld-musl-*.so.1 || true; } 2>&1 | head -n 2
-                bash /scripts/check-capi-archive.sh /archive
-                # A fully static program (docs/c-api.md): -static, -lgcc_eh in place of -lgcc_s.
-                gcc -std=c99 -static -I /archive/include -o /tmp/minimal-full-static /archive/examples/minimal.c \
-                  /archive/lib/libdsd2pcm.a -lgcc_eh -lc
-                readelf -d /tmp/minimal-full-static | grep -q NEEDED && { echo "not static"; exit 1; }
-                /tmp/minimal-full-static'
+            # In Alpine (musl), with its gcc; the archives, the test file and the script mounted
+            # read-only. The static tool converts the test file there too, to the same bytes.
+            wav=$(cd "$RUNNER_TEMP" && sha256sum test.wav | cut -d ' ' -f 1)
+            for image in $ALPINE_IMAGES; do
+              docker run --rm -e CC=gcc -e WAV="$wav" \
+                -v "$RUNNER_TEMP/check/$CPKG:/archive:ro" -v "$RUNNER_TEMP/check/$PKG:/tool:ro" \
+                -v "$RUNNER_TEMP/test.dsf:/test.dsf:ro" -v "$GITHUB_WORKSPACE/.github/scripts:/scripts:ro" \
+                "$image" sh -euc 'apk add --no-cache -q bash binutils gcc musl-dev pkgconf
+                  echo "Alpine $(cat /etc/alpine-release)"; { /lib/ld-musl-*.so.1 || true; } 2>&1 | head -n 2
+                  /tool/dsd2pcm /test.dsf /tmp/test.wav
+                  [ "$(sha256sum /tmp/test.wav | cut -d " " -f 1)" = "$WAV" ] || { echo "the tool gave other output"; exit 1; }
+                  bash /scripts/check-capi-archive.sh /archive
+                  # A fully static program (docs/c-api.md): -static, -lgcc_eh in place of -lgcc_s.
+                  gcc -std=c99 -static -I /archive/include -o /tmp/minimal-full-static /archive/examples/minimal.c \
+                    /archive/lib/libdsd2pcm.a -lgcc_eh -lc
+                  readelf -d /tmp/minimal-full-static | grep -q NEEDED && { echo "not static"; exit 1; }
+                  /tmp/minimal-full-static'
+            done
           else
             .github/scripts/check-capi-archive.sh "$RUNNER_TEMP/check/$CPKG"
           fi
@@ -784,7 +794,12 @@ jobs:
           # The same bytes a second time (deterministic).
           git archive --format=tar --prefix="dsd2pcm-$VERSION/" "$SHA" | gzip -n -9 | cmp - "dist/$src.tar.gz"
           (cd dist && sha256sum "$src.tar.gz" > "$src.tar.gz.sha256" && cat "$src.tar.gz.sha256")
-          tar -tzf "dist/$src.tar.gz" | grep -E "^dsd2pcm-$VERSION/(Cargo.lock|fuzz/Cargo.toml|docs/c-api.md|crates/dsd2pcm-capi/include/dsd2pcm.h)$"
+          # Each of these files is in it (grep alone would pass on any one of them).
+          tar -tzf "dist/$src.tar.gz" > "$RUNNER_TEMP/src-files"
+          for f in Cargo.lock LICENSE-MIT LICENSE-APACHE fuzz/Cargo.toml docs/c-api.md crates/dsd2pcm-capi/include/dsd2pcm.h; do
+            grep -qxF "dsd2pcm-$VERSION/$f" "$RUNNER_TEMP/src-files" || { echo "::error::$f is not in the source archive"; exit 1; }
+          done
+          echo "$(wc -l < "$RUNNER_TEMP/src-files") entries"
           echo "SRC=$src" >> "$GITHUB_ENV"
       - name: The C library builds from the unpacked source
         run: |
@@ -824,11 +839,13 @@ jobs:
           tr -d '\r' < <(cat smoke-*.sha256) | tee /dev/stderr | awk '{print $1}' | sort -u > hashes
           n=$(wc -l < hashes)
           [[ "$n" -eq 1 ]] || { echo "::error::the platforms' binaries converted the test file to $n different outputs"; exit 1; }
-          [[ $(ls smoke-*.sha256 | wc -l) -eq 9 ]] || { echo "::error::expected nine platforms' outputs"; exit 1; }
+          smokes=$(find . -maxdepth 1 -name 'smoke-*.sha256' | wc -l)
+          [[ "$smokes" -eq 9 ]] || { echo "::error::expected nine platforms' outputs, found $smokes"; exit 1; }
           tools=$(find . -maxdepth 1 \( -name 'dsd2pcm-*.tar.gz' -o -name 'dsd2pcm-*.zip' \) ! -name '*-src.tar.gz' | wc -l)
           [[ "$tools" -eq 8 ]] || { echo "::error::expected eight archives of the tool, found $tools"; exit 1; }
           [[ -f "dsd2pcm-${VERSION}-src.tar.gz" ]] || { echo "::error::no source archive"; exit 1; }
-          [[ $(ls ./libdsd2pcm-*.tar.gz ./libdsd2pcm-*.zip | wc -l) -eq 9 ]] || { echo "::error::expected nine archives of the C library"; exit 1; }
+          clibs=$(find . -maxdepth 1 \( -name 'libdsd2pcm-*.tar.gz' -o -name 'libdsd2pcm-*.zip' \) | wc -l)
+          [[ "$clibs" -eq 9 ]] || { echo "::error::expected nine archives of the C library, found $clibs"; exit 1; }
           echo "all nine binaries: the same output"
       - name: What a tag would publish
         if: github.ref_type != 'tag'
@@ -934,7 +951,7 @@ jobs:
             echo "- \`dsd2pcm-$VERSION-x86_64-macos.tar.gz\`: macOS 11 or later on Intel. Signed and notarised the same way."
             echo "- \`dsd2pcm-$VERSION-x86_64-windows.zip\`: Windows 10 or 11, x86_64. Not code-signed."
             echo
-            echo "The C library (\`include/dsd2pcm.h\`, shared and static libraries, a pkg-config file; ABI version 1), \`libdsd2pcm-$VERSION-<platform>\` for the same eight platforms (on Linux with musl: musl 1.2.3 or later) and for Windows with MinGW-w64 (\`x86_64-windows-gnu\`, for gcc): \`.tar.gz\`, and \`.zip\` for Windows. On x86_64 Linux the libraries are marked for the CET shadow stack. See [docs/c-api.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/c-api.md#binary-releases)."
+            echo "The C library (\`include/dsd2pcm.h\`, shared and static libraries, a pkg-config file; ABI version 1), \`libdsd2pcm-$VERSION-<platform>\` for the same eight platforms (on Linux with musl: musl 1.2.3 or later) and for Windows with MinGW-w64 (\`x86_64-windows-gnu\`, for gcc): \`.tar.gz\`, and \`.zip\` for Windows. On x86_64 Linux the static libraries (glibc and musl) and the glibc shared library are marked for the CET shadow stack. See [docs/c-api.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/c-api.md#binary-releases)."
             echo
             echo "The source: \`dsd2pcm-$VERSION-src.tar.gz\`, the tagged commit's whole tree (\`git archive --format=tar --prefix=dsd2pcm-$VERSION/ v$VERSION | gzip -n -9\` makes the same bytes)."
             echo
