@@ -167,8 +167,11 @@ steps 1 to 5 for that crate alone.
 
 1. On `main`, through a pull request: set `version` under `[workspace.package]` and the
    `version` of `dsd2pcm` under `[workspace.dependencies]` in `Cargo.toml` to the new
-   version (`"0.1.1"` and `"=0.1.1"` for 0.1.1), run `cargo update --workspace`, and update
-   README and docs. CI must be green on that commit.
+   version (`"0.1.1"` and `"=0.1.1"` for 0.1.1), run `cargo update --workspace` and
+   `cargo update --manifest-path fuzz/Cargo.toml -p dsd2pcm`, give the `## Unreleased`
+   section of CHANGELOG.md the version, and update the version in README and docs (the
+   `versions` check of `docs.yml` lists every place). CI must be green on that commit; the
+   Quick start check skips with a notice until the tag is released.
 2. Optional: a dry run of the release workflow on `main` (Actions, release, Run workflow).
 3. Tag the release commit, the `main` commit that CI and the Security Auditor approved, and
    push the tag:

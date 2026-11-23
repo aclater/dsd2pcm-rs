@@ -15,3 +15,9 @@ CARGO_PROFILE_DEV_OPT_LEVEL=2 .github/scripts/test-simd-levels.sh
 Releases are built, tested and published by `.github/workflows/release.yml` from an
 annotated `v*` tag; [docs/release.md](release.md) lists what is published and the
 manual steps.
+
+`.github/workflows/docs.yml` keeps the docs true: it checks every link in the README,
+CHANGELOG, SECURITY.md and `docs/` (lychee, `.github/lychee.toml`), runs the README's
+Quick start block literally on the release it names, and fails when the workspace version,
+the lock files, the newest CHANGELOG section and the release references in the docs
+disagree (`python3 -I .github/scripts/check-doc-versions.py`).

@@ -1,0 +1,99 @@
+# Docs stay true: links resolve, the README's Quick start works on the latest release, and
+# the version named in the manifests, lock files, changelog and docs is one version.
+# - links: lychee (pinned binary, SHA-256 checked) over README.md, CHANGELOG.md, SECURITY.md,
+#   PROVENANCE.md, AGENTS.md and docs/; relative links and anchors offline, then external
+#   links with retries (.github/lychee.toml). Weekly too: external links rot without a change.
+# - quick start: the README's Quick start block, run literally (.github/scripts/readme-quick-start.sh).
+# - versions: .github/scripts/check-doc-versions.py.
+# Linux only; no secrets.
+name: docs
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 3"  # Wednesdays, 06:17 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}  # a new push supersedes the old PR run; main runs finish
+
+permissions:
+  contents: read
+
+env:
+  # lychee from its GitHub release, checked against this hash (the release's .sha256 file).
+  LYCHEE_VERSION: 0.24.2
+  LYCHEE_SHA256: 1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a
+
+jobs:
+  links:
+    name: links
+    runs-on: ubuntu-24.04
+    container:
+      # UBI 10 (ubi10/ubi 10.3), pinned by digest.
+      image: registry.access.redhat.com/ubi10/ubi@sha256:1e9193f051ac70582821c8a941325c5053488c54c75cd0c31b577d871ac29dba
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Packages
+        run: dnf -y -q --setopt=install_weak_deps=False install tar gzip && dnf clean all
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: lychee (pinned version and SHA-256)
+        run: |
+          name=lychee-x86_64-unknown-linux-gnu
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$name.tar.gz" \
+            "https://github.com/lycheeverse/lychee/releases/download/lychee-v$LYCHEE_VERSION/$name.tar.gz"
+          echo "$LYCHEE_SHA256  $RUNNER_TEMP/$name.tar.gz" | sha256sum -c -
+          tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/$name.tar.gz"
+          install -m 755 "$RUNNER_TEMP/$name/lychee" "$RUNNER_TEMP/lychee"
+          "$RUNNER_TEMP/lychee" --version
+      - name: Relative links and anchors (offline)
+        run: |
+          "$RUNNER_TEMP/lychee" --no-progress --offline --config .github/lychee.toml \
+            README.md CHANGELOG.md SECURITY.md PROVENANCE.md AGENTS.md 'docs/**/*.md'
+      - name: External links (with retries)
+        run: |
+          "$RUNNER_TEMP/lychee" --no-progress --config .github/lychee.toml \
+            README.md CHANGELOG.md SECURITY.md PROVENANCE.md AGENTS.md 'docs/**/*.md'
+
+  quick-start:
+    name: quick start
+    runs-on: ubuntu-24.04
+    container:
+      # UBI 10 (ubi10/ubi 10.3), pinned by digest.
+      image: registry.access.redhat.com/ubi10/ubi@sha256:1e9193f051ac70582821c8a941325c5053488c54c75cd0c31b577d871ac29dba
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Packages
+        run: dnf -y -q --setopt=install_weak_deps=False install git-core gawk python3 tar gzip && dnf clean all
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The README's Quick start, literally, on the release it names
+        run: .github/scripts/readme-quick-start.sh
+
+  versions:
+    name: versions
+    runs-on: ubuntu-24.04
+    container:
+      # UBI 10 (ubi10/ubi 10.3), pinned by digest.
+      image: registry.access.redhat.com/ubi10/ubi@sha256:1e9193f051ac70582821c8a941325c5053488c54c75cd0c31b577d871ac29dba
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Packages
+        run: dnf -y -q --setopt=install_weak_deps=False install python3 && dnf clean all
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: One version in manifests, lock files, changelog and docs
+        run: python3 -I .github/scripts/check-doc-versions.py

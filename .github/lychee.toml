@@ -1,0 +1,16 @@
+# lychee link checker settings for .github/workflows/docs.yml. Locally, from the
+# repository root: lychee --config .github/lychee.toml README.md CHANGELOG.md SECURITY.md PROVENANCE.md AGENTS.md 'docs/**/*.md'
+include_fragments = "full"
+max_retries = 4
+retry_wait_time = 10
+timeout = 30
+max_concurrency = 8
+# 429: the host throttles CI runners (GitHub, crates.io); it exists, so not a broken link.
+accept = "200..=299, 429"
+exclude = [
+  # Badge images: rendered by the hosts on request and throttled; their link targets are checked.
+  '^https://img\.shields\.io/',
+  '^https://api\.scorecard\.dev/projects/',
+  '^https://docs\.rs/dsd2pcm/badge\.svg$',
+  '/actions/workflows/[^/]+/badge\.svg',
+]
