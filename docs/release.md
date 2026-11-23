@@ -26,12 +26,12 @@ The GitHub release, with these assets:
 | `dsd2pcm-0.1.0-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
 | `dsd2pcm-0.1.0-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
 | `dsd2pcm-0.1.0-i686-linux.tar.gz` | Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later |
-| `dsd2pcm-0.1.0-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon; not signed or notarised |
+| `dsd2pcm-0.1.0-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon; signed (Developer ID) and notarised |
 | `dsd2pcm-0.1.0-x86_64-windows.zip` | Windows 10 and 11, x86_64; C runtime linked in; not code-signed |
 | `libdsd2pcm-0.1.0-x86_64-linux.tar.gz` | C library, Linux x86_64, glibc 2.17 or later |
 | `libdsd2pcm-0.1.0-aarch64-linux.tar.gz` | C library, Linux aarch64, glibc 2.17 or later |
 | `libdsd2pcm-0.1.0-i686-linux.tar.gz` | C library, Linux 32-bit x86, glibc 2.17 or later |
-| `libdsd2pcm-0.1.0-aarch64-macos.tar.gz` | C library, macOS 11 or later, Apple silicon |
+| `libdsd2pcm-0.1.0-aarch64-macos.tar.gz` | C library, macOS 11 or later, Apple silicon; `libdsd2pcm.1.dylib` signed and notarised |
 | `libdsd2pcm-0.1.0-x86_64-windows.zip` | C library, Windows 10 and 11, x86_64 |
 
 A `dsd2pcm-` archive holds `dsd2pcm` (or `dsd2pcm.exe`), `README.md`, `LICENSE-MIT` and
@@ -58,6 +58,19 @@ all.
    `crates/dsd2pcm-capi/tests/minimal.c` against the packed C library, shared and static
    (through its pkg-config file on Linux and macOS, with MSVC on Windows), checking the
    SONAME (Linux) or install name (macOS).
+   On macOS this is three jobs. `binary (aarch64-macos)` builds and tests, with no secrets.
+   `sign and notarise (aarch64-macos)` runs on a tag in the environment `release` (so it
+   waits for approval too): it signs `dsd2pcm` and `libdsd2pcm.1.dylib` with the Developer ID
+   certificate (`codesign --options runtime --timestamp`, in a temporary keychain deleted
+   afterwards), sends a zip of both to Apple's notary service (`notarytool submit --wait`),
+   checks the signatures and the notarisation, and packs the archives. The notary
+   submission and its log are kept as the workflow artifact `macos-notarisation`.
+   `check (aarch64-macos)` unpacks the archives on a fresh runner and checks the signatures
+   and notarisation again (`.github/scripts/check-macos-signature.sh`: strict signature,
+   Developer ID, hardened runtime, timestamp, `codesign --check-notarization`, `spctl`) before
+   the smoke tests. Bare Mach-O files cannot be stapled: macOS looks the ticket up online.
+   A tag without the signing secrets fails here, before anything is published; a dry run
+   skips signing with a notice.
 3. **same output everywhere**: all ten archives are there and match their `.sha256`, and
    all five binaries made byte-identical output from the test file.
 4. **publish to crates.io** (tag only): in the GitHub environment `release`, so it waits for
@@ -69,7 +82,8 @@ all.
 A pull request that changes the release files, or a manual run (Actions, release, "Run
 workflow"), is a dry run: steps 1 to 3, nothing published.
 
-Permissions: every workflow reads only (`contents: read`). The crates job adds
+Permissions: every workflow reads only (`contents: read`). Only `sign and notarise
+(aarch64-macos)` sees the six `MACOS_*` secrets, and only in its signing step. The crates job adds
 `id-token: write` (for crates.io). The release job adds `contents: write` (the release),
 `id-token: write` and `attestations: write` (the attestation). Every action is pinned by
 commit SHA; checkouts keep no credentials.
@@ -80,7 +94,20 @@ commit SHA; checkouts keep no credentials.
    - Required reviewers: the Orchestrator (and the owner if wanted). Leave "Prevent
      self-review" off if one person both pushes tags and approves.
    - Deployment branches and tags: "Selected branches and tags", add the tag rule `v*`.
-   - No secrets: trusted publishing needs none.
+   - Secrets for macOS signing and notarisation (crates.io's trusted publishing needs none):
+
+     | Secret | Content |
+     |---|---|
+     | `MACOS_CERT_P12_BASE64` | the Developer ID Application certificate and its private key, as a .p12 file, base64 |
+     | `MACOS_CERT_PASSWORD` | the .p12 file's password |
+     | `MACOS_SIGN_IDENTITY` | the certificate's name, `Developer ID Application: <name> (<team ID>)` |
+     | `MACOS_NOTARY_KEY_ID` | the App Store Connect API key's ID |
+     | `MACOS_NOTARY_ISSUER` | the API key's issuer ID |
+     | `MACOS_NOTARY_KEY_P8_BASE64` | the API key's .p8 file, base64 |
+
+     The API key needs the Developer role (enough for `notarytool`). Environment secrets
+     reach only jobs that name the environment, and only on `v*` tags (the deployment rule
+     above); pull requests and manual runs never see them.
 2. **Tag ruleset** (Settings, Rules, Rulesets, New tag ruleset): target `v*`; restrict
    creations to the Orchestrator (bypass list), restrict updates, restrict deletions.
    Release tags are not signed: this ruleset and the build provenance attestations are what
@@ -149,8 +176,10 @@ steps 1 to 5 for that crate alone.
    ```
 
    Check first that `git log -1 origin/main` is the approved commit.
-4. Approve the `release` environment when the crates.io job waits (Actions, the run, Review
-   deployments).
+4. Approve the `release` environment twice when a job waits for it (Actions, the run, Review
+   deployments): `sign and notarise (aarch64-macos)` early in the run, then
+   `publish to crates.io` once every build is checked. Notarisation usually takes a few
+   minutes.
 5. Check: the crates on crates.io, the GitHub release with its 31 files (ten
    archives, their `.sha256` and `.intoto.jsonl` files, and `SHA256SUMS`), and an asset:
 
