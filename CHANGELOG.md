@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- x86_64 without AVX2 (e.g. Celeron and Pentium J and N series of NAS units): the `sse2`
+  level now runs there too, where the generic level ran at 0.6x to 0.9x the speed of
+  scarletbook-pcm 0.7.0 ([performance](docs/performance.md)). Output bytes unchanged.
+
 ## 0.1.1
 
 Faster, same output: every output byte is unchanged from 0.1.0 at every SIMD level.
