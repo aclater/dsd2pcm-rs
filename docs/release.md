@@ -140,7 +140,7 @@ steps 1 to 5 for that crate alone.
 
    ```
    gh release download v0.1.0 -R aclater/dsd2pcm-rs -p dsd2pcm-0.1.0-x86_64-linux.tar.gz
-   gh attestation verify dsd2pcm-0.1.0-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs
+   gh attestation verify dsd2pcm-0.1.0-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs --signer-workflow aclater/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.0 --deny-self-hosted-runners
    ```
 
 If a run fails after the crates job, re-run the failed jobs: published crates are skipped.

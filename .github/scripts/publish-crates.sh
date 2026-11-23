@@ -75,6 +75,8 @@ fi
 
 for name in "${pending[@]}"; do
     echo "::group::cargo publish -p $name (${version[$name]})"
-    cargo publish --locked -p "$name"
+    # --no-verify: preflight already ran the verifying --dry-run on this commit, and a
+    # verify build here would run every build script with the publish token in the env.
+    cargo publish --locked --no-verify -p "$name"
     echo "::endgroup::"
 done

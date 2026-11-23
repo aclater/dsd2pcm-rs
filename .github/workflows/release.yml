@@ -47,7 +47,7 @@ jobs:
   # before anything is built.
   preflight:
     name: version and tag
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.check.outputs.version }}
     steps:
@@ -88,13 +88,13 @@ jobs:
         include:
           # target-cpu is always set on x86, never left to a toolchain's default; the AVX2
           # kernels are chosen at run time.
-          - {name: x86_64-linux, arch: x86_64, target: x86_64-unknown-linux-gnu, runner: ubuntu-latest,
+          - {name: x86_64-linux, arch: x86_64, target: x86_64-unknown-linux-gnu, runner: ubuntu-24.04,
              rustflags: "-C target-cpu=x86-64",
              zig_sha256: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00}
           - {name: aarch64-linux, arch: aarch64, target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm,
              rustflags: "",
              zig_sha256: ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17}
-          - {name: i686-linux, arch: x86_64, target: i686-unknown-linux-gnu, runner: ubuntu-latest,
+          - {name: i686-linux, arch: x86_64, target: i686-unknown-linux-gnu, runner: ubuntu-24.04,
              rustflags: "-C target-cpu=pentium4",
              zig_sha256: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00}
     env:
@@ -181,7 +181,7 @@ jobs:
   macos:
     name: binary (aarch64-macos)
     needs: preflight
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 45
     env:
       VERSION: ${{ needs.preflight.outputs.version }}
@@ -242,7 +242,7 @@ jobs:
   windows:
     name: binary (x86_64-windows)
     needs: preflight
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 45
     env:
       VERSION: ${{ needs.preflight.outputs.version }}
@@ -300,7 +300,7 @@ jobs:
   check:
     name: same output everywhere
     needs: [preflight, linux, macos, windows]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
@@ -336,7 +336,7 @@ jobs:
     name: publish to crates.io
     if: github.ref_type == 'tag'
     needs: [preflight, check]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: release
     permissions:
       contents: read
@@ -368,7 +368,7 @@ jobs:
     name: GitHub release
     if: github.ref_type == 'tag'
     needs: [preflight, check, crates]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write      # create the release and upload its assets
       id-token: write      # sign the provenance attestation (Sigstore, the workflow's OIDC token)
@@ -419,7 +419,7 @@ jobs:
             echo "- \`dsd2pcm-$VERSION-aarch64-macos.tar.gz\`: macOS 11 or later on Apple silicon. Not signed or notarised."
             echo "- \`dsd2pcm-$VERSION-x86_64-windows.zip\`: Windows 10 or 11, x86_64. Not code-signed."
             echo
-            echo "Verify a download: \`sha256sum -c <asset>.sha256\` and \`gh attestation verify <asset> -R $GITHUB_REPOSITORY\`."
+            echo "Verify a download: \`sha256sum -c <asset>.sha256\` and \`gh attestation verify <asset> -R $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml --source-ref refs/tags/v$VERSION --deny-self-hosted-runners\`."
             echo
             echo "Built from $GITHUB_SHA."
           } > release-notes.md

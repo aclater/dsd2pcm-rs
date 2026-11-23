@@ -27,7 +27,7 @@ env:
 jobs:
   fuzz:
     name: fuzz
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: ${{ github.event_name == 'schedule' && 90 || 30 }}
     container:
       # UBI 10 (ubi10/ubi 10.3), pinned by digest.

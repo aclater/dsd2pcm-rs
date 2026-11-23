@@ -20,7 +20,7 @@ permissions:
 jobs:
   deny:
     name: cargo-deny
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       # UBI 10 (ubi10/ubi 10.3), pinned by digest; cargo from UBI, for `cargo metadata`.
       image: registry.access.redhat.com/ubi10/ubi@sha256:1e9193f051ac70582821c8a941325c5053488c54c75cd0c31b577d871ac29dba

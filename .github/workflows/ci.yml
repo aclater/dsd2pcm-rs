@@ -28,7 +28,7 @@ env:
 jobs:
   lint:
     name: fmt + clippy + docs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       # UBI 10 (ubi10/ubi 10.3), pinned by digest.
       image: registry.access.redhat.com/ubi10/ubi@sha256:1e9193f051ac70582821c8a941325c5053488c54c75cd0c31b577d871ac29dba
@@ -66,7 +66,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {name: x86_64-linux, runner: ubuntu-latest}
+          - {name: x86_64-linux, runner: ubuntu-24.04}
           - {name: aarch64-linux, runner: ubuntu-24.04-arm}
     container:
       # UBI 10 (ubi10/ubi 10.3), pinned by digest (an index: amd64 and arm64).
@@ -93,7 +93,7 @@ jobs:
   # runner. Fedora, pinned by digest: UBI has no 32-bit C libraries.
   test-i686:
     name: tests (i686-linux)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: registry.fedoraproject.org/fedora@sha256:b414c09be79dd1f32529b55b096b6bb30435d82ee16fbdbbabf8985eb5f86db0
     defaults:
@@ -133,8 +133,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {name: aarch64-macos, runner: macos-latest}
-          - {name: x86_64-windows, runner: windows-latest}
+          - {name: aarch64-macos, runner: macos-15}
+          - {name: x86_64-windows, runner: windows-2025}
     defaults:
       run:
         shell: bash
@@ -158,7 +158,7 @@ jobs:
   # (.github/scripts/capi-check.sh). Passes with a notice while the crate does not exist.
   capi:
     name: C library
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       # UBI 10 (ubi10/ubi 10.3), pinned by digest.
       image: registry.access.redhat.com/ubi10/ubi@sha256:1e9193f051ac70582821c8a941325c5053488c54c75cd0c31b577d871ac29dba

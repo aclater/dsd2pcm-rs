@@ -16,9 +16,6 @@ readme = "README.md"
 # (.github/scripts/release-preflight.sh checks it).
 dsd2pcm = { path = "crates/dsd2pcm", version = "=0.1.0" }
 
-[workspace.dependencies]
-dsd2pcm = { path = "crates/dsd2pcm", version = "=0.1.0" }
-
 [profile.release]
 codegen-units = 1
 lto = "thin"
