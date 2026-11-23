@@ -1,0 +1,423 @@
+# The release. On a version tag (v0.1.0, ...), annotated, signed and verified by GitHub, on a
+# commit on main (.github/scripts/release-preflight.sh):
+#   1. build and test the command-line tool `dsd2pcm` for Linux x86_64, aarch64 and i686
+#      (glibc 2.17 or later), macOS arm64 and Windows x86_64; every packed binary converts the
+#      same test file, and all five outputs must be byte-identical;
+#   2. publish the crates to crates.io with trusted publishing (OIDC, no stored token), in
+#      dependency order: dsd2pcm, then dsd2pcm-capi if it is publishable, then dsd2pcm-cli
+#      (.github/scripts/publish-crates.sh). This job runs in the GitHub environment `release`,
+#      whose required reviewers approve it;
+#   3. create the GitHub release with the five archives, a .sha256 file for each, SHA256SUMS
+#      and a build provenance attestation (Sigstore) for each archive.
+# Any other run (a pull request that changes the release files, or a manual run) is a dry run:
+# the same builds and checks, and `cargo publish --dry-run`, with nothing published.
+# The steps that need a person are in docs/release.md.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - ".github/scripts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/*/Cargo.toml"
+
+permissions:
+  contents: read
+
+# One release per tag at a time; a second run for the same ref waits instead of racing it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_STABLE: 1.100.0
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # Cheap checks first: a version mismatch, an unsigned tag or one off main stops the release
+  # before anything is built.
+  preflight:
+    name: version and tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0  # main's history, for the check that the tag is on main
+      - name: Rust
+        run: |
+          rustup toolchain install "$RUST_STABLE" --profile minimal
+          rustup default "$RUST_STABLE"
+      - name: Versions, tag signature and branch (.github/scripts/release-preflight.sh)
+        id: check
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          TAG_SHA: ${{ github.sha }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/release-preflight.sh
+      - name: The crates package and verify (cargo publish --dry-run)
+        run: .github/scripts/publish-crates.sh --dry-run
+
+  # Linux binaries linked against glibc 2.17's symbols, so that they run on RHEL 7 era systems
+  # and on NAS systems with an old glibc, built with cargo-zigbuild (zig links against the
+  # symbol versions of the glibc named in the target). zig and cargo-zigbuild are pinned, the
+  # zig archive by its SHA-256. Each is tested on the runner (natively; i686 runs on the
+  # x86_64 runner with the 32-bit C libraries installed), checked for its newest glibc symbol,
+  # packed, and the packed binary converts the test file.
+  linux:
+    name: binary (${{ matrix.name }})
+    needs: preflight
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # target-cpu is always set on x86, never left to a toolchain's default; the AVX2
+          # kernels are chosen at run time.
+          - {name: x86_64-linux, arch: x86_64, target: x86_64-unknown-linux-gnu, runner: ubuntu-latest,
+             rustflags: "-C target-cpu=x86-64",
+             zig_sha256: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00}
+          - {name: aarch64-linux, arch: aarch64, target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm,
+             rustflags: "",
+             zig_sha256: ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17}
+          - {name: i686-linux, arch: x86_64, target: i686-unknown-linux-gnu, runner: ubuntu-latest,
+             rustflags: "-C target-cpu=pentium4",
+             zig_sha256: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00}
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      NAME: ${{ matrix.name }}
+      ARCH: ${{ matrix.arch }}
+      TARGET: ${{ matrix.target }}
+      GLIBC_MAX: "2.17"
+      ZIG_VERSION: 0.16.0
+      ZIG_SHA256: ${{ matrix.zig_sha256 }}
+      CARGO_ZIGBUILD_VERSION: 0.24.0
+      MATRIX_RUSTFLAGS: ${{ matrix.rustflags }}
+      CARGO_PROFILE_RELEASE_STRIP: symbols
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust, zig and cargo-zigbuild
+        run: |
+          rustup toolchain install "$RUST_STABLE" --profile minimal --target "$TARGET"
+          rustup default "$RUST_STABLE"
+          zig="zig-$ARCH-linux-$ZIG_VERSION"
+          curl -sSfL --proto =https --tlsv1.2 -o "$RUNNER_TEMP/$zig.tar.xz" \
+            "https://ziglang.org/download/$ZIG_VERSION/$zig.tar.xz"
+          echo "$ZIG_SHA256  $RUNNER_TEMP/$zig.tar.xz" | sha256sum -c
+          tar -C "$RUNNER_TEMP" -xJf "$RUNNER_TEMP/$zig.tar.xz"
+          echo "$RUNNER_TEMP/$zig" >> "$GITHUB_PATH"
+          cargo install --locked cargo-zigbuild --version "$CARGO_ZIGBUILD_VERSION"
+          # The runner's paths are left out of the binary.
+          echo "RUSTFLAGS=$MATRIX_RUSTFLAGS --remap-path-prefix=$HOME/.cargo=/cargo --remap-path-prefix=$GITHUB_WORKSPACE=/dsd2pcm" >> "$GITHUB_ENV"
+      - name: The 32-bit C libraries, to run the i686 tests
+        if: matrix.target == 'i686-unknown-linux-gnu'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends gcc-multilib
+      - name: Build and test, linked against glibc 2.17
+        run: |
+          zig version
+          cargo zigbuild --release --locked -p dsd2pcm-cli --target "$TARGET.$GLIBC_MAX"
+          cargo-zigbuild test --release --locked --workspace --target "$TARGET.$GLIBC_MAX"
+      - name: glibc 2.17 or later, stripped
+        run: |
+          bin="target/$TARGET/release/dsd2pcm"
+          file "$bin"
+          readelf -d "$bin" | grep NEEDED
+          max=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -n 1)
+          echo "newest glibc symbol version: $max"
+          if [[ "$(printf '%s\n' "$max" "$GLIBC_MAX" | sort -V | tail -n 1)" != "$GLIBC_MAX" ]]; then
+            echo "::error::the binary needs glibc $max, newer than $GLIBC_MAX"; exit 1
+          fi
+          if readelf -S "$bin" | grep -q '\.symtab'; then
+            echo "::error::the binary is not stripped"; exit 1
+          fi
+      - name: Package
+        run: |
+          pkg="dsd2pcm-$VERSION-$NAME"
+          mkdir -p "dist/$pkg"
+          install -m 0755 "target/$TARGET/release/dsd2pcm" "dist/$pkg/dsd2pcm"
+          install -m 0644 README.md LICENSE-MIT LICENSE-APACHE "dist/$pkg/"
+          # Reproducible: fixed order, owner and times (the commit's), no gzip timestamp.
+          mtime=$(git log -1 --format=%ct)
+          tar -C dist --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$mtime" \
+            -cf - "$pkg" | gzip -n -9 > "dist/$pkg.tar.gz"
+          rm -rf "dist/$pkg"
+          (cd dist && sha256sum "$pkg.tar.gz" > "$pkg.tar.gz.sha256" && cat "$pkg.tar.gz.sha256")
+          echo "PKG=$pkg" >> "$GITHUB_ENV"
+      - name: The packed binary converts the test file
+        run: |
+          mkdir -p "$RUNNER_TEMP/check"
+          tar -C "$RUNNER_TEMP/check" -xzf "dist/$PKG.tar.gz"
+          python3 -I .github/scripts/make-test-dsf.py "$RUNNER_TEMP/test.dsf"
+          "$RUNNER_TEMP/check/$PKG/dsd2pcm" "$RUNNER_TEMP/test.dsf" "$RUNNER_TEMP/test.wav"
+          (cd "$RUNNER_TEMP" && sha256sum test.wav) | tee "smoke-$NAME.sha256"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: bin-${{ matrix.name }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+            smoke-*.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  macos:
+    name: binary (aarch64-macos)
+    needs: preflight
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      NAME: aarch64-macos
+      # The oldest macOS the binary starts on.
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+      CARGO_PROFILE_RELEASE_STRIP: symbols
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust
+        run: |
+          rustup toolchain install "$RUST_STABLE" --profile minimal
+          rustup default "$RUST_STABLE"
+          sw_vers
+          uname -m
+          echo "RUSTFLAGS=--remap-path-prefix=$HOME/.cargo=/cargo --remap-path-prefix=$GITHUB_WORKSPACE=/dsd2pcm" >> "$GITHUB_ENV"
+      - name: Build and test
+        run: |
+          cargo build --release --locked -p dsd2pcm-cli
+          cargo test --release --locked --workspace
+      - name: Package
+        run: |
+          pkg="dsd2pcm-$VERSION-$NAME"
+          mkdir -p "dist/$pkg"
+          install -m 0755 target/release/dsd2pcm "dist/$pkg/"
+          install -m 0644 README.md LICENSE-MIT LICENSE-APACHE "dist/$pkg/"
+          lipo -archs "dist/$pkg/dsd2pcm"
+          otool -L "dist/$pkg/dsd2pcm"
+          # Fixed order, owner and times (the commit's), no gzip timestamp.
+          stamp=$(date -r "$(git log -1 --format=%ct)" +%Y%m%d%H%M.%S)
+          find "dist/$pkg" -exec touch -h -t "$stamp" {} +
+          (cd dist && find "$pkg" | LC_ALL=C sort > files.txt \
+            && tar --uid 0 --gid 0 --no-recursion -cf - -T files.txt | gzip -n -9 > "$pkg.tar.gz" \
+            && rm -rf files.txt "$pkg")
+          (cd dist && shasum -a 256 "$pkg.tar.gz" > "$pkg.tar.gz.sha256" && cat "$pkg.tar.gz.sha256")
+          echo "PKG=$pkg" >> "$GITHUB_ENV"
+      - name: The packed binary converts the test file
+        run: |
+          mkdir -p "$RUNNER_TEMP/check"
+          tar -C "$RUNNER_TEMP/check" -xzf "dist/$PKG.tar.gz"
+          python3 -I .github/scripts/make-test-dsf.py "$RUNNER_TEMP/test.dsf"
+          "$RUNNER_TEMP/check/$PKG/dsd2pcm" "$RUNNER_TEMP/test.dsf" "$RUNNER_TEMP/test.wav"
+          (cd "$RUNNER_TEMP" && shasum -a 256 test.wav) | tee "smoke-$NAME.sha256"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: bin-aarch64-macos
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+            smoke-*.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  # Windows x86_64, with the C runtime linked in (no Visual C++ redistributable needed),
+  # packed as a zip.
+  windows:
+    name: binary (x86_64-windows)
+    needs: preflight
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      NAME: x86_64-windows
+      CARGO_PROFILE_RELEASE_STRIP: symbols
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust
+        run: |
+          rustup toolchain install "$RUST_STABLE" --profile minimal
+          rustup default "$RUST_STABLE"
+          echo "RUSTFLAGS=-C target-cpu=x86-64 -C target-feature=+crt-static" >> "$GITHUB_ENV"
+      - name: Build and test
+        run: |
+          cargo build --release --locked -p dsd2pcm-cli
+          cargo test --release --locked --workspace
+      - name: No Visual C++ runtime DLL among the imports
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $dumpbin = & $vswhere -latest -find "VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
+          $deps = (& $dumpbin /nologo /dependents target\release\dsd2pcm.exe) -join "`n"
+          $deps
+          if ($deps -match "(?i)vcruntime|msvcp|api-ms-win-crt") { throw "depends on the Visual C++ runtime" }
+      - name: Package
+        run: |
+          pkg="dsd2pcm-$VERSION-$NAME"
+          mkdir -p "dist/$pkg"
+          cp target/release/dsd2pcm.exe README.md LICENSE-MIT LICENSE-APACHE "dist/$pkg/"
+          python -I .github/scripts/pack-zip.py "dist/$pkg.zip" "dist/$pkg" "$(git log -1 --format=%ct)"
+          rm -rf "dist/$pkg"
+          (cd dist && sha256sum "$pkg.zip" > "$pkg.zip.sha256" && cat "$pkg.zip.sha256")
+          echo "PKG=$pkg" >> "$GITHUB_ENV"
+      - name: The packed binary converts the test file
+        run: |
+          mkdir -p "$RUNNER_TEMP/check"
+          python -I -m zipfile -e "dist/$PKG.zip" "$RUNNER_TEMP/check"
+          python -I .github/scripts/make-test-dsf.py "$RUNNER_TEMP/test.dsf"
+          "$RUNNER_TEMP/check/$PKG/dsd2pcm.exe" "$RUNNER_TEMP/test.dsf" "$RUNNER_TEMP/test.wav"
+          (cd "$RUNNER_TEMP" && sha256sum test.wav) | tee "smoke-$NAME.sha256"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: bin-x86_64-windows
+          path: |
+            dist/*.zip
+            dist/*.sha256
+            smoke-*.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  # Every platform's binary made the same bytes from the test file, and every archive matches
+  # its .sha256. On a dry run, the list of what a tag would publish.
+  check:
+    name: same output everywhere
+    needs: [preflight, linux, macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          pattern: bin-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums and identical output
+        run: |
+          cd dist
+          sha256sum -c ./*.tar.gz.sha256 ./*.zip.sha256
+          ls -l
+          tr -d '\r' < <(cat smoke-*.sha256) | tee /dev/stderr | awk '{print $1}' | sort -u > hashes
+          n=$(wc -l < hashes)
+          [[ "$n" -eq 1 ]] || { echo "::error::the platforms' binaries converted the test file to $n different outputs"; exit 1; }
+          [[ $(ls smoke-*.sha256 | wc -l) -eq 5 ]] || { echo "::error::expected five platforms' outputs"; exit 1; }
+          echo "all five binaries: the same output"
+      - name: What a tag would publish
+        if: github.ref_type != 'tag'
+        run: |
+          {
+            echo "### Dry run: nothing published"
+            echo
+            echo "Release assets a tag would publish:"
+            echo
+            (cd dist && ls -1 ./*.tar.gz ./*.zip ./*.sha256 | grep -v smoke- | sed 's|^\./|- |')
+            echo "- SHA256SUMS, and an attestation (.intoto.jsonl) per archive"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Publishing to crates.io, on a tag only, in the environment `release` (required reviewers:
+  # docs/release.md). Trusted publishing: the job's OIDC token is exchanged for a crates.io
+  # token valid for 30 minutes, revoked when the job ends; no token is stored in the repository.
+  crates:
+    name: publish to crates.io
+    if: github.ref_type == 'tag'
+    needs: [preflight, check]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write  # the OIDC token for crates.io's trusted publishing
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust
+        run: |
+          rustup toolchain install "$RUST_STABLE" --profile minimal
+          rustup default "$RUST_STABLE"
+      - uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9  # v1.0.6
+        id: auth
+      - name: Publish, in dependency order (.github/scripts/publish-crates.sh)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: .github/scripts/publish-crates.sh
+
+  # The GitHub release, on a tag only, once the crates are on crates.io.
+  release:
+    name: GitHub release
+    if: github.ref_type == 'tag'
+    needs: [preflight, check, crates]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # create the release and upload its assets
+      id-token: write      # sign the provenance attestation (Sigstore, the workflow's OIDC token)
+      attestations: write  # store the attestation with the repository
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          pattern: bin-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          rm -f smoke-*.sha256
+          sha256sum -c ./*.tar.gz.sha256 ./*.zip.sha256
+          cat ./*.tar.gz.sha256 ./*.zip.sha256 > SHA256SUMS
+          cat SHA256SUMS
+      - name: Attest build provenance
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+      # The attestation also goes on the release as <asset>.intoto.jsonl (one bundle covers
+      # all), so it can be checked offline; each copy is verified first.
+      - name: Provenance bundles
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          for f in dist/*.tar.gz dist/*.zip; do
+            cp "$BUNDLE" "$f.intoto.jsonl"
+            gh attestation verify "$f" --bundle "$f.intoto.jsonl" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+          done
+      - name: Publish the release
+        run: |
+          {
+            echo "dsd2pcm $VERSION: the crates [dsd2pcm](https://crates.io/crates/dsd2pcm/$VERSION) and [dsd2pcm-cli](https://crates.io/crates/dsd2pcm-cli/$VERSION) (\`cargo install dsd2pcm-cli\`), and the command-line tool \`dsd2pcm\` for:"
+            echo
+            echo "- \`dsd2pcm-$VERSION-x86_64-linux.tar.gz\`: Linux x86_64, glibc 2.17 or later."
+            echo "- \`dsd2pcm-$VERSION-aarch64-linux.tar.gz\`: Linux aarch64 (64-bit ARM), glibc 2.17 or later."
+            echo "- \`dsd2pcm-$VERSION-i686-linux.tar.gz\`: Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later."
+            echo "- \`dsd2pcm-$VERSION-aarch64-macos.tar.gz\`: macOS 11 or later on Apple silicon. Not signed or notarised."
+            echo "- \`dsd2pcm-$VERSION-x86_64-windows.zip\`: Windows 10 or 11, x86_64. Not code-signed."
+            echo
+            echo "Verify a download: \`sha256sum -c <asset>.sha256\` and \`gh attestation verify <asset> -R $GITHUB_REPOSITORY\`."
+            echo
+            echo "Built from $GITHUB_SHA."
+          } > release-notes.md
+          pre=()
+          [[ "$VERSION" == *-* ]] && pre=(--prerelease)
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag "${pre[@]}" \
+            --title "dsd2pcm $VERSION" --notes-file release-notes.md --generate-notes \
+            dist/*.tar.gz dist/*.zip dist/*.sha256 dist/*.intoto.jsonl dist/SHA256SUMS
