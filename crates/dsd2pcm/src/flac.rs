@@ -19,7 +19,7 @@
 //! it is counted again without those 128 bytes. A stream that ends before its declared
 //! count is an error; frames beyond it are ignored.
 //!
-//! Every read from the caller's reader goes through [`Honest`], which never reports more
+//! Every read from the caller's reader goes through a private adapter, which never reports more
 //! bytes than the buffer holds: claxon's byte reader indexes its buffer unchecked with the
 //! count `read` returns, so a `Read` implementation that over-reports must not reach it.
 
