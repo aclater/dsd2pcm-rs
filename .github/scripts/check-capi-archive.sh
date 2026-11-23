@@ -126,10 +126,11 @@ case "$os" in
     Windows)
         # shellcheck disable=SC2086
         $cc -std=c99 -shared -static-libgcc -Dmain=minimal_main "${cflags[@]}" -o "$work/embed.dll" "$src" \
-            "$dir/lib/libdsd2pcm.a" -Wl,--exclude-libs,libdsd2pcm.a -Wl,--out-implib,"$work/libembed.dll.a" "${private[@]}"
+            "$dir/lib/libdsd2pcm.a" -Wl,--exclude-libs,ALL -Wl,--out-implib,"$work/libembed.dll.a" "${private[@]}"
         exports=$(objdump -p "$work/embed.dll" | awk '/\[Ordinal\/Name Pointer\] Table/ {on = 1; next} on && !NF {on = 0} on && /^[[:space:]]*\[/ {print $NF}')
         lib=$work/embed.dll
-        # -static-libgcc (docs/c-api.md): no MinGW runtime DLL, which MSYS2's PATH would hide.
+        # -static-libgcc and --exclude-libs,ALL (docs/c-api.md): no MinGW runtime DLL, which
+        # MSYS2's PATH would hide, and none of the static libgcc's unwinder symbols exported.
         if objdump -p "$lib" | grep -Ei 'DLL Name: (libgcc|libwinpthread|libstdc)'; then
             echo "::error::$lib needs a MinGW runtime DLL"; exit 1
         fi
