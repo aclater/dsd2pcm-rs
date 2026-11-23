@@ -142,9 +142,10 @@ const PAD: usize = kernel::MAX_L;
 const PASS_BYTES: usize = 32 << 10;
 
 /// The fewest outputs a pass runs in lanes: each run needs its own filter margins, which
-/// for short passes (one Super Audio CD frame at 88.2 kHz: 1176 outputs) cost more than
-/// the lanes gain.
-const LANES_MIN: usize = 64 * PAD;
+/// for short passes (one Super Audio CD frame: 1176 outputs at 88.2 kHz, 2352 at 176.4
+/// kHz) cost more than the lanes gain. Shorter passes use the ordered kernels, with the
+/// paired S1 tables where the plan has them.
+const LANES_MIN: usize = 128 * PAD;
 
 /// Most stages after S1 in any plan.
 const MAX_OPS: usize = 3;
@@ -454,7 +455,10 @@ impl Plan {
         if !matches!(self.ops.first(), Some(Op::Dec2(_))) {
             let n1 = levels[0].1.div_ceil(PAD) * PAD;
             a.resize(n1, 0.0);
-            dispatch::s1(self.isa, self.lut, bytes, 0, 1, a);
+            match self.lanes {
+                Some(pair) => pair.run(self.lut, bytes, &mut lanes::Flat(a)),
+                None => dispatch::s1(self.isa, self.lut, bytes, 0, 1, a),
+            }
         }
         for (k, op) in self.ops.iter().enumerate() {
             let n_out = levels[k + 1].1;
@@ -468,17 +472,28 @@ impl Plan {
                     let (e, o) = (s.even.len() - 1, s.odd.len());
                     let np = n_out.div_ceil(PAD) * PAD;
                     let (de, dodd) = (m - 2 * e, m + 1 - 2 * o);
-                    even.resize(np + 2 * e, 0.0);
-                    odd.resize(np + 2 * o, 0.0);
-                    if k == 0 {
-                        dispatch::s1(self.isa, self.lut, bytes, de, 2, even);
-                        dispatch::s1(self.isa, self.lut, bytes, dodd, 2, odd);
-                    } else {
-                        every_other(&a[de..], even);
-                        every_other(&a[dodd..], odd);
-                    }
                     b.resize(np, 0.0);
-                    dispatch::dec2(self.isa, s, even, odd, b);
+                    if let (0, Some(pair)) = (k, self.lanes) {
+                        // S1 at even and odd bytes in one set of lookups per pair, as two
+                        // streams that the stage reads from its offsets.
+                        let half = levels[0].1.div_ceil(PAD) * PAD / 2;
+                        even.resize(half, 0.0);
+                        odd.resize(half, 0.0);
+                        pair.run(self.lut, bytes, &mut lanes::Split(even, odd));
+                        let (xe, xo) = lanes::split(even, odd, de, dodd);
+                        dispatch::dec2(self.isa, s, xe, xo, b);
+                    } else {
+                        even.resize(np + 2 * e, 0.0);
+                        odd.resize(np + 2 * o, 0.0);
+                        if k == 0 {
+                            dispatch::s1(self.isa, self.lut, bytes, de, 2, even);
+                            dispatch::s1(self.isa, self.lut, bytes, dodd, 2, odd);
+                        } else {
+                            every_other(&a[de..], even);
+                            every_other(&a[dodd..], odd);
+                        }
+                        dispatch::dec2(self.isa, s, even, odd, b);
+                    }
                 }
                 Op::Interp2(s) => {
                     let o = s.odd.len();
@@ -763,7 +778,14 @@ mod tests {
                 });
                 let mut ordered = plan.clone();
                 ordered.lanes = None;
-                for (o0, n) in [(0, LANES_MIN), (-200, 1176 * 6), (64, 2050), (10, 4096)] {
+                for (o0, n) in [
+                    (0, LANES_MIN),
+                    (-200, 1176 * 6),
+                    (64, 2050),
+                    (10, 4096),
+                    (-200, 1176),
+                    (8, 2),
+                ] {
                     let n = n.min(plan.pass);
                     let (mut a, mut b) = (Scratch::default(), Scratch::default());
                     ordered.pass_run(&bytes, 300, o0, n, &mut a);

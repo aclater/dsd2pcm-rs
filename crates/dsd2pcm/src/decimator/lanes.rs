@@ -156,10 +156,48 @@ impl S1Pair {
     }
 }
 
-/// `out[k].0[w]` for `k` in pairs: S1 over `bytes[k ..]` (`B` = window bytes + 1, `T`
-/// tables).
+/// Where paired S1 outputs go: pair `k` (windows at bytes `2 k` and `2 k + 1`).
+pub(super) trait PairSink {
+    /// The number of pairs.
+    fn pairs(&self) -> usize;
+    /// Stores pair `k` (`k < pairs()`).
+    fn put(&mut self, k: usize, x: f64, y: f64);
+}
+
+/// Every byte, in order.
+pub(super) struct Flat<'a>(pub &'a mut [f64]);
+
+impl PairSink for Flat<'_> {
+    #[inline(always)]
+    fn pairs(&self) -> usize {
+        self.0.len() / 2
+    }
+    #[inline(always)]
+    fn put(&mut self, k: usize, x: f64, y: f64) {
+        let o: &mut [f64; 2] = (&mut self.0[2 * k..2 * k + 2]).try_into().unwrap();
+        *o = [x, y];
+    }
+}
+
+/// Even bytes into the first, odd bytes into the second.
+pub(super) struct Split<'a>(pub &'a mut [f64], pub &'a mut [f64]);
+
+impl PairSink for Split<'_> {
+    #[inline(always)]
+    fn pairs(&self) -> usize {
+        self.0.len().min(self.1.len())
+    }
+    #[inline(always)]
+    fn put(&mut self, k: usize, x: f64, y: f64) {
+        self.0[k] = x;
+        self.1[k] = y;
+    }
+}
+
+/// S1 into lane `w` of `out` at every byte: `out[k].0[w]` over `bytes[k ..]` (`out.len()`
+/// even; `B` = window bytes + 1, `T` tables).
 #[inline(always)]
-fn s1_pairs_n<const B: usize, const T: usize>(
+fn s1_pairs_lane<const B: usize, const T: usize>(
     t: &[PTable; T],
     bias: [i64; 2],
     bytes: &[u8],
@@ -186,6 +224,77 @@ fn s1_pairs_n<const B: usize, const T: usize>(
     }
 }
 
+/// S1 for each pair of `out` (`B` = window bytes + 1, `T` tables).
+#[inline(always)]
+fn s1_pairs_n<const B: usize, const T: usize>(
+    t: &[PTable; T],
+    bias: [i64; 2],
+    bytes: &[u8],
+    out: &mut impl PairSink,
+) {
+    let n = out.pairs();
+    let Some(last) = n.checked_sub(1) else {
+        return;
+    };
+    let bytes = &bytes[..2 * last + B];
+    for k in 0..n {
+        let win: &[u8; B] = bytes[2 * k..2 * k + B].try_into().unwrap();
+        let mut sum = 0u64;
+        let mut i = 0;
+        for part in win.chunks(8) {
+            let mut word = [0u8; 8];
+            word[..part.len()].copy_from_slice(part);
+            let word = u64::from_le_bytes(word);
+            let mut s = 0;
+            while s < 8 * part.len() {
+                sum = sum.wrapping_add(t[i][((word >> s) as usize) & ((1 << P_BITS) - 1)]);
+                i += 1;
+                s += P_BITS;
+            }
+        }
+        out.put(
+            k,
+            (i64::from(sum as u32) - bias[0]) as f64,
+            (i64::from((sum >> 32) as u32) - bias[1]) as f64,
+        );
+    }
+}
+
+impl S1Pair {
+    /// S1 for each pair of `out`: pair `k` over the windows at `bytes[2 k ..]` and
+    /// `bytes[2 k + 1 ..]`; `lut` (the same filter) serves any other window size.
+    #[inline(always)]
+    pub(super) fn run(&self, lut: &S1Lut, bytes: &[u8], out: &mut impl PairSink) {
+        const T9: usize = pair_tables(9);
+        const T13: usize = pair_tables(13);
+        if let (8, Ok(t)) = (self.bytes, <&[PTable; T9]>::try_from(&self.tables[..])) {
+            s1_pairs_n::<9, T9>(t, self.bias, bytes, out);
+        } else if let (12, Ok(t)) = (self.bytes, <&[PTable; T13]>::try_from(&self.tables[..])) {
+            s1_pairs_n::<13, T13>(t, self.bias, bytes, out);
+        } else {
+            for k in 0..out.pairs() {
+                let mut v = [0.0; 2];
+                s1(lut, bytes, 2 * k, 1, &mut v);
+                out.put(k, v[0], v[1]);
+            }
+        }
+    }
+}
+
+/// The stage inputs of a first Dec2 from S1 split into even (`ev[i]` at byte `2 i`) and
+/// odd (`od[i]` at byte `2 i + 1`) streams: `(xe, xo)` with `xe[k]` = S1 at byte
+/// `de + 2 k` and `xo[k]` at byte `dodd + 2 k`.
+pub(super) fn split<'x, T>(ev: &'x [T], od: &'x [T], de: usize, dodd: usize) -> (&'x [T], &'x [T]) {
+    let at = |d: usize| {
+        if d % 2 == 0 {
+            &ev[d / 2..]
+        } else {
+            &od[d / 2..]
+        }
+    };
+    (at(de), at(dodd))
+}
+
 /// The number of tables of a joint window of `joint` bytes.
 const fn pair_tables(joint: usize) -> usize {
     let mut n = 0;
@@ -198,21 +307,20 @@ const fn pair_tables(joint: usize) -> usize {
     n
 }
 
-/// `out[k].0[w]` = the S1 sum over the window `bytes[starts[w] + k ..]` (`out.len()` even),
-/// two outputs per set of lookups.
+/// S1 of every run at every byte: `a[i].0[w]` over the window at byte `i` of run `w`.
 #[inline(always)]
-fn s1_lanes(p: &Pass<'_>, out: &mut [Lanes]) {
+fn s1_lanes(p: &Pass<'_>, a: &mut [Lanes]) {
     const T9: usize = pair_tables(9);
     const T13: usize = pair_tables(13);
     let pr = p.pair;
     for w in 0..W {
         let bytes = &p.bytes[p.starts[w]..];
         if let (8, Ok(t)) = (pr.bytes, <&[PTable; T9]>::try_from(&pr.tables[..])) {
-            s1_pairs_n::<9, T9>(t, pr.bias, bytes, out, w);
+            s1_pairs_lane::<9, T9>(t, pr.bias, bytes, a, w);
         } else if let (12, Ok(t)) = (pr.bytes, <&[PTable; T13]>::try_from(&pr.tables[..])) {
-            s1_pairs_n::<13, T13>(t, pr.bias, bytes, out, w);
+            s1_pairs_lane::<13, T13>(t, pr.bias, bytes, a, w);
         } else {
-            s1(p.lut, bytes, 0, 1, out.iter_mut().map(|v| &mut v.0[w]));
+            s1(p.lut, bytes, 0, 1, a.iter_mut().map(|v| &mut v.0[w]));
         }
     }
 }
@@ -315,7 +423,7 @@ pub(super) fn run<'b, M: Mac>(p: &Pass<'_>, pad: usize, bufs: &'b mut Bufs) -> &
     debug_assert!(pad % (2 * SV) == 0);
     let Bufs { a, b } = bufs;
     // S1 at every byte: the first stage takes its even and odd inputs from it as later
-    // stages do.
+    // stages do (two separate streams were slower).
     a.resize(up(p.lens[0], pad), Lanes::default());
     s1_lanes(p, a);
     for (k, op) in p.ops.iter().enumerate() {
