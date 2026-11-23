@@ -12,7 +12,7 @@
 
 dsd2pcm converts DSD (DSF and DSDIFF files, or Super Audio CD frames) to 24-bit PCM, as a Rust
 crate, a C library and a command-line tool. Its output is the same, byte for byte, on every
-CPU, and on most workloads it is faster than scarletbook-pcm 0.7.0, whose output it
+CPU (with SSE2 floating point on x86), and on most workloads it is faster than scarletbook-pcm 0.7.0, whose output it
 reproduces ([performance](docs/performance.md)).
 
 ## Platforms

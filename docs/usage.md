@@ -26,6 +26,8 @@
 The output samples are identical to those of scarletbook-pcm 0.7.0 for the same rate,
 cutoff and gain; the tests compare the two on synthetic and real input. Every sample is an
 exact integer computation, so the output is the same on every CPU and build profile.
+On x86 this assumes SSE2 floating point, as on x86_64 and Rust's i686 targets (the release
+builds); targets that use the x87 unit (i586 and older) are not covered.
 The DSD idle pattern (0x69) converts to exact zeros. On x86 the filters use AVX2 and FMA
 when the CPU has them, chosen at run time, with the same output; the environment variable
 `DSD2PCM_SIMD` (`generic`, `sse2` on x86 and x86_64, `avx2` or `avx2fma`) caps the level.

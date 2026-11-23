@@ -255,9 +255,9 @@ pub(super) fn s1_layout(isa: Isa) -> S1Layout {
     }
 }
 
-/// Whether the lanes take S1 from the paired tables ([`lanes::S1Pair`]): not on 32-bit
-/// targets, where each 64-bit addition takes two instructions and the 112 KiB of tables
-/// leave the level-1 cache; there S1 uses the byte tables of the ordered kernels.
+/// Whether the lanes take S1 from the paired tables ([`lanes::S1Pair`]: 18 KiB, or
+/// 26 KiB for the wide filter, of 64-bit entries): not on 32-bit targets, where each 64-bit
+/// addition takes two instructions; there S1 uses the byte tables of the ordered kernels.
 pub(super) fn lanes_pair() -> bool {
     cfg!(target_pointer_width = "64")
 }
