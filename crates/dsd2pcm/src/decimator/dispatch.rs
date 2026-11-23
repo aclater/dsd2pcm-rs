@@ -564,6 +564,10 @@ mod neon {
         let t = tune();
         match (t.sv1, t.sv2, t.whole) {
             (4, 4, true) => lanes::run::<Fused, 4, 4, true>(p, pad, bufs),
+            (4, 4, false) => lanes::run::<Fused, 4, 4, false>(p, pad, bufs),
+            (2, 4, true) => lanes::run::<Fused, 2, 4, true>(p, pad, bufs),
+            (4, 2, true) => lanes::run::<Fused, 4, 2, true>(p, pad, bufs),
+            (2, 2, true) => lanes::run::<Fused, 2, 2, true>(p, pad, bufs),
             (4, 8, true) => lanes::run::<Fused, 4, 8, true>(p, pad, bufs),
             (8, 8, false) => lanes::run::<Fused, 8, 8, false>(p, pad, bufs),
             (16, 8, true) => lanes::run::<Fused, 16, 8, true>(p, pad, bufs),
