@@ -5,14 +5,14 @@
 //!
 //! The levels: the generic kernels as compiled; on x86 and x86-64, the same safe code built
 //! with SSE2 (`#[target_feature]`), which runs passes in lanes ([`super::lanes`]) in blocks
-//! sized for SSE2, picked when the CPU has no AVX2; the safe code built with AVX2; and that build with fused multiply-adds in
-//! the stages whose sums [`super::exact`] proved exact (`Sym::fused`). None changes an
-//! output: the builds do the same IEEE-754 operations in the same order per output (the
-//! compiler never fuses or reorders floating-point operations on its own), a fused
-//! multiply-add gives the same result as a product and an addition when both are exact, and
-//! the lanes do the same operations per output in the same order as the ordered kernels, on
-//! another data layout. On x86-64 the fused level runs plans whose every stage is proven
-//! exact in lanes.
+//! sized for SSE2, picked when the CPU has no AVX2; the safe code built with AVX2; and that
+//! build with fused multiply-adds in the stages whose sums [`super::exact`] proved exact
+//! (`Sym::fused`). None changes an output: the builds do the same IEEE-754 operations in the
+//! same order per output (the compiler never fuses or reorders floating-point operations on
+//! its own), a fused multiply-add gives the same result as a product and an addition when
+//! both are exact, and the lanes do the same operations per output in the same order as the
+//! ordered kernels, on another data layout. On x86-64 the fused level runs plans whose every
+//! stage is proven exact in lanes.
 //!
 //! This is the only module of the crate with `unsafe`: calling a `#[target_feature]`
 //! function is `unsafe`. Every call is made with an [`Isa`] whose level is at most the one
@@ -158,7 +158,8 @@ impl Isa {
 
 // SAFETY (every `unsafe` block below): an `Isa` at `Avx2` or above exists only if
 // `Isa::detect` found AVX2 on this CPU, and at `Avx2Fma` only if it also found FMA; on
-// 32-bit x86, an `Isa` at `Sse2` or above only if it found SSE2. `Isa::cap` only lowers a
+// 32-bit x86, an `Isa` at `Sse2` or above only if it found SSE2; on x86-64 every CPU has
+// SSE2 (the target's baseline, which every x86-64 build assumes). `Isa::cap` only lowers a
 // level (to `Generic` where the target lacks a level). Each block calls one
 // `#[target_feature]` wrapper whose features the matched level guarantees, and nothing
 // else.
