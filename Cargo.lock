@@ -54,7 +54,7 @@ dependencies = [
 
 [[package]]
 name = "dsd2pcm"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "claxon",
  "scarletbook-pcm",
@@ -63,14 +63,14 @@ dependencies = [
 
 [[package]]
 name = "dsd2pcm-capi"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "dsd2pcm",
 ]
 
 [[package]]
 name = "dsd2pcm-cli"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "dsd2pcm",
 ]

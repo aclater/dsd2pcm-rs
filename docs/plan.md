@@ -7,8 +7,10 @@ DSF/DFF/WAV output; the frame-run interface; the opt-in pysacd filter; the C int
 fuzzed readers; golden hashes on x86_64, i686 and aarch64.
 
 Done in 0.1.1: one-frame calls ahead of scarletbook-pcm 0.7.0 on Zen 2 and on the measured
-Intel cores; an `sse2` level for 32-bit x86. Since 0.1.1 (unreleased): the `sse2` level on
-x86-64 CPUs without AVX2. SSSE3 and SSE4.2 builds measured within noise of SSE2, so there
+Intel cores; an `sse2` level for 32-bit x86.
+
+Done in 0.1.2: the `sse2` level on x86-64 CPUs without AVX2; testing for long-lived
+processes (soak, leak loop, Miri, ThreadSanitizer, valgrind). SSSE3 and SSE4.2 builds measured within noise of SSE2, so there
 is no separate level for them ([design.md](design.md#speed)).
 
 Next:

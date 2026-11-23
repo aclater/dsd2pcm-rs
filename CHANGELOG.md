@@ -1,14 +1,25 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 (2026-11-23)
+
+This release contains security fixes; upgrading is recommended. Earlier versions were yanked.
 
 - x86_64 without AVX2 (e.g. Celeron and Pentium J and N series of NAS units): the `sse2`
-  level now runs there too, where the generic level ran at 0.6x to 0.9x the speed of
-  scarletbook-pcm 0.7.0 ([performance](docs/performance.md)). Output bytes unchanged.
+  level now runs there too, at 1.09x to 1.34x the speed of scarletbook-pcm 0.7.0's path for
+  CPUs without AVX2 on runs of frames and whole files (1.03x to 1.27x one frame per call),
+  where the generic level ran at 0.84x to 1.17x ([performance](docs/performance.md)).
+  Output bytes unchanged.
+- C library: built without FLAC reading (unreachable from C); the archives now contain no
+  third-party code.
 - Command line: `--help` prints the usage to standard output and exits with status 0 (it
   exited with 2); the usage explains `--single-thread`.
+- Testing for long-lived processes: a soak test (thousands of conversions in one process,
+  live heap, RSS and threads checked flat), a C create-convert-free leak loop under ASan
+  and LSan, and Miri, ThreadSanitizer and valgrind runs ([testing](docs/testing.md)).
 - Docs: checked against the code and the 0.1.1 release (commands, file names, versions);
-  a security policy (`SECURITY.md`).
+  a security policy (`SECURITY.md`); the design decisions with their reasons
+  ([design](docs/design.md)); speed on GitHub-hosted aarch64 Linux and macOS runners; CI
+  checks for links, the README Quick start and version drift.
 
 ### Fixed
 
