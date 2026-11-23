@@ -32,7 +32,7 @@ The GitHub release, with these assets:
 | `dsd2pcm-0.1.2-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon; signed (Developer ID) and notarised |
 | `dsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.1.3) macOS 11 or later, Intel; signed (Developer ID) and notarised |
 | `dsd2pcm-0.1.2-x86_64-windows.zip` | Windows 10 and 11, x86_64; C runtime linked in; not code-signed |
-| `libdsd2pcm-0.1.2-x86_64-linux.tar.gz` | C library, Linux x86_64, glibc 2.17 or later; marked for the CET shadow stack |
+| `libdsd2pcm-0.1.2-x86_64-linux.tar.gz` | C library, Linux x86_64, glibc 2.17 or later; static library marked for the CET shadow stack |
 | `libdsd2pcm-0.1.2-aarch64-linux.tar.gz` | C library, Linux aarch64, glibc 2.17 or later |
 | `libdsd2pcm-0.1.2-i686-linux.tar.gz` | C library, Linux 32-bit x86, glibc 2.17 or later |
 | `libdsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | (from 0.1.3) C library, Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later); static library marked for the CET shadow stack |
@@ -88,9 +88,8 @@ build provenance attestation (`.intoto.jsonl`, also stored with GitHub). `SHA256
    GitHub keeps `macos-15-intel` until August 2027; after that the x86_64 macOS build moves
    to an arm64 runner (cross-compiled, tests under Rosetta).
    On x86_64 Linux, every object of the static library is marked for the CET shadow stack
-   (`.github/scripts/clib-shstk.py`, from scarletbook-rs) and the glibc shared library is
-   linked again from those objects (`.github/scripts/relink-shstk.sh`); the archive check
-   requires the mark on every object and on the glibc shared library
+   (`.github/scripts/clib-shstk.py`, from scarletbook-rs); the archive check requires the
+   mark on every object and on a program object linked with it
    ([c-api.md](c-api.md#intel-cet)).
    On macOS this is three jobs. `binary (aarch64-macos)` and `binary (x86_64-macos)` build
    and test, with no secrets. `sign and notarise (macos)` runs on a tag in the environment

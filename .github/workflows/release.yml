@@ -90,8 +90,8 @@ jobs:
   # statically by default and then builds no shared library: -crt-static for the C library
   # only); the C library is checked in an Alpine container.
   # On x86_64 every object of the static library is marked for the CET shadow stack
-  # (clib-shstk.py), and the glibc shared library is linked again from those objects so that
-  # it is marked too (relink-shstk.sh); never IBT (docs/c-api.md, "Intel CET").
+  # (clib-shstk.py); not the shared library, whose unwinder (zig's libunwind) does not unwind
+  # the shadow stack, and never IBT (docs/c-api.md, "Intel CET").
   linux:
     name: binary (${{ matrix.name }})
     needs: preflight
@@ -186,9 +186,6 @@ jobs:
         if: matrix.shstk
         run: |
           python3 -I .github/scripts/clib-shstk.py "target/$TARGET/release/libdsd2pcm.a"
-          if [[ "$LIBC" == gnu ]]; then
-            .github/scripts/relink-shstk.sh "target/$TARGET/release" "${ARCH}-linux-gnu.$GLIBC_MAX" "$(cat "$RUNNER_TEMP/static-libs")"
-          fi
       - name: glibc 2.17 or later (or musl), stripped
         run: |
           for bin in "target/$TARGET/release/dsd2pcm" "target/$TARGET/release/libdsd2pcm.so"; do
@@ -951,7 +948,7 @@ jobs:
             echo "- \`dsd2pcm-$VERSION-x86_64-macos.tar.gz\`: macOS 11 or later on Intel. Signed and notarised the same way."
             echo "- \`dsd2pcm-$VERSION-x86_64-windows.zip\`: Windows 10 or 11, x86_64. Not code-signed."
             echo
-            echo "The C library (\`include/dsd2pcm.h\`, shared and static libraries, a pkg-config file; ABI version 1), \`libdsd2pcm-$VERSION-<platform>\` for the same eight platforms (on Linux with musl: musl 1.2.3 or later) and for Windows with MinGW-w64 (\`x86_64-windows-gnu\`, for gcc): \`.tar.gz\`, and \`.zip\` for Windows. On x86_64 Linux the static libraries (glibc and musl) and the glibc shared library are marked for the CET shadow stack. See [docs/c-api.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/c-api.md#binary-releases)."
+            echo "The C library (\`include/dsd2pcm.h\`, shared and static libraries, a pkg-config file; ABI version 1), \`libdsd2pcm-$VERSION-<platform>\` for the same eight platforms (on Linux with musl: musl 1.2.3 or later) and for Windows with MinGW-w64 (\`x86_64-windows-gnu\`, for gcc): \`.tar.gz\`, and \`.zip\` for Windows. On x86_64 Linux the static libraries are marked for the CET shadow stack. See [docs/c-api.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/c-api.md#binary-releases)."
             echo
             echo "The source: \`dsd2pcm-$VERSION-src.tar.gz\`, the tagged commit's whole tree (\`git archive --format=tar --prefix=dsd2pcm-$VERSION/ v$VERSION | gzip -n -9\` makes the same bytes)."
             echo

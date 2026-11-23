@@ -55,8 +55,9 @@ case "$os" in
         readelf -d "$so" | grep NEEDED
         # x86-64: every object of the static library carries the CET shadow-stack property
         # (.github/scripts/clib-shstk.py), so a program built with -fcf-protection keeps it
-        # when it links the library; with glibc, the shared library carries it too
-        # (.github/scripts/relink-shstk.sh). Never IBT: Rust's standard library has no ENDBR64.
+        # when it links the library. The shared library is not marked: it holds zig's
+        # libunwind, which does not unwind the shadow stack. Never IBT: Rust's standard
+        # library has no ENDBR64.
         if readelf -h "$so" | grep -q 'Machine:.*X86-64'; then
             a=$dir/lib/libdsd2pcm.a
             members=$(ar t "$a" | wc -l)
@@ -69,10 +70,6 @@ case "$os" in
             $cc -std=c99 -fcf-protection=full -nostdlib -r "${cflags[@]}" -o "$work/minimal-cet.o" "$src" "$a"
             [[ "$(readelf -n "$work/minimal-cet.o" | grep 'x86 feature:')" == *'x86 feature: SHSTK' ]] \
                 || { echo "::error::a program object linked with libdsd2pcm.a is not marked SHSTK"; exit 1; }
-            if readelf -d "$so" | grep -q 'NEEDED.*\[libc\.so\.6\]'; then
-                readelf -n "$so" | grep -q 'x86 feature: SHSTK$' || { echo "::error::$so is not marked SHSTK"; exit 1; }
-                echo "shared library marked SHSTK"
-            fi
         fi
         ;;
     Darwin)

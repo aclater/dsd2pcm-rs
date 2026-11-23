@@ -319,19 +319,21 @@ that only the program's own function is exported, and runs it.
 
 ### Intel CET
 
-On x86_64 Linux, every object in `libdsd2pcm.a` (glibc and musl) and the glibc
-`libdsd2pcm.so.1` carry the CET shadow-stack property (`readelf -n` shows `x86 feature:
-SHSTK`), so a program or extension built with `-fcf-protection` keeps its SHSTK mark when
-it links the library, and glibc with shadow stacks enabled loads it. Stable rustc cannot
-emit the mark: the release adds it to each object afterwards
-(`.github/scripts/clib-shstk.py`, from scarletbook-rs), and links the glibc shared library
-again from those objects with `-z shstk` (`.github/scripts/relink-shstk.sh`; the only
-unmarked inputs of that link are glibc 2.17's `stat64` and `fstat64` wrappers from
-`libc_nonshared.a`, a tail call each). The libraries are not marked for indirect branch
-tracking (IBT): Rust's precompiled standard library has no `ENDBR64` instructions, so a
-program that links the static library loses its IBT mark. Do not force it with
-`-Wl,-z,ibt`. The musl shared library is not marked (musl has no shadow-stack support), nor
-are the 32-bit x86 libraries.
+On x86_64 Linux, every object in `libdsd2pcm.a` (glibc and musl) carries the CET
+shadow-stack property (`readelf -n` shows `x86 feature: SHSTK`), so a program or extension
+built with `-fcf-protection` keeps its SHSTK mark when it links the static library. Stable
+rustc cannot emit the mark: the release adds it to each object afterwards
+(`.github/scripts/clib-shstk.py`, from scarletbook-rs). A caught panic inside the library
+unwinds with the program's own unwinder (libgcc's, through `-lgcc_s` in `Libs.private`),
+which on a distribution built for CET unwinds the shadow stack too.
+
+The shared library `libdsd2pcm.so.1` is not marked: it carries its own unwinder (zig's
+LLVM libunwind, linked in by the release build), which does not unwind the shadow stack,
+so marking it would turn a caught panic into a crash in a process running with shadow
+stacks. A program that needs the mark links the static library. No library is marked for
+indirect branch tracking (IBT): Rust's precompiled standard library has no `ENDBR64`
+instructions, so a program that links the static library loses its IBT mark. Do not force
+it with `-Wl,-z,ibt`. The 32-bit x86 libraries are not marked.
 
 ## Checks
 
