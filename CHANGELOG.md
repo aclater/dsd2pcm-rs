@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- CI: a check that tracked files and commit identities hold no private names or addresses
+  ([testing](docs/testing.md#private-names)).
+
 ## 0.1.2 (2026-11-23)
 
 This release contains security fixes; upgrading is recommended. Versions 0.1.0 and 0.1.1 are
