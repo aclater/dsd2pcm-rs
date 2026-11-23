@@ -140,6 +140,58 @@ the commands), and `tests/smoke.c` uses every function. Both run without argumen
   `dsd2pcm_frames_config` 32, `dsd2pcm_run` 80, `dsd2pcm_stats` 64 bytes (checked when the
   library is built).
 
+## Binary releases
+
+Each GitHub release has the C library built for five platforms, next to the command-line
+tool: `libdsd2pcm-0.1.0-x86_64-linux.tar.gz`, `-aarch64-linux.tar.gz`, `-i686-linux.tar.gz`
+(glibc 2.17 or later), `-aarch64-macos.tar.gz` (macOS 11 or later) and
+`-x86_64-windows.zip`, each with a `.sha256` file and a build provenance attestation.
+An archive holds:
+
+- `include/dsd2pcm.h`;
+- the shared library: `lib/libdsd2pcm.so.1` with the link `lib/libdsd2pcm.so` (Linux,
+  SONAME `libdsd2pcm.so.1`); `lib/libdsd2pcm.1.dylib` with the link `lib/libdsd2pcm.dylib`
+  (macOS, install name `@rpath/libdsd2pcm.1.dylib`, not signed or notarised);
+  `bin/dsd2pcm.dll` and its import library `lib/dsd2pcm.dll.lib` (Windows, C runtime
+  linked in);
+- the static library: `lib/libdsd2pcm.a` (`lib/dsd2pcm.lib` on Windows, built with the
+  static C runtime, `/MT`);
+- `lib/pkgconfig/dsd2pcm.pc` (Linux and macOS), relative to wherever the archive is
+  unpacked; its `Libs.private` lists the system libraries the static library needs;
+- `examples/minimal.c` (`crates/dsd2pcm-capi/tests/minimal.c`), `README.md`,
+  `LICENSE-MIT`, `LICENSE-APACHE`.
+
+The `1` in the file names is the ABI version (see [ABI](#abi)). Check a download, unpack
+it, and build the example against it, from the folder holding the archive (Linux x86_64
+shown):
+
+```
+sha256sum -c libdsd2pcm-0.1.0-x86_64-linux.tar.gz.sha256
+gh attestation verify libdsd2pcm-0.1.0-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs
+tar -xzf libdsd2pcm-0.1.0-x86_64-linux.tar.gz
+export PKG_CONFIG_PATH=libdsd2pcm-0.1.0-x86_64-linux/lib/pkgconfig
+cc libdsd2pcm-0.1.0-x86_64-linux/examples/minimal.c $(pkg-config --cflags --libs dsd2pcm) -Wl,-rpath,'$ORIGIN/libdsd2pcm-0.1.0-x86_64-linux/lib' -o minimal
+./minimal
+```
+
+On macOS the same with the `aarch64-macos` archive, `shasum -a 256 -c` in place of
+`sha256sum -c`, and `-Wl,-rpath,@executable_path/libdsd2pcm-0.1.0-aarch64-macos/lib`.
+Static linking instead (Linux):
+
+```
+cc libdsd2pcm-0.1.0-x86_64-linux/examples/minimal.c $(pkg-config --cflags dsd2pcm) libdsd2pcm-0.1.0-x86_64-linux/lib/libdsd2pcm.a $(pkg-config --libs-only-l --static dsd2pcm | sed 's/-ldsd2pcm//') -o minimal
+```
+
+To install system-wide, copy `include/` and `lib/` under a prefix such as `/usr/local`; the
+pkg-config file needs no change. On Windows, in a Visual Studio developer prompt in the
+unpacked folder:
+
+```
+cl /I include examples\minimal.c lib\dsd2pcm.dll.lib
+copy bin\dsd2pcm.dll .
+minimal.exe
+```
+
 ## Checks
 
 `crates/dsd2pcm-capi/check.sh`, from the repository root, checks that the committed header
