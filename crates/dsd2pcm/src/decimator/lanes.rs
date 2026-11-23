@@ -7,13 +7,18 @@
 //! vector belongs to run `w`. Each stage is then an FIR over vectors with the same
 //! operations per output, in the same order, as the ordered kernels (`super::kernel`), but
 //! all loads are aligned (no load crosses a cache line), decimation and interpolation are
-//! index arithmetic on whole vectors, and nothing is copied between stages. Blocks of 8
-//! output vectors keep 8 independent sums, enough to cover the multiply-add latency. S1
-//! uses paired tables ([`S1Pair`]): one set of lookups for two outputs.
+//! index arithmetic on whole vectors, and nothing is copied between stages. Blocks of `SV`
+//! output vectors keep `SV` independent sums (8 with AVX2 on x86-64, enough to cover the
+//! multiply-add latency; fewer where the CPU has fewer vector registers). S1 uses paired
+//! tables ([`S1Pair`]) where the level has them: one set of lookups for two outputs.
 //!
-//! Used on x86-64 with AVX2 and FMA (`super::dispatch`); elsewhere the ordered kernels run.
+//! Used on x86-64 with AVX2 and FMA, and on 32-bit x86 from SSE2 up (`super::dispatch`);
+//! elsewhere the ordered kernels run.
 
-#![cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+#![cfg_attr(
+    not(any(target_arch = "x86", target_arch = "x86_64")),
+    allow(dead_code)
+)]
 
 use super::kernel::{round_even, s1, Mac, S1Lut, Sym};
 use super::Op;
@@ -25,9 +30,6 @@ pub(super) const W: usize = 4;
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(align(32))]
 pub(super) struct Lanes(pub(super) [f64; W]);
-
-/// Output vectors per block: 8 independent sums, enough to cover the multiply-add latency.
-const SV: usize = 8;
 
 /// The largest tap offset the lane kernels take.
 pub(super) const MAX_M: usize = 128;
@@ -47,8 +49,8 @@ pub(super) struct Bufs {
 /// One pass: what `Plan::pass_run` computes for each run.
 pub(super) struct Pass<'a> {
     pub lut: &'a S1Lut,
-    /// The same S1 as paired tables.
-    pub pair: &'a S1Pair,
+    /// The same S1 as paired tables, if the level uses them.
+    pub pair: Option<&'a S1Pair>,
     pub ops: &'a [Op],
     /// The bytes of run `w` start at `bytes[starts[w]]`.
     pub bytes: &'a [u8],
@@ -312,13 +314,13 @@ const fn pair_tables(joint: usize) -> usize {
 fn s1_lanes(p: &Pass<'_>, a: &mut [Lanes]) {
     const T9: usize = pair_tables(9);
     const T13: usize = pair_tables(13);
-    let pr = p.pair;
     for w in 0..W {
         let bytes = &p.bytes[p.starts[w]..];
-        if let (8, Ok(t)) = (pr.bytes, <&[PTable; T9]>::try_from(&pr.tables[..])) {
-            s1_pairs_lane::<9, T9>(t, pr.bias, bytes, a, w);
-        } else if let (12, Ok(t)) = (pr.bytes, <&[PTable; T13]>::try_from(&pr.tables[..])) {
-            s1_pairs_lane::<13, T13>(t, pr.bias, bytes, a, w);
+        let pr = p.pair.map(|pr| (pr.bytes, &pr.tables[..], pr.bias));
+        if let Some((8, t, bias)) = pr.filter(|pr| pr.1.len() == T9) {
+            s1_pairs_lane::<9, T9>(t.try_into().unwrap(), bias, bytes, a, w);
+        } else if let Some((12, t, bias)) = pr.filter(|pr| pr.1.len() == T13) {
+            s1_pairs_lane::<13, T13>(t.try_into().unwrap(), bias, bytes, a, w);
         } else {
             s1(p.lut, bytes, 0, 1, a.iter_mut().map(|v| &mut v.0[w]));
         }
@@ -327,13 +329,37 @@ fn s1_lanes(p: &Pass<'_>, a: &mut [Lanes]) {
 
 /// `acc[g] += h[j] (X[hi + g + j] + X[lo + g - j])` over `j`, with `X[k] = x[S k]`.
 #[inline(always)]
-fn pairs<M: Mac, const S: usize>(
+fn pairs<M: Mac, const S: usize, const SV: usize>(
     acc: &mut [[f64; W]; SV],
     h: &[f64],
     x: &[Lanes],
     hi: usize,
     lo: usize,
 ) {
+    // On 32-bit x86 (SSE2), with the windows sliced once (no bounds checks in the loop) and
+    // whole vectors loaded, which lets the additions read aligned memory operands: 1.2x
+    // faster there. With AVX2 on x86-64 that form measured slower than this one.
+    #[cfg(target_arch = "x86")]
+    {
+        let Some(last) = h.len().checked_sub(1) else {
+            return;
+        };
+        let span = S * (SV - 1) + 1;
+        let up = x[S * hi..S * (hi + last) + span].windows(span).step_by(S);
+        let dn = x[S * (lo - last)..S * lo + span]
+            .windows(span)
+            .step_by(S)
+            .rev();
+        for ((up, dn), &hj) in up.zip(dn).zip(h) {
+            for (g, acc) in acc.iter_mut().enumerate() {
+                let (a, b) = (up[S * g].0, dn[S * g].0);
+                for ((acc, a), b) in acc.iter_mut().zip(a).zip(b) {
+                    *acc = M::mac(*acc, hj, a + b);
+                }
+            }
+        }
+    }
+    #[cfg(not(target_arch = "x86"))]
     for (j, &hj) in h.iter().enumerate() {
         // `X[hi + j ..]` and `X[lo - j ..]`, `SV` vectors each.
         let up = &x[S * (hi + j)..][..S * (SV - 1) + 1];
@@ -349,7 +375,7 @@ fn pairs<M: Mac, const S: usize>(
 
 /// `acc[g] = c X[c + g]` with `X[k] = x[S k]`.
 #[inline(always)]
-fn centre<const S: usize>(c0: f64, x: &[Lanes], c: usize) -> [[f64; W]; SV] {
+fn centre<const S: usize, const SV: usize>(c0: f64, x: &[Lanes], c: usize) -> [[f64; W]; SV] {
     std::array::from_fn(|g| {
         let x = x[S * (c + g)].0;
         std::array::from_fn(|l| c0 * x[l])
@@ -358,7 +384,7 @@ fn centre<const S: usize>(c0: f64, x: &[Lanes], c: usize) -> [[f64; W]; SV] {
 
 /// `out[i + g]` = `acc[g]` rescaled and rounded.
 #[inline(always)]
-fn store(acc: &[[f64; W]; SV], scale: f64, out: &mut [Lanes]) {
+fn store<const SV: usize>(acc: &[[f64; W]; SV], scale: f64, out: &mut [Lanes]) {
     for (o, a) in out[..SV].iter_mut().zip(acc) {
         o.0 = std::array::from_fn(|l| round_even(a[l] * scale));
     }
@@ -366,29 +392,34 @@ fn store(acc: &[[f64; W]; SV], scale: f64, out: &mut [Lanes]) {
 
 /// Fir1 over vectors: `out[i]` centred on `x[i + m]` (as `kernel::fir1`).
 #[inline(always)]
-fn fir1<M: Mac>(s: &Sym, x: &[Lanes], out: &mut [Lanes]) {
+fn fir1<M: Mac, const SV: usize>(s: &Sym, x: &[Lanes], out: &mut [Lanes]) {
     let m = s.half_len();
     let h = &s.full[1..];
     for (bi, o) in out.chunks_exact_mut(SV).enumerate() {
         let i = bi * SV;
-        let mut acc = centre::<1>(s.full[0], x, i + m);
-        pairs::<M, 1>(&mut acc, h, x, i + m + 1, i + m - 1);
+        let mut acc = centre::<1, SV>(s.full[0], x, i + m);
+        pairs::<M, 1, SV>(&mut acc, h, x, i + m + 1, i + m - 1);
         store(&acc, s.scale, o);
     }
 }
 
 /// Dec2 over vectors (as `kernel::dec2`), with `xe[k]` = `xe0[S k]`, `xo[k]` = `xo0[S k]`.
 #[inline(always)]
-fn dec2<M: Mac, const S: usize>(s: &Sym, xe: &[Lanes], xo: &[Lanes], out: &mut [Lanes]) {
+fn dec2<M: Mac, const S: usize, const SV: usize>(
+    s: &Sym,
+    xe: &[Lanes],
+    xo: &[Lanes],
+    out: &mut [Lanes],
+) {
     let (e, o) = (s.even.len() - 1, s.odd.len());
     let he = &s.even[1..];
     for (bi, d) in out.chunks_exact_mut(SV).enumerate() {
         let i = bi * SV;
-        let mut acc = centre::<S>(s.even[0], xe, i + e);
+        let mut acc = centre::<S, SV>(s.even[0], xe, i + e);
         if e > 0 {
-            pairs::<M, S>(&mut acc, he, xe, i + e + 1, i + e - 1);
+            pairs::<M, S, SV>(&mut acc, he, xe, i + e + 1, i + e - 1);
         }
-        pairs::<M, S>(&mut acc, &s.odd, xo, i + o, i + o - 1);
+        pairs::<M, S, SV>(&mut acc, &s.odd, xo, i + o, i + o - 1);
         store(&acc, s.scale, d);
     }
 }
@@ -396,12 +427,12 @@ fn dec2<M: Mac, const S: usize>(s: &Sym, xe: &[Lanes], xo: &[Lanes], out: &mut [
 /// Interp2 over vectors: `out[2 i]` = `w[i + o]`, `out[2 i + 1]` between `w[i + o]` and
 /// `w[i + o + 1]` (as `kernel::interp2_odd` and `Plan::pass_run`).
 #[inline(always)]
-fn interp2<M: Mac>(s: &Sym, w: &[Lanes], out: &mut [Lanes]) {
+fn interp2<M: Mac, const SV: usize>(s: &Sym, w: &[Lanes], out: &mut [Lanes]) {
     let o = s.odd.len();
     for (bi, d) in out.chunks_exact_mut(2 * SV).enumerate() {
         let i = bi * SV;
         let mut acc = [[0.0; W]; SV];
-        pairs::<M, 1>(&mut acc, &s.odd, w, i + o + 1, i + o);
+        pairs::<M, 1, SV>(&mut acc, &s.odd, w, i + o + 1, i + o);
         let mut odd = [Lanes::default(); SV];
         store(&acc, s.scale * 2.0, &mut odd);
         for (g, d) in d.chunks_exact_mut(2).enumerate() {
@@ -417,10 +448,15 @@ fn up(n: usize, pad: usize) -> usize {
 }
 
 /// Runs the pass; the outputs of run `w` end up in lane `w` of `bufs.a[..lens[ops.len()]]`,
-/// which is returned. `pad` is `Plan`'s block size.
+/// which is returned. Blocks of `SV1` output vectors in Fir1 and Interp2, `SV2` in Dec2.
+/// `pad` is `Plan`'s block size.
 #[inline(always)]
-pub(super) fn run<'b, M: Mac>(p: &Pass<'_>, pad: usize, bufs: &'b mut Bufs) -> &'b [Lanes] {
-    debug_assert!(pad % (2 * SV) == 0);
+pub(super) fn run<'b, M: Mac, const SV1: usize, const SV2: usize>(
+    p: &Pass<'_>,
+    pad: usize,
+    bufs: &'b mut Bufs,
+) -> &'b [Lanes] {
+    debug_assert!(pad % (2 * SV1) == 0 && pad % SV2 == 0);
     let Bufs { a, b } = bufs;
     // S1 at every byte: the first stage takes its even and odd inputs from it as later
     // stages do (two separate streams were slower).
@@ -431,19 +467,19 @@ pub(super) fn run<'b, M: Mac>(p: &Pass<'_>, pad: usize, bufs: &'b mut Bufs) -> &
         match op {
             Op::Fir1(s) => {
                 b.resize(up(n_out, pad), Lanes::default());
-                fir1::<M>(s, a, b);
+                fir1::<M, SV1>(s, a, b);
             }
             Op::Dec2(s) => {
                 let m = s.half_len();
                 let (e, o) = (s.even.len() - 1, s.odd.len());
                 let (de, dodd) = (m - 2 * e, m + 1 - 2 * o);
                 b.resize(up(n_out, pad), Lanes::default());
-                dec2::<M, 2>(s, &a[de..], &a[dodd..], b);
+                dec2::<M, 2, SV2>(s, &a[de..], &a[dodd..], b);
             }
             Op::Interp2(s) => {
                 let half = up(n_out / 2, pad);
                 b.resize(2 * half, Lanes::default());
-                interp2::<M>(s, a, b);
+                interp2::<M, SV1>(s, a, b);
             }
         }
         std::mem::swap(a, b);

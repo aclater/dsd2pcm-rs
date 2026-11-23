@@ -108,15 +108,16 @@ fn pow2(e: i32) -> f64 {
 /// The S1 tables of a filter given from the centre out. The window covers the bytes
 /// `-B/2 .. B/2` around the output's byte (`B` = 4 times the half length, in bytes), and the
 /// output is centred on the first sample of its byte.
-fn lut(half: &[i32]) -> Lut {
+fn lut(half: &[i32], layout: S1Layout) -> Lut {
     let bytes = half.len() / 4;
     let centre = 8 * (bytes / 2);
-    Lut::new(bytes, |i| {
+    Lut::new(bytes, layout, |i| {
         half.get(i.abs_diff(centre)).copied().unwrap_or(0)
     })
 }
 
 type Lut = kernel::S1Lut;
+use kernel::S1Layout;
 
 /// [`lut`] as paired tables (`lanes`).
 fn pair(half: &[i32]) -> lanes::S1Pair {
@@ -130,8 +131,19 @@ fn pair(half: &[i32]) -> lanes::S1Pair {
 static PAIR_S1: OnceLock<lanes::S1Pair> = OnceLock::new();
 static PAIR_S1_WIDE: OnceLock<lanes::S1Pair> = OnceLock::new();
 
-static LUT_S1: OnceLock<Lut> = OnceLock::new();
-static LUT_S1_WIDE: OnceLock<Lut> = OnceLock::new();
+/// S1's tables and the wide filter's, in each layout.
+static LUT_S1: [OnceLock<Lut>; 2] = [OnceLock::new(), OnceLock::new()];
+static LUT_S1_WIDE: [OnceLock<Lut>; 2] = [OnceLock::new(), OnceLock::new()];
+
+/// The tables of `half` (S1 or the wide filter) in `layout`, built once.
+fn s1_lut(half: &'static [i32], layout: S1Layout) -> &'static Lut {
+    let cell = if half == &tables::S1_WIDE[..] {
+        &LUT_S1_WIDE
+    } else {
+        &LUT_S1
+    };
+    cell[layout as usize].get_or_init(|| lut(half, layout))
+}
 
 const Q_FIR: i32 = 24;
 
@@ -146,6 +158,12 @@ const PASS_BYTES: usize = 32 << 10;
 /// kHz) cost more than the lanes gain. Shorter passes use the ordered kernels, with the
 /// paired S1 tables and the channel's [`Carry`] where the plan has them.
 const LANES_MIN: usize = 128 * PAD;
+
+/// [`LANES_MIN`] on 32-bit x86, where the ordered kernels pay more against the lanes
+/// (unaligned loads, 8 vector registers, no paired tables or carry): one frame at 88.2 kHz
+/// runs faster in lanes there; the wide filter, whose 80 kHz stage has the longest margins,
+/// from 2048 outputs (one frame at 176.4 kHz).
+const LANES_MIN_X86: [usize; 2] = [32 * PAD, 64 * PAD];
 
 /// Most stages after S1 in any plan.
 const MAX_OPS: usize = 3;
@@ -298,15 +316,20 @@ pub(crate) struct Plan {
     /// The bytes that outputs `0` and `1` need: `win.0 .. win.0 + win.1`.
     win: (i64, usize),
     /// Whether passes run in lanes (`lanes`): every stage proven exact and taken, on a
-    /// level that runs them; with S1's paired tables.
-    lanes: Option<&'static lanes::S1Pair>,
+    /// level that runs them; with S1's paired tables if the level uses them (and then
+    /// also in the ordered passes, with the channel's [`Carry`]).
+    lanes: Option<Option<&'static lanes::S1Pair>>,
+    /// The fewest outputs a pass runs in lanes.
+    lanes_min: usize,
 }
 
 impl Plan {
     pub(crate) fn new(rate: PcmRate, cutoff: Cutoff) -> Result<Plan> {
         let hb = || Sym::new(&tables::HB, pow2(-Q_FIR));
         let f40 = || Sym::new(&tables::F40, pow2(-Q_FIR));
-        let wide = || LUT_S1_WIDE.get_or_init(|| lut(&tables::S1_WIDE));
+        let isa = Isa::current();
+        let layout = dispatch::s1_layout(isa);
+        let wide = || s1_lut(&tables::S1_WIDE, layout);
         let (s1_half, lut, mut ops) = match (cutoff, rate) {
             (Cutoff::Wide, PcmRate::Hz88200) => {
                 return Err(Error::InvalidArgument(
@@ -334,28 +357,25 @@ impl Plan {
                         vec![Op::Dec2(hb()), Op::Fir1(f), Op::Interp2(hb())]
                     }
                 };
-                (
-                    &tables::S1[..],
-                    LUT_S1.get_or_init(|| lut(&tables::S1)),
-                    ops,
-                )
+                (&tables::S1[..], s1_lut(&tables::S1, layout), ops)
             }
         };
         debug_assert!(ops.len() <= MAX_OPS);
         exact::prove(s1_half, &mut ops);
         let k = (rate.decimation() / 8) as i64;
         let pass = (PASS_BYTES / k as usize).div_ceil(PAD) * PAD;
-        let isa = Isa::current();
         let lanes = (dispatch::lanes_level(isa)
             && ops.iter().all(|op| match op {
                 Op::Fir1(s) | Op::Dec2(s) | Op::Interp2(s) => lanes::takes(s),
             }))
         .then(|| {
-            if cutoff == Cutoff::Wide {
-                PAIR_S1_WIDE.get_or_init(|| pair(&tables::S1_WIDE))
-            } else {
-                PAIR_S1.get_or_init(|| pair(&tables::S1))
-            }
+            dispatch::lanes_pair().then(|| {
+                if cutoff == Cutoff::Wide {
+                    PAIR_S1_WIDE.get_or_init(|| pair(&tables::S1_WIDE))
+                } else {
+                    PAIR_S1.get_or_init(|| pair(&tables::S1))
+                }
+            })
         });
         let mut plan = Plan {
             lut,
@@ -365,6 +385,11 @@ impl Plan {
             pass,
             win: (0, 0),
             lanes,
+            lanes_min: if cfg!(target_arch = "x86") {
+                LANES_MIN_X86[usize::from(cutoff == Cutoff::Wide)]
+            } else {
+                LANES_MIN
+            },
         };
         plan.win = plan.byte_range((0, 2), false);
         Ok(plan)
@@ -540,7 +565,7 @@ impl Plan {
 
     /// Sizes `c` for every pass that can use it, so that later passes allocate nothing.
     pub(crate) fn reserve(&self, c: &mut Carry) {
-        if self.lanes.is_none() || c.reserved {
+        if !matches!(self.lanes, Some(Some(_))) || c.reserved {
             return;
         }
         c.reserved = true;
@@ -562,7 +587,7 @@ impl Plan {
         sc: &mut Scratch,
         carry: Option<&mut Carry>,
     ) {
-        if let Some(pair) = self.lanes.filter(|_| n >= LANES_MIN) {
+        if let Some(pair) = self.lanes.filter(|_| n >= self.lanes_min) {
             if let Some(c) = carry {
                 c.valid = false;
             }
@@ -590,7 +615,7 @@ impl Plan {
         mut carry: Option<&mut Carry>,
     ) {
         // The carry holds S1 values of the paired tables only.
-        if self.lanes.is_none() {
+        if !matches!(self.lanes, Some(Some(_))) {
             if let Some(c) = carry.take() {
                 c.valid = false;
             }
@@ -611,13 +636,13 @@ impl Plan {
             let n1 = levels[0].1.div_ceil(PAD) * PAD;
             a.resize(n1, 0.0);
             match self.lanes {
-                Some(pair) => {
+                Some(Some(pair)) => {
                     let from = carry
                         .as_deref()
                         .map_or(0, |c| c.reuse(bytes, p0, self.lut.bytes, false, a, &mut []));
                     pair.run(self.lut, &bytes[from..], &mut lanes::Flat(&mut a[from..]));
                 }
-                None => dispatch::s1(self.isa, self.lut, bytes, 0, 1, a),
+                _ => dispatch::s1(self.isa, self.lut, bytes, 0, 1, a),
             }
         }
         for (k, op) in self.ops.iter().enumerate() {
@@ -636,7 +661,7 @@ impl Plan {
                     let np = n_out.div_ceil(PAD) * PAD;
                     let (de, dodd) = (m - 2 * e, m + 1 - 2 * o);
                     b.resize(np, 0.0);
-                    if let (0, Some(pair)) = (k, self.lanes) {
+                    if let (0, Some(Some(pair))) = (k, self.lanes) {
                         // S1 at even and odd bytes in one set of lookups per pair, as two
                         // streams that the stage reads from its offsets.
                         let half = levels[0].1.div_ceil(PAD) * PAD / 2;
@@ -694,7 +719,7 @@ impl Plan {
     /// `pass_run` would.
     fn pass_lanes(
         &self,
-        pair: &lanes::S1Pair,
+        pair: Option<&lanes::S1Pair>,
         src: &[u8],
         src0: i64,
         o0: i64,
@@ -883,19 +908,20 @@ mod tests {
             let plan = Plan::new(rate, cutoff).unwrap();
             let s1 = exact::s1_bound(s1_half(cutoff));
             assert!(s1 < i32::MAX as u128, "S1 bound {s1}");
-            // The tables themselves stay within the bound.
-            let worst: u128 = plan
-                .lut
-                .tables
-                .iter()
-                .map(|t| {
-                    t.iter()
-                        .map(|e| u128::from(e.unsigned_abs()))
-                        .max()
-                        .unwrap()
-                })
-                .sum();
-            assert!(worst <= s1, "{rate:?} {cutoff:?}: tables {worst} > {s1}");
+            // The tables themselves stay within the bound, in both layouts.
+            for layout in [S1Layout::Wide, S1Layout::Byte] {
+                let worst: u128 = lut(s1_half(cutoff), layout)
+                    .table_slices()
+                    .iter()
+                    .map(|t| {
+                        t.iter()
+                            .map(|e| u128::from(e.unsigned_abs()))
+                            .max()
+                            .unwrap()
+                    })
+                    .sum();
+                assert!(worst <= s1, "{rate:?} {cutoff:?}: tables {worst} > {s1}");
+            }
             let mut x = s1;
             for op in &plan.ops {
                 let (sum, out) = exact::stage(op, x)
@@ -943,30 +969,35 @@ mod tests {
                 let plan = with_simd_level(level, || Plan::new(rate, cutoff))
                     .unwrap()
                     .unwrap();
-                let mut lanes = plan.clone();
-                lanes.lanes = Some(if cutoff == Cutoff::Wide {
+                let paired = Some(if cutoff == Cutoff::Wide {
                     PAIR_S1_WIDE.get_or_init(|| pair(&tables::S1_WIDE))
                 } else {
                     PAIR_S1.get_or_init(|| pair(&tables::S1))
                 });
                 let mut ordered = plan.clone();
                 ordered.lanes = None;
-                for (o0, n) in [
-                    (0, LANES_MIN),
-                    (-200, 1176 * 6),
-                    (64, 2050),
-                    (10, 4096),
-                    (-200, 1176),
-                    (8, 2),
-                ] {
-                    let n = n.min(plan.pass);
-                    let (mut a, mut b) = (Scratch::default(), Scratch::default());
-                    ordered.pass_run(&bytes, 300, o0, n, &mut a);
-                    lanes.pass_run(&bytes, 300, o0, n, &mut b);
-                    assert!(
-                        a.a[..n] == b.a[..n],
-                        "{level:?} {rate:?} {cutoff:?} o0 {o0} n {n}"
-                    );
+                // With and without the paired S1 tables.
+                for s1 in [paired, None] {
+                    let mut lanes = plan.clone();
+                    lanes.lanes = Some(s1);
+                    for (o0, n) in [
+                        (0, LANES_MIN),
+                        (-200, 1176 * 6),
+                        (64, 2050),
+                        (10, 4096),
+                        (-200, 1176),
+                        (8, 2),
+                    ] {
+                        let n = n.min(plan.pass);
+                        let (mut a, mut b) = (Scratch::default(), Scratch::default());
+                        ordered.pass_run(&bytes, 300, o0, n, &mut a);
+                        lanes.pass_run(&bytes, 300, o0, n, &mut b);
+                        assert!(
+                            a.a[..n] == b.a[..n],
+                            "{level:?} {rate:?} {cutoff:?} paired {} o0 {o0} n {n}",
+                            s1.is_some()
+                        );
+                    }
                 }
             }
         }
@@ -1032,7 +1063,6 @@ mod tests {
             .collect();
         for half in [&tables::S1[..], &tables::S1_WIDE[..]] {
             let reference = byte_tables(half);
-            let chunked = lut(half);
             let b = reference.len();
             for stride in [1, 2] {
                 for start in 0..9 {
@@ -1048,18 +1078,24 @@ mod tests {
                             f64::from(sum)
                         })
                         .collect();
-                    for level in SimdLevel::available() {
+                    for layout in [S1Layout::Wide, S1Layout::Byte] {
+                        let chunked = lut(half, layout);
+                        for level in SimdLevel::available() {
+                            let mut got = vec![0.0; n];
+                            let isa = with_simd_level(level, Isa::current).unwrap();
+                            dispatch::s1(isa, &chunked, &bytes, start, stride, &mut got);
+                            assert!(
+                                got == want,
+                                "{level:?} {layout:?} {b} bytes, stride {stride}, start {start}"
+                            );
+                        }
                         let mut got = vec![0.0; n];
-                        let isa = with_simd_level(level, Isa::current).unwrap();
-                        dispatch::s1(isa, &chunked, &bytes, start, stride, &mut got);
+                        kernel::s1_any(&chunked, &bytes, start, stride, &mut got);
                         assert!(
                             got == want,
-                            "{level:?} {b} bytes, stride {stride}, start {start}"
+                            "any window: {layout:?} {b} bytes, stride {stride}"
                         );
                     }
-                    let mut got = vec![0.0; n];
-                    kernel::s1_any(&chunked, &bytes, start, stride, &mut got);
-                    assert!(got == want, "any window: {b} bytes, stride {stride}");
                 }
             }
         }
@@ -1080,6 +1116,8 @@ mod tests {
             let fma = avx2 && std::arch::is_x86_feature_detected!("fma");
             assert_eq!(levels.contains(&SimdLevel::Avx2), avx2);
             assert_eq!(levels.contains(&SimdLevel::Avx2Fma), fma);
+            let sse2 = cfg!(target_arch = "x86") && std::arch::is_x86_feature_detected!("sse2");
+            assert_eq!(levels.contains(&SimdLevel::Sse2), sse2);
         }
         for &level in &levels {
             let plan = with_simd_level(level, || Plan::new(PcmRate::Hz88200, Cutoff::Standard))

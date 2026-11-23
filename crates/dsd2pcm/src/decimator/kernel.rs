@@ -33,6 +33,11 @@ pub(super) fn to_i32(x: f64) -> i32 {
 /// Outputs per block of the generic kernels: 4 vectors of SSE2, 8 of NEON.
 pub(super) const L: usize = 16;
 
+/// Outputs per block of the generic Fir1 kernel: [`L`], but 8 on 32-bit x86, whose SSE2 has
+/// 8 vector registers instead of 16, so that the sums and a step's operands stay in
+/// registers (as in scarletbook-pcm). Dec2 and Interp2 keep [`L`].
+pub(super) const L_FIR1: usize = if cfg!(target_arch = "x86") { 8 } else { L };
+
 /// The largest block of any instantiation; stage buffers are padded to a multiple of it.
 pub(super) const MAX_L: usize = 32;
 
@@ -52,35 +57,73 @@ impl Mac for Plain {
     }
 }
 
-/// Index bits of the S1 tables.
-pub(super) const S1_BITS: usize = 13;
+/// The layout of the S1 tables: how a window is read and cut into chunks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum S1Layout {
+    /// 64-bit words cut into 13-bit chunks: 5 lookups for S1's 8-byte window.
+    Wide,
+    /// 32-bit words cut into bytes, as in scarletbook-pcm: 8 lookups, but 8 KiB of tables
+    /// for S1's window, which stay in the level-1 cache of small in-order cores (which stall
+    /// on every table read from the level-2 cache), and no 64-bit shifts (a register pair
+    /// and two instructions on 32-bit targets). Used on 32-bit targets at the levels below
+    /// AVX2.
+    Byte,
+}
 
-/// One S1 table: a partial sum for each value of a chunk of up to [`S1_BITS`] samples.
-pub(super) type S1Table = [i32; 1 << S1_BITS];
+impl S1Layout {
+    /// Bytes per word.
+    const fn word(self) -> usize {
+        match self {
+            S1Layout::Wide => 8,
+            S1Layout::Byte => 4,
+        }
+    }
+
+    /// Index bits per chunk.
+    const fn bits(self) -> usize {
+        match self {
+            S1Layout::Wide => WIDE_BITS,
+            S1Layout::Byte => 8,
+        }
+    }
+}
+
+/// Index bits of the [`S1Layout::Wide`] tables.
+const WIDE_BITS: usize = 13;
+
+/// The S1 tables of one layout: a partial sum for each value of a chunk.
+#[derive(Debug)]
+pub(super) enum S1Tables {
+    Wide(Vec<[i32; 1 << WIDE_BITS]>),
+    Byte(Vec<[i32; 256]>),
+}
 
 /// The S1 lookup tables of a window of `bytes` bytes. The window is read as little-endian
-/// 64-bit words (the last one may be shorter), and each word is cut, from its low bit up,
-/// into chunks of [`S1_BITS`] bits (the last chunk of a word may be shorter). Table `k` maps
-/// the value of chunk `k` to the sum over its samples of `+tap` for a 1 bit and `-tap` for a
-/// 0 bit. scarletbook-pcm uses one table per byte; wider chunks need fewer lookups, and the
+/// words (the last one may be shorter), and each word is cut, from its low bit up, into
+/// chunks (the last chunk of a word may be shorter), as the layout says. Table `k` maps the
+/// value of chunk `k` to the sum over its samples of `+tap` for a 1 bit and `-tap` for a 0
+/// bit. scarletbook-pcm uses one table per byte; wider chunks need fewer lookups, and the
 /// sum is the same integer: no partial sum wraps (the sum of the absolute taps is below
 /// 2^31, `super::tests`).
 #[derive(Debug)]
 pub(super) struct S1Lut {
     /// Bytes per window.
     pub bytes: usize,
+    /// The layout.
+    pub layout: S1Layout,
     /// One table per chunk, in window order.
-    pub tables: Vec<S1Table>,
+    pub tables: S1Tables,
 }
 
 impl S1Lut {
     /// The chunks of a window of `bytes` bytes: (first bit in the window, bits).
-    pub fn chunks(bytes: usize) -> Vec<(usize, usize)> {
+    pub fn chunks(bytes: usize, layout: S1Layout) -> Vec<(usize, usize)> {
+        let (word, cut) = (layout.word(), layout.bits());
         let mut v = Vec::new();
-        for w in (0..bytes).step_by(8) {
-            let bits = 8 * (bytes - w).min(8);
-            for s in (0..bits).step_by(S1_BITS) {
-                v.push((8 * w + s, (bits - s).min(S1_BITS)));
+        for w in (0..bytes).step_by(word) {
+            let bits = 8 * (bytes - w).min(word);
+            for s in (0..bits).step_by(cut) {
+                v.push((8 * w + s, (bits - s).min(cut)));
             }
         }
         v
@@ -88,29 +131,52 @@ impl S1Lut {
 
     /// The tables of a window of `bytes` bytes whose sample `i` (0 .. 8 `bytes`, in time
     /// order: bit 7 of byte 0 first) has the tap `tap(i)`.
-    pub fn new(bytes: usize, tap: impl Fn(usize) -> i32) -> S1Lut {
-        let tables = S1Lut::chunks(bytes)
-            .into_iter()
-            .map(|(first, bits)| {
-                let mut t = [0i32; 1 << S1_BITS];
-                for (v, e) in t.iter_mut().enumerate() {
-                    *e = (0..bits)
-                        .map(|b| {
-                            // Bit `p` of byte `j` of the word is sample `8 j + 7 - p`.
-                            let pos = first + b;
-                            let h = tap(8 * (pos / 8) + 7 - pos % 8);
-                            if (v >> b) & 1 == 1 {
-                                h
-                            } else {
-                                -h
-                            }
-                        })
-                        .sum();
-                }
-                t
-            })
-            .collect();
-        S1Lut { bytes, tables }
+    pub fn new(bytes: usize, layout: S1Layout, tap: impl Fn(usize) -> i32) -> S1Lut {
+        fn build<const N: usize>(
+            chunks: Vec<(usize, usize)>,
+            tap: impl Fn(usize) -> i32,
+        ) -> Vec<[i32; N]> {
+            chunks
+                .into_iter()
+                .map(|(first, bits)| {
+                    let mut t = [0i32; N];
+                    for (v, e) in t.iter_mut().enumerate() {
+                        *e = (0..bits)
+                            .map(|b| {
+                                // Bit `p` of byte `j` of the word is sample `8 j + 7 - p`.
+                                let pos = first + b;
+                                let h = tap(8 * (pos / 8) + 7 - pos % 8);
+                                if (v >> b) & 1 == 1 {
+                                    h
+                                } else {
+                                    -h
+                                }
+                            })
+                            .sum();
+                    }
+                    t
+                })
+                .collect()
+        }
+        let chunks = S1Lut::chunks(bytes, layout);
+        let tables = match layout {
+            S1Layout::Wide => S1Tables::Wide(build(chunks, tap)),
+            S1Layout::Byte => S1Tables::Byte(build(chunks, tap)),
+        };
+        S1Lut {
+            bytes,
+            layout,
+            tables,
+        }
+    }
+
+    /// The tables, each as a slice.
+    #[cfg(test)]
+    pub fn table_slices(&self) -> Vec<&[i32]> {
+        match &self.tables {
+            S1Tables::Wide(t) => t.iter().map(|t| &t[..]).collect(),
+            S1Tables::Byte(t) => t.iter().map(|t| &t[..]).collect(),
+        }
     }
 }
 
@@ -123,42 +189,88 @@ where
 {
     // S1's 8-byte window and the wide filter's 12-byte one, with a constant table count, so
     // that the loops unroll.
-    const T8: usize = s1_tables(8);
-    const T12: usize = s1_tables(12);
-    if let (8, Ok(t)) = (lut.bytes, <&[S1Table; T8]>::try_from(&lut.tables[..])) {
-        s1_n::<8, T8, _>(t, bytes, start, stride, out)
-    } else if let (12, Ok(t)) = (lut.bytes, <&[S1Table; T12]>::try_from(&lut.tables[..])) {
-        s1_n::<12, T12, _>(t, bytes, start, stride, out)
-    } else {
-        s1_any(lut, bytes, start, stride, out)
+    const W8: usize = s1_tables(8, S1Layout::Wide);
+    const W12: usize = s1_tables(12, S1Layout::Wide);
+    const B8: usize = s1_tables(8, S1Layout::Byte);
+    const B12: usize = s1_tables(12, S1Layout::Byte);
+    match (&lut.tables, lut.bytes) {
+        (S1Tables::Wide(t), 8) if t.len() == W8 => {
+            s1_n::<u64, WIDE_BITS, { 1 << WIDE_BITS }, 8, W8, _>(
+                t[..].try_into().unwrap(),
+                bytes,
+                start,
+                stride,
+                out,
+            )
+        }
+        (S1Tables::Wide(t), 12) if t.len() == W12 => {
+            s1_n::<u64, WIDE_BITS, { 1 << WIDE_BITS }, 12, W12, _>(
+                t[..].try_into().unwrap(),
+                bytes,
+                start,
+                stride,
+                out,
+            )
+        }
+        (S1Tables::Byte(t), 8) if t.len() == B8 => {
+            s1_n::<u32, 8, 256, 8, B8, _>(t[..].try_into().unwrap(), bytes, start, stride, out)
+        }
+        (S1Tables::Byte(t), 12) if t.len() == B12 => {
+            s1_n::<u32, 8, 256, 12, B12, _>(t[..].try_into().unwrap(), bytes, start, stride, out)
+        }
+        _ => s1_any(lut, bytes, start, stride, out),
     }
 }
 
 /// The number of S1 tables (chunks) of a window of `bytes` bytes.
-const fn s1_tables(bytes: usize) -> usize {
+const fn s1_tables(bytes: usize, layout: S1Layout) -> usize {
+    let (word, cut) = (layout.word(), layout.bits());
     let mut n = 0;
     let mut w = 0;
     while w < bytes {
-        let bits = 8 * if bytes - w < 8 { bytes - w } else { 8 };
-        n += bits.div_ceil(S1_BITS);
-        w += 8;
+        let bits = 8 * if bytes - w < word { bytes - w } else { word };
+        n += bits.div_ceil(cut);
+        w += word;
     }
     n
 }
 
-/// `u64` little-endian word from up to 8 bytes, zero above them.
-#[inline(always)]
-fn load(part: &[u8]) -> u64 {
-    let mut w = [0u8; 8];
-    w[..part.len()].copy_from_slice(part);
-    u64::from_le_bytes(w)
+/// A machine word that S1 reads a window in.
+trait S1Word: Copy {
+    /// Its size in bytes.
+    const BYTES: usize;
+    /// `part` (at most `BYTES` bytes) as a little-endian word, zero above it.
+    fn load(part: &[u8]) -> Self;
+    /// The word shifted right by `s` bits, as an index.
+    fn index(self, s: usize) -> usize;
 }
 
-/// [`s1`] with a window of `B` bytes and `T` tables: each window is read as 64-bit words
-/// and cut into chunks, with the loops unrolled.
+macro_rules! s1_word {
+    ($t:ty) => {
+        impl S1Word for $t {
+            const BYTES: usize = std::mem::size_of::<$t>();
+            #[inline(always)]
+            fn load(part: &[u8]) -> Self {
+                let mut w = [0u8; std::mem::size_of::<$t>()];
+                w[..part.len()].copy_from_slice(part);
+                <$t>::from_le_bytes(w)
+            }
+            #[inline(always)]
+            fn index(self, s: usize) -> usize {
+                (self >> s) as usize
+            }
+        }
+    };
+}
+s1_word!(u32);
+s1_word!(u64);
+
+/// [`s1`] with a window of `B` bytes and `T` tables of `BITS`-bit chunks (`N` = 2^`BITS`
+/// entries) of words `W`: each
+/// window is read as words and cut into chunks, with the loops unrolled.
 #[inline(always)]
-fn s1_n<'a, const B: usize, const T: usize, O>(
-    t: &[S1Table; T],
+fn s1_n<'a, W: S1Word, const BITS: usize, const N: usize, const B: usize, const T: usize, O>(
+    t: &[[i32; N]; T],
     bytes: &[u8],
     start: usize,
     stride: usize,
@@ -177,14 +289,14 @@ fn s1_n<'a, const B: usize, const T: usize, O>(
     for (o, w) in out.zip(windows) {
         let mut sum = 0i32;
         let mut k = 0;
-        for part in w.chunks(8) {
-            let word = load(part);
+        for part in w.chunks(W::BYTES) {
+            let word = W::load(part);
             let mut s = 0;
             while s < 8 * part.len() {
-                let i = ((word >> s) as usize) & ((1 << S1_BITS) - 1);
+                let i = word.index(s) & (N - 1);
                 sum = sum.wrapping_add(t[k][i]);
                 k += 1;
-                s += S1_BITS;
+                s += BITS;
             }
         }
         *o = f64::from(sum);
@@ -199,16 +311,22 @@ pub(super) fn s1_any<'a>(
     stride: usize,
     out: impl IntoIterator<Item = &'a mut f64>,
 ) {
-    let chunks = S1Lut::chunks(lut.bytes);
-    for (k, o) in out.into_iter().enumerate() {
-        let w = &bytes[start + stride * k..][..lut.bytes];
+    let chunks = S1Lut::chunks(lut.bytes, lut.layout);
+    let word = lut.layout.word();
+    let entry = |k: usize, i: usize| match &lut.tables {
+        S1Tables::Wide(t) => t[k][i],
+        S1Tables::Byte(t) => t[k][i],
+    };
+    for (n, o) in out.into_iter().enumerate() {
+        let w = &bytes[start + stride * n..][..lut.bytes];
         let sum = chunks
             .iter()
-            .zip(&lut.tables)
-            .fold(0i32, |acc, (&(first, bits), t)| {
-                let word = load(&w[first / 64 * 8..(first / 64 * 8 + 8).min(w.len())]);
-                let i = ((word >> (first % 64)) as usize) & ((1 << bits) - 1);
-                acc.wrapping_add(t[i])
+            .enumerate()
+            .fold(0i32, |acc, (k, &(first, bits))| {
+                let at = first / (8 * word) * word;
+                let v = u64::load(&w[at..(at + word).min(w.len())]);
+                let i = (v.index(first % (8 * word))) & ((1 << bits) - 1);
+                acc.wrapping_add(entry(k, i))
             });
         *o = f64::from(sum);
     }
