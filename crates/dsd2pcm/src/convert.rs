@@ -246,14 +246,14 @@ pub fn dsd64_to_pcm_with<W: Write + Seek>(
         let o0 = done as i64;
         // At the end of the input, the rest is idle: every remaining output is ready.
         let ready = if eof {
-            ((n_out - done) as usize).next_multiple_of(2)
+            left(n_out, done).next_multiple_of(2)
         } else {
             plan.ready(o0, end)
         };
         if ready == 0 {
             continue;
         }
-        let keep = ((n_out - done) as usize).min(ready);
+        let keep = left(n_out, done).min(ready);
         // Pieces: an even number of outputs each, about PIECE bytes of input, each writing
         // its samples straight into its part of `q` (channel `c` at `c keep ..`).
         let piece = ((PIECE / plan_k(rate)) as usize).max(2);
@@ -296,6 +296,12 @@ pub fn dsd64_to_pcm_with<W: Write + Seek>(
         out_samples: n_out,
         clipped,
     })
+}
+
+/// Outputs still to write, saturated to an even `usize` (on 32-bit targets a plain cast
+/// could truncate the count to 0).
+fn left(n_out: u64, done: u64) -> usize {
+    usize::try_from(n_out - done).unwrap_or(usize::MAX - 1)
 }
 
 /// Calls the hook at a block boundary of a conversion driver: [`Error::Cancelled`] on

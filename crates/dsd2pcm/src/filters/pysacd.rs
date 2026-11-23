@@ -464,7 +464,8 @@ pub(crate) fn dsd64_to_pcm<W: Write + Seek>(
         if stop <= done {
             continue;
         }
-        let keep = (stop - done) as usize;
+        let keep = usize::try_from(stop - done)
+            .map_err(|_| Error::Format("input too long for this platform".into()))?;
         bytes.resize(keep * ch * 3, 0);
         let mut items = Vec::new();
         let mut rest = &mut bytes[..];

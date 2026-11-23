@@ -7,17 +7,26 @@
 //! sample is the least significant bit of each byte.
 
 use crate::error::{format_err, unsupported, Result};
-use crate::io::{check_dsd_rate, le_u32, le_u64, read_exact_arr, skip, DsdInfo, DsdRead, DsdWrite};
+use crate::io::{
+    check_dsd_rate, le_u32, le_u64, read_exact_arr, seek_to, skip, DsdInfo, DsdRead, DsdWrite,
+};
 use std::io::{Read, Seek, SeekFrom, Write};
 
 /// Block size per channel that this writer uses (the only value the specification allows).
 pub const BLOCK_SIZE: usize = 4096;
 /// Largest metadata block carried over from the input (larger tags are dropped).
 pub const MAX_METADATA: u64 = 16 << 20;
+/// DSD idle (silence) pattern, MSB-first.
+const IDLE: u8 = 0x69;
 /// Largest block size accepted from a reader.
 const MAX_BLOCK: u32 = 1 << 20;
 
 /// DSF reader over any seekable byte source.
+///
+/// When the sample count is not a multiple of 8, the bits of the last byte past
+/// [`DsdInfo::samples`] are padding; the reader delivers them as the bits of the idle
+/// pattern `0x69` at those positions, whatever the file holds, so the padding converts
+/// as silence.
 #[derive(Debug)]
 pub struct DsfReader<R> {
     r: R,
@@ -114,10 +123,10 @@ impl<R: Read + Seek> DsfReader<R> {
         {
             let len = file_len - meta_ptr;
             if len <= MAX_METADATA {
-                r.seek(SeekFrom::Start(meta_ptr))?;
+                seek_to(&mut r, meta_ptr)?;
                 let mut m = vec![0u8; len as usize];
                 r.read_exact(&mut m)?;
-                r.seek(SeekFrom::Start(data_start))?;
+                seek_to(&mut r, data_start)?;
                 Some(m)
             } else {
                 None
@@ -183,6 +192,19 @@ impl<R: Read + Seek> DsdRead for DsfReader<R> {
             }
         }
         self.remaining -= deliver as u64;
+        if self.remaining == 0 {
+            // Bits past `samples` in the last byte are padding, often zeros, which decode
+            // as a full-scale step. Set them to the idle pattern 0x69's bits instead.
+            let pad = (self.info.samples.div_ceil(8) * 8 - self.info.samples) as u32;
+            if pad > 0 {
+                let mask = ((1u16 << pad) - 1) as u8;
+                for o in out.iter_mut() {
+                    if let Some(last) = o.last_mut() {
+                        *last = (*last & !mask) | (IDLE & mask);
+                    }
+                }
+            }
+        }
         Ok(deliver)
     }
 
@@ -296,6 +318,10 @@ impl<W: Write + Seek> DsdWrite for DsfWriter<W> {
         self.flush_blocks(false)
     }
 
+    /// Pads the last block with zero bytes and patches the headers. When `samples` is not a
+    /// multiple of 8, the bits of the last byte past `samples` are written as the caller
+    /// gave them; set them to the idle pattern `0x69`'s bits at those positions, as
+    /// [`DsfReader`] delivers them.
     fn finish(&mut self, samples: u64) -> Result<()> {
         if self.finished {
             return Ok(());

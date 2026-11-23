@@ -50,12 +50,18 @@ fn dsf_round_trip_all_rates_and_channels() {
                 (i.channels as usize, i.sample_rate, i.samples),
                 (ch, rate, samples)
             );
+            // The 3 padding bits of the last byte are delivered as 0x69's.
+            let mut want = data.clone();
+            for c in &mut want {
+                let last = c.last_mut().unwrap();
+                *last = (*last & !0b111) | (0x69 & 0b111);
+            }
             for max in [1, 5000, 1 << 20] {
                 let mut r2 =
                     DsfReader::new(Cursor::new(dsf_bytes(&data, samples, rate, None))).unwrap();
-                assert_eq!(read_all(&mut r2, max), data);
+                assert_eq!(read_all(&mut r2, max), want);
             }
-            assert_eq!(read_all(&mut r, 4096), data);
+            assert_eq!(read_all(&mut r, 4096), want);
         }
     }
 }
@@ -418,5 +424,37 @@ fn wav_header_len_matches_the_writer() {
                 header_len(format, ch)
             );
         }
+    }
+}
+
+/// A source that declares 2^37 samples (2^32 outputs at 88.2 kHz, a count a 32-bit `usize`
+/// truncates to 0) and ends after 1 MiB per channel.
+struct HugeShort(bool);
+
+impl DsdRead for HugeShort {
+    fn info(&self) -> dsd2pcm::io::DsdInfo {
+        dsd2pcm::io::DsdInfo {
+            channels: 1,
+            sample_rate: 2_822_400,
+            samples: 1 << 37,
+        }
+    }
+    fn read_bytes(&mut self, _max: usize, out: &mut [Vec<u8>]) -> dsd2pcm::Result<usize> {
+        if std::mem::replace(&mut self.0, true) {
+            return Ok(0);
+        }
+        out[0].extend(std::iter::repeat_n(0x69, 1 << 20));
+        Ok(1 << 20)
+    }
+}
+
+#[test]
+fn output_counts_past_32_bits_do_not_panic() {
+    for filter in [dsd2pcm::Filter::Default, dsd2pcm::Filter::Pysacd] {
+        let mut wav = WavWriter::new(Cursor::new(Vec::new()), WavFormat::I24, 1, 88_200).unwrap();
+        let mut opts = dsd2pcm::PcmOptions::new(dsd2pcm::PcmRate::Hz88200);
+        opts.filter = filter;
+        let r = dsd2pcm::convert::dsd64_to_pcm(Box::new(HugeShort(false)), &mut wav, &opts);
+        assert!(matches!(r, Err(Error::Format(_))), "{filter:?}: {r:?}");
     }
 }
