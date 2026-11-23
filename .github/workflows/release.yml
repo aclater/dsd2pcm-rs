@@ -466,7 +466,11 @@ jobs:
           stamp=$(date -r "$(git log -1 --format=%ct)" +%Y%m%d%H%M.%S)
           for name in $NAMES; do
             out="$RUNNER_TEMP/out/$name"
-            target=$(case "$name" in aarch64-macos) echo aarch64-apple-darwin ;; x86_64-macos) echo x86_64-apple-darwin ;; esac)
+            # Not a case inside $( ): bash 3.2 (macOS's /bin/bash) cannot parse that.
+            case "$name" in
+              aarch64-macos) target=aarch64-apple-darwin ;;
+              x86_64-macos) target=x86_64-apple-darwin ;;
+            esac
             pkg="dsd2pcm-$VERSION-$name"
             mkdir -p "dist/$name/$pkg"
             install -m 0755 "$out/dsd2pcm" "dist/$name/$pkg/"
