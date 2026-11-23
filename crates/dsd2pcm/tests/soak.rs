@@ -412,13 +412,13 @@ fn soak() {
         errors: 0,
     };
     let base_threads = threads();
-    let mut rss = Vec::with_capacity(iterations);
+    // Written before the run, so its pages do not add to the resident set on the way.
+    let mut rss = vec![0u64; iterations];
+    let have_rss = rss_kib().is_some();
     let t0 = Instant::now();
-    for i in 0..iterations {
+    for (i, r) in rss.iter_mut().enumerate() {
         iteration(i, &mut rng, &mut reused, &tmp, base_threads, &mut st);
-        if let Some(k) = rss_kib() {
-            rss.push(k);
-        }
+        *r = rss_kib().unwrap_or(0);
     }
     std::fs::remove_dir_all(&tmp).unwrap();
     let secs = t0.elapsed().as_secs_f64();
@@ -438,7 +438,7 @@ fn soak() {
             threads().unwrap_or(0)
         );
     }
-    if rss.len() == iterations {
+    if have_rss {
         let deciles: Vec<String> = (1..=10)
             .map(|d| format!("{}", rss[d * iterations / 10 - 1] / 1024))
             .collect();
@@ -446,12 +446,16 @@ fn soak() {
         let half = iterations / 2;
         let plateau = *rss[warm..half].iter().max().unwrap();
         let late = *rss[half..].iter().max().unwrap();
+        let mut sorted = rss[half..].to_vec();
+        sorted.sort_unstable();
         let bound = plateau + (plateau / 20).max(16 * 1024);
         println!(
-            "soak: RSS MiB at each tenth of the run: {}; plateau (20-50 %) {} MiB, \
-             second-half max {} MiB, bound {} MiB",
+            "soak: RSS MiB at each tenth of the run: {}; plateau (20-50 %) {} MiB; second half \
+             min {} median {} max {} MiB; bound {} MiB",
             deciles.join(" "),
             plateau / 1024,
+            sorted[0] / 1024,
+            sorted[sorted.len() / 2] / 1024,
             late / 1024,
             bound / 1024
         );
