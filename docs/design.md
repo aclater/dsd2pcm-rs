@@ -144,7 +144,8 @@ run property the bytes equal one call.
 - The FIR kernels compute blocks of independent outputs (16 generic, 32 with AVX2), so
   the compiler puts them in vector lanes; each output keeps its own sum in tap order.
 - Lanes (`decimator/lanes.rs`; x86-64 with AVX2 and FMA, plans whose every stage is proven
-  exact, passes of at least 256 outputs). The ordered kernels load unaligned input
+  exact, passes of at least 2048 outputs: below that, each run's own filter margins cost
+  more than the lanes gain, e.g. one frame at 88.2 kHz). The ordered kernels load unaligned input
   vectors, many of them across cache lines. A pass in lanes splits its outputs into 4 runs
   of consecutive outputs (each a whole number of blocks; the last runs move back to end
   with the padded pass, so runs may overlap) and computes each run as the ordered pass
