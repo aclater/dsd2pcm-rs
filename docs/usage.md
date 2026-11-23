@@ -39,6 +39,19 @@ bit-exact with pysacd's reference build on every CPU and SIMD level; 88.2 and 17
 only, with a fixed response (leave `--cutoff` at the default). The default filter and its
 output are unchanged.
 
+## Command line
+
+```
+dsd2pcm IN OUT [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread]
+```
+
+The `dsd2pcm` tool converts one DSF or DFF file (DSD64) to a 24-bit WAV file; WAV and FLAC
+input is read by the library only. Defaults: `--rate 176400 --cutoff 40 --gain 0
+--filter default`, on all cores (`--single-thread`: on the calling thread only). It prints
+the rates, the length of the audio, the time taken and the clipped samples, in all and per
+channel. Exit status: 0 on success, 1 when the conversion fails, 2 for a usage error.
+`--help` prints the usage.
+
 ## Library
 
 As a library, `dsd2pcm::frames::Converter` converts Super Audio CD frames (channels

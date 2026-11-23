@@ -11,6 +11,10 @@
 - x86_64 without AVX2 (e.g. Celeron and Pentium J and N series of NAS units): the `sse2`
   level now runs there too, where the generic level ran at 0.6x to 0.9x the speed of
   scarletbook-pcm 0.7.0 ([performance](docs/performance.md)). Output bytes unchanged.
+- Command line: `--help` prints the usage to standard output and exits with status 0 (it
+  exited with 2); the usage explains `--single-thread`.
+- Docs: checked against the code and the 0.1.1 release (commands, file names, versions);
+  a security policy (`SECURITY.md`).
 
 ## 0.1.1
 

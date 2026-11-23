@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/aclater/dsd2pcm-rs/main/docs/assets/icon-256.png" alt="" width="96">
+
 # dsd2pcm-rs
 
 [![CI](https://github.com/aclater/dsd2pcm-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/aclater/dsd2pcm-rs/actions/workflows/ci.yml)
@@ -18,7 +20,7 @@ reproduces ([performance](docs/performance.md)).
 | System | How | Guide |
 |---|---|---|
 | Linux | Release builds of the tool and the C library for x86_64, aarch64 and 32-bit x86, glibc 2.17 or later; `cargo install dsd2pcm-cli` | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
-| macOS 11 or later | Release builds for Apple silicon (tool and C library), signed and notarized | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
+| macOS 11 or later | Release builds for Apple silicon (tool and C library), signed and notarised | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
 | Windows 10 and 11, x64 | Release builds (tool and C library, C runtime linked in). Not code-signed | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
 | Any Rust target | The `dsd2pcm` crate | [docs.rs](https://docs.rs/dsd2pcm) |
 
@@ -30,9 +32,9 @@ Intel Core i9-13900H (P- and E-cores) and an AMD Ryzen 9 3950X.
 On Linux x86_64, with a DSF file named `01 - Track.dsf` in the current directory:
 
 ```
-curl -LO https://github.com/aclater/dsd2pcm-rs/releases/download/v0.1.0/dsd2pcm-0.1.0-x86_64-linux.tar.gz
-tar xzf dsd2pcm-0.1.0-x86_64-linux.tar.gz
-./dsd2pcm-0.1.0-x86_64-linux/dsd2pcm "01 - Track.dsf" "01 - Track.wav"
+curl -LO https://github.com/aclater/dsd2pcm-rs/releases/download/v0.1.1/dsd2pcm-0.1.1-x86_64-linux.tar.gz
+tar xzf dsd2pcm-0.1.1-x86_64-linux.tar.gz
+./dsd2pcm-0.1.1-x86_64-linux/dsd2pcm "01 - Track.dsf" "01 - Track.wav"
 ```
 
 This writes a 176.4 kHz, 24-bit WAV and prints the duration, the speed and the number of
@@ -48,6 +50,7 @@ Other platforms and options: [docs/usage.md](docs/usage.md).
 - [Changelog](CHANGELOG.md) · [Plan](docs/plan.md)
 - [Development](docs/development.md) · [Fuzzing](docs/fuzzing.md) · [Releases](docs/release.md)
 - [Provenance](PROVENANCE.md) · [Rules for contributors](AGENTS.md)
+- [Security policy](SECURITY.md): supported versions and how to report a vulnerability
 
 ## Licence and credits
 
