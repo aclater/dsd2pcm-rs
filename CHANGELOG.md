@@ -11,8 +11,8 @@
   a security policy (`SECURITY.md`).
 - Docs: [PCM quality](docs/pcm-quality.md), the measured audio quality of every filter and
   rate (frequency response, aliasing, ringing, noise, ultrasonic noise, headroom, an
-  RMAA-style summary, the pysacd preset and scarletbook-pcm 0.7.0 compared), with the
-  measurement scripts in `tools/quality`.
+  RMAA-style summary; the pysacd preset, scarletbook-pcm 0.7.0 and the foobar2000 SACD
+  plug-in compared), with the measurement scripts in `tools/quality`.
 
 ## 0.1.1
 

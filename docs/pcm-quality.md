@@ -29,6 +29,7 @@ At every rate and filter:
 - **DSD silence converts to exact digital zero**; the polarity is preserved; identical channels give identical samples.
 - **No clipping at 0 dB gain** up to +4.5 dB SACD, past the +3.1 dB SACD peak level the Scarlet Book allows.
 - **24-bit output, rounded, not dithered.** The rounding noise (-153 dBFS in 20 Hz-20 kHz at 176.4 kHz) is 30 dB below the DSD64 test signal's own noise.
+- **Against the foobar2000 SACD plug-in** (2.0.27): equal in the audio band within 0.6 dB, the plug-in slightly quieter; dsd2pcm keeps DSD silence and timing exact and passes far less ultrasonic noise than the plug-in's default mode ([details](#comparisons)).
 
 The measured figures are limited by the test signal, not by the converter: THD+N, noise and
 dynamic range are within 0.1 to 0.6 dB of what the DSD itself contains, except the wide
@@ -435,10 +436,96 @@ command-line tool, run as a black box) has no PCM output: it writes DSF, DSDIFF 
 image (`-s`, `-p`, `-e`, `-I`) and nothing else, so there is no PCM of its own to compare.
 Its DSF output is the input of a decoder such as dsd2pcm, not a competitor to it.
 
-**The foobar2000 SACD plug-in.** To follow. The same DSD64, DSD128 and DSD256 test files
-are being converted with the foobar2000 SACD plug-in (foo_input_sacd) on Windows, in each of its conversion modes,
-and will be measured as a black box with the same scripts; the results will be added here with
-the plug-in's version and settings.
+**The foobar2000 SACD plug-in.** foo_input_sacd 2.0.27 (the current release, SHA-256 of
+its download equal to the one SourceForge publishes) in foobar2000 2.26.3 x64, on Windows 11
+in a virtual machine. The plug-in was run as a black box: the same DSF test files went in,
+and only its output files were measured, with the same scripts. Settings: output PCM,
+volume 0 dB (the plug-in's default is +6 dB), LFE 0, decimation Auto, no ramp; foobar2000's
+converter writing 32-bit float WAV, no dither, no DSP, no ReplayGain, decode postprocessing
+off. Each of its conversion modes was run at 352.8 kHz: Multistage (the default) and
+Direct with a 30 kHz low-pass, each in 32-bit and 64-bit floating point, and Installable
+FIR with each of the four filter files it ships (30, 40, 50 and 60 kHz, 641 taps); the
+default mode also at 176.4 kHz. The 32-bit and 64-bit float variants measured the same
+except where noted, so the tables show one of each.
+
+**Levels match.** At volume 0 dB the plug-in maps 100 % modulation to full scale, as
+dsd2pcm does: 0 dB SACD reads -6.02 dBFS in both, so no level correction was applied. Its
+default of +6 dB would put 0 dB SACD at full scale, where the +3.1 dB SACD peak level clips
+(its output is floating point, so the overs survive in the file but not in a fixed-point
+DAC).
+
+| Decoder and setting | Noise level, dB(A) | Dynamic range, dB(A) | THD, % | THD+N, dB | IMD+N SMPTE, % | IMD CCIF, % | Crosstalk at 1 kHz, dB | Frequency response 20 Hz-20 kHz, dB |
+|---|---:|---:|---:|---:|---:|---:|---|---|
+| dsd2pcm 352.8 kHz, 40 kHz (for reference) | -117.8 | 107.0 | 0.00023 | -106.0 | 0.00059 | 0.00073 | -161.3 | -0.002, +0.003 |
+| foobar2000 SACD: Multistage (32fp), 352.8 kHz (default mode) | -118.2 | 107.1 | 0.00023 | -106.1 | 0.00060 | 0.00074 | -161.6 | -0.001, +0.002 |
+| foobar2000 SACD: Multistage (32fp), 176.4 kHz | -118.2 | 107.1 | 0.00023 | -106.1 | 0.00058 | 0.00083 | -161.5 | -0.001, +0.002 |
+| foobar2000 SACD: Multistage (64fp), 352.8 kHz | -118.2 | 107.1 | 0.00023 | -106.1 | 0.00060 | 0.00074 | -161.6 | -0.001, +0.002 |
+| foobar2000 SACD: Direct (32fp, 30kHz lowpass) | -115.4 | 107.0 | 0.00023 | -106.0 | 0.00060 | 0.00072 | -154.1 | -0.113, +0.000 |
+| foobar2000 SACD: Direct (64fp, 30kHz lowpass) | -115.4 | 107.0 | 0.00023 | -106.0 | 0.00060 | 0.00072 | -154.1 | -0.113, +0.000 |
+| foobar2000 SACD: Installable FIR (64fp), 30 kHz filter | -118.2 | 107.1 | 0.00023 | -106.2 | 0.00060 | 0.00072 | -162.0 | -0.299, +0.000 |
+| foobar2000 SACD: Installable FIR (64fp), 40 kHz filter | -118.2 | 107.1 | 0.00023 | -106.1 | 0.00060 | 0.00074 | -162.0 | -0.001, +0.002 |
+| foobar2000 SACD: Installable FIR (64fp), 50 kHz filter | -118.2 | 107.1 | 0.00023 | -106.1 | 0.00060 | 0.00074 | -162.1 | -0.001, +0.002 |
+| foobar2000 SACD: Installable FIR (64fp), 60 kHz filter | -118.2 | 107.1 | 0.00023 | -106.1 | 0.00060 | 0.00074 | -162.1 | -0.001, +0.002 |
+
+| Mode | 0 dB SACD reads (dBFS) | Noise 20 Hz-20 kHz (dBFS) | Noise above 20 kHz (dBFS) | Peak sample, +3.1 dB SACD tone (dBFS) | DSD silence (0x69) | Ringing above -60 dB, each side (ms) |
+|---|---:|---:|---:|---:|---|---:|
+| dsd2pcm 352.8 kHz, 40 kHz | -6.02 | -121.9 | -70.2 | -2.09 | exact zero | 0.261 |
+| dsd2pcm 352.8 kHz, wide | -6.02 | -118.8 | -50.2 | -1.68 | exact zero | 0.130 |
+| Multistage (32fp), 352.8 kHz (default mode) | -6.02 | -122.5 | -35.1 | -0.87 | not zero: up to -37.3 dBFS | 0.011 |
+| Multistage (32fp), 176.4 kHz | -6.02 | -122.5 | -49.9 | -2.10 | not zero: up to -24.5 dBFS | 0.074 |
+| Multistage (64fp), 352.8 kHz | -6.02 | -122.5 | -35.1 | -0.87 | not zero: up to -26.7 dBFS | 0.011 |
+| Direct (32fp, 30kHz lowpass) | -6.02 | -118.8 | -91.9 | -2.92 | not zero: up to -22.0 dBFS | 0.088 |
+| Direct (64fp, 30kHz lowpass) | -6.02 | -118.8 | -91.9 | -2.92 | not zero: up to -22.0 dBFS | 0.088 |
+| Installable FIR (64fp), 30 kHz filter | -6.02 | -122.6 | -90.6 | -2.92 | not zero: up to -22.0 dBFS | 0.077 |
+| Installable FIR (64fp), 40 kHz filter | -6.02 | -122.5 | -74.7 | -2.90 | not zero: up to -21.9 dBFS | 0.071 |
+| Installable FIR (64fp), 50 kHz filter | -6.02 | -122.5 | -64.6 | -2.86 | not zero: up to -21.5 dBFS | 0.074 |
+| Installable FIR (64fp), 60 kHz filter | -6.02 | -122.5 | -59.1 | -2.73 | not zero: up to -20.7 dBFS | 0.071 |
+
+![foobar2000 modes, modulated silence](assets/quality/foobar-noise.svg)
+
+![foobar2000 modes, impulse](assets/quality/foobar-impulse.svg)
+
+What the numbers say:
+
+- **In the audio band the two are equal within 0.6 dB, and the plug-in is the slightly
+  quieter one.** Its Multistage and Installable FIR modes leave exactly the source's noise
+  (-122.5 dBFS) where dsd2pcm's 110 dB stopband lets 0.6 dB more fold in. THD+N, IMD and
+  dynamic range are the same: all of them are the test signal's.
+- **The default Multistage mode is barely a filter at 352.8 kHz.** It passes DSD64's noise
+  almost unchanged to 176 kHz (-35 dBFS above 20 kHz, against -70 dBFS with dsd2pcm's
+  default), and its impulse response is close to a single sample. That is the most
+  "open" decode possible, and it also means the most ultrasonic noise for the amplifier and
+  the least headroom: a tone at the +3.1 dB SACD peak level gave sample peaks of -0.87 dBFS
+  (-2.09 dBFS with dsd2pcm). At 176.4 kHz it passes the noise up to that rate's Nyquist
+  frequency (-49.9 dBFS above 20 kHz, like dsd2pcm's wide filter).
+- **Direct (30 kHz) folds noise into the band**: -118.8 dBFS in 20 Hz-20 kHz, 3.7 dB above
+  the source, and the response is already -0.11 dB at 20 kHz. Its stopband is visibly
+  shallower than the installable filters' (the noise plot). Archimago found the same mode
+  weak in 2015.
+- **Installable FIR** filters roll off more gently than dsd2pcm's (the "40 kHz" one reaches
+  its stopband only around 60 kHz, see the noise plot) and then go deeper; the 30 kHz one
+  droops by 0.3 dB at 20 kHz.
+- **DSD silence is not digital zero.** A file of DSD silence (`0x69`) gets a short
+  transient in its first samples (up to -22 dBFS, depending on the mode: a click), and the
+  Direct mode leaves a floor of about -117 dBFS on it. dsd2pcm treats the input as continuing with DSD
+  silence before its first byte, so its first samples are exact zero.
+- **The alignment varies from file to file.** Against the DSD timeline (dsd2pcm's output is
+  centred on it by design), the plug-in's output is 0 to 1 samples late on some files and
+  40 to 41 samples later (about 116 µs at 352.8 kHz, 227 µs at 176.4 kHz) on others, in
+  every mode, with the file length unchanged; we did not find what decides it. Both
+  channels move together, so it is inaudible, but files converted from the same DSD do not
+  line up sample for sample.
+- **Higher DSD rates** convert as they should: the plug-in's DSD128 and DSD256 outputs
+  carry 20 dB less in-band noise than DSD64 (below), which dsd2pcm cannot show yet.
+
+| Source | THD+N, 1 kHz at 0 dB SACD (dB) | Noise 20 Hz-20 kHz (dBFS) | Noise above 20 kHz (dBFS) |
+|---|---:|---:|---:|
+| DSD64, foobar2000 Multistage (64fp), 352.8 kHz | -106.1 | -122.5 | -35.1 |
+| DSD128, foobar2000 Multistage (64fp), 352.8 kHz | -135.1 | -141.3 | -49.2 |
+| DSD256, foobar2000 Multistage (64fp), 352.8 kHz | -137.9 | -142.0 | -67.8 |
+| DSD64 source itself | -106.1 | -122.5 | – |
+| DSD128 source itself | -135.6 | -144.3 | – |
+| DSD256 source itself | -139.0 | -144.9 | – |
 
 **"DSD to PCM in a player".** Most players that convert DSD on the fly use the same kind
 of filter: a multistage linear-phase low-pass, often with a cutoff between 24 and 50 kHz,
@@ -516,6 +603,10 @@ venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/t
 venv/bin/python tools/quality/plot.py --filters out/filters.json --results out/results.json --curves out/curves.json --out docs/assets/quality
 venv/bin/python tools/quality/report.py --filters out/filters.json --results out/results.json
 ```
+
+The foobar2000 rows come from WAVs made on Windows as described under
+[comparisons](#comparisons) and copied to `out/dec/foobar/<mode>-<rate>/` before
+`analyse.py`; without them those rows and two charts are left out.
 
 The inputs are generated, not downloaded; with the same versions the DSD files, the
 decoded WAVs and the numbers are identical on every run. Without SoX-DSD the multitone and

@@ -100,6 +100,48 @@ def extras_table(R):
     return "\n".join(out)
 
 
+FOOBAR = [("multistage-32fp-352k8", "Multistage (32fp), 352.8 kHz (default mode)"),
+          ("multistage-32fp-176k4", "Multistage (32fp), 176.4 kHz"),
+          ("multistage-64fp-352k8", "Multistage (64fp), 352.8 kHz"),
+          ("direct-30k-32fp-352k8", "Direct (32fp, 30kHz lowpass)"),
+          ("direct-30k-64fp-352k8", "Direct (64fp, 30kHz lowpass)"),
+          ("installable-fir-30k-64fp-352k8", "Installable FIR (64fp), 30 kHz filter"),
+          ("installable-fir-40k-64fp-352k8", "Installable FIR (64fp), 40 kHz filter"),
+          ("installable-fir-50k-64fp-352k8", "Installable FIR (64fp), 50 kHz filter"),
+          ("installable-fir-60k-64fp-352k8", "Installable FIR (64fp), 60 kHz filter")]
+
+
+def foobar_tables(R):
+    out = ["| Decoder and setting | Noise level, dB(A) | Dynamic range, dB(A) | THD, % | THD+N, dB | IMD+N SMPTE, % | IMD CCIF, % | Crosstalk at 1 kHz, dB | Frequency response 20 Hz-20 kHz, dB |",
+           "|---|---:|---:|---:|---:|---:|---:|---|---|"]
+    out.append(rmaa_rows(R, "dsd2pcm", "352k8-40", label_="dsd2pcm 352.8 kHz, 40 kHz (for reference)"))
+    for m, lab in FOOBAR:
+        out.append(rmaa_rows(R, "foobar", m, label_="foobar2000 SACD: " + lab))
+    out += ["", "| Mode | 0 dB SACD reads (dBFS) | Noise 20 Hz-20 kHz (dBFS) | Noise above 20 kHz (dBFS) | Peak sample, +3.1 dB SACD tone (dBFS) | DSD silence (0x69) | Ringing above -60 dB, each side (ms) |",
+            "|---|---:|---:|---:|---:|---|---:|"]
+    rows = [("dsd2pcm", "352k8-40", "dsd2pcm 352.8 kHz, 40 kHz"), ("dsd2pcm", "352k8-wide", "dsd2pcm 352.8 kHz, wide")] + [("foobar", m, lab) for m, lab in FOOBAR]
+    for dec, m, lab in rows:
+        b = f"{dec}/{m}/"
+        lvl = g(R, b + "sine1k_0-p88-dsd64-ref", "level_dbfs")
+        n = g(R, b + "silence-p88-dsd64-ref", "noise_dbfs")
+        us = g(R, b + "silence-p88-dsd64-ref", "ultrasonic_to_nyquist_dbfs")
+        pk = g(R, b + "sine1k_peak-p96-dsd64-ref", "peak_dbfs")
+        idle = g(R, b + "idle-bits-dsd64-ref", "all_zero")
+        mx = g(R, b + "idle-bits-dsd64-ref", "max_abs")
+        ring = g(R, b + "bit_impulse-bits-dsd64-ref", "pre_ring_60_ms")
+        idl = "exact zero" if idle else ("not zero: up to %.1f dBFS" % (20 * math.log10(mx)) if mx else "–")
+        out.append(f"| {lab} | {f(lvl, '{:.2f}')} | {f(n)} | {f(us)} | {f(pk, '{:.2f}')} | {idl} | {f(ring, '{:.3f}')} |")
+    out += ["", "| Source | THD+N, 1 kHz at 0 dB SACD (dB) | Noise 20 Hz-20 kHz (dBFS) | Noise above 20 kHz (dBFS) |", "|---|---:|---:|---:|"]
+    for r_ in ("dsd64", "dsd128", "dsd256"):
+        b = "foobar/multistage-64fp-352k8/"
+        out.append(f"| {r_.upper()}, foobar2000 Multistage (64fp), 352.8 kHz | {f(g(R, b + f'sine1k_0-p88-{r_}-ref', 'thdn_db'))} | "
+                   f"{f(g(R, b + f'silence-p88-{r_}-ref', 'noise_dbfs'))} | {f(g(R, b + f'silence-p88-{r_}-ref', 'ultrasonic_to_nyquist_dbfs'))} |")
+    for r_ in ("dsd64", "dsd128", "dsd256"):
+        out.append(f"| {r_.upper()} source itself | {f(g(R, f'source/sine1k_0-p88-{r_}-ref', 'thdn_db'))} | "
+                   f"{f(g(R, f'source/silence-p88-{r_}-ref', 'noise_dbfs'))} | – |")
+    return "\n".join(out)
+
+
 def identity(R):
     same = differ = 0
     bad = []
@@ -130,6 +172,9 @@ def main():
     print(rmaa_table(R))
     print("\n## Extras\n")
     print(extras_table(R))
+    if any(k.startswith("foobar/") for k in R):
+        print("\n## foobar2000\n")
+        print(foobar_tables(R))
     s, d, bad = identity(R)
     print(f"\n## scarletbook-pcm identity\n\n{s} outputs identical, {d} differ {bad[:5]}")
 

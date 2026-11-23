@@ -244,6 +244,21 @@ def main():
                          ("gain -3 dB", C["30"], "dsd2pcm-gain/176k4-40-g-3/hot_ramp-dsd-dsd64-ref"),
                          ("gain +3 dB", C["wide"], "dsd2pcm-gain/176k4-40-g+3/hot_ramp-dsd-dsd64-ref"),
                          ("gain +6 dB", C["pysacd"], "dsd2pcm-gain/176k4-40-g+6/hot_ramp-dsd-dsd64-ref")])
+    fb = "foobar/{}/"
+    if any(k.startswith("foobar/") for k in Cv):
+        plot_noise(R, Cv, a.out, None, "foobar-noise.svg",
+                   "foobar2000 SACD plug-in modes against dsd2pcm: modulated silence (352.8 kHz output)",
+                   [("DSD64 source", C["source"], "source/silence-p88-dsd64-ref", 0.9),
+                    ("dsd2pcm, 40 kHz filter", C["40"], d.format("40") + "silence-p88-dsd64-ref", 1.6),
+                    ("foobar2000 Multistage (default)", C["30"], fb.format("multistage-32fp-352k8") + "silence-p88-dsd64-ref", 1.2),
+                    ("foobar2000 Direct (30 kHz)", C["wide"], fb.format("direct-30k-64fp-352k8") + "silence-p88-dsd64-ref", 1.2),
+                    ("foobar2000 Installable FIR, 40 kHz", C["pysacd"], fb.format("installable-fir-40k-64fp-352k8") + "silence-p88-dsd64-ref", 1.2)],
+                   176.4)
+        plot_time(R, Cv, a.out, None, "foobar-impulse.svg",
+                  "foobar2000 SACD plug-in: one DSD bit flipped (352.8 kHz output samples)", 0.3,
+                  [("Multistage (default)", C["30"], fb.format("multistage-32fp-352k8") + "bit_impulse-bits-dsd64-ref"),
+                   ("Direct (30 kHz)", C["wide"], fb.format("direct-30k-64fp-352k8") + "bit_impulse-bits-dsd64-ref"),
+                   ("Installable FIR, 40 kHz", C["pysacd"], fb.format("installable-fir-40k-64fp-352k8") + "bit_impulse-bits-dsd64-ref")])
     lp = [("dsd2pcm 30 kHz filter", C["30"], "dsd2pcm/352k8-30/silence-p88-dsd64-ref", 1.4),
           ("wide decode + reference 30 kHz low-pass", C["ref"], "lp30-ref/352k8/silence-p88-dsd64-ref", 1.0)]
     plot_noise(R, Cv, a.out, None, "lp30.svg", "The 30 kHz filter against a separate 150 dB linear-phase 30 kHz low-pass",
