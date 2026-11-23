@@ -127,7 +127,7 @@ case "$os" in
         # shellcheck disable=SC2086
         $cc -std=c99 -shared -Dmain=minimal_main "${cflags[@]}" -o "$work/embed.dll" "$src" \
             "$dir/lib/libdsd2pcm.a" -Wl,--exclude-libs,libdsd2pcm.a -Wl,--out-implib,"$work/libembed.dll.a" "${private[@]}"
-        exports=$(objdump -p "$work/embed.dll" | awk '/\[Ordinal\/Name Pointer\] Table/ {on = 1; next} on && !NF {exit} on && /^[[:space:]]*\[/ {print $NF}')
+        exports=$(objdump -p "$work/embed.dll" | awk '/\[Ordinal\/Name Pointer\] Table/ {on = 1; next} on && !NF {on = 0} on && /^[[:space:]]*\[/ {print $NF}')
         lib=$work/embed.dll
         ;;
 esac
