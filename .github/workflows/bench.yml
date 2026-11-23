@@ -10,7 +10,6 @@
 name: bench
 
 on:
-  pull_request:  # TEMPORARY: measurement run before merge; reverted in this PR
   workflow_dispatch:
     inputs:
       rounds:
