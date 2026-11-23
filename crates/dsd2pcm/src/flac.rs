@@ -165,7 +165,7 @@ fn vorbis_channel_mask<R: Read + Seek>(r: &mut R, start: u64, len: u64) -> Resul
 }
 
 /// Where the audio frames start, the 34-byte STREAMINFO body, and the channel mask of the
-/// first Vorbis comment block that has one.
+/// first Vorbis comment block.
 fn parse_container<R: Read + Seek>(
     r: &mut R,
     file_len: u64,
@@ -201,6 +201,7 @@ fn parse_container<R: Read + Seek>(
     }
     let mut streaminfo = None;
     let mut mask = None;
+    let mut comments_seen = false;
     for n in 0.. {
         if n == MAX_METADATA_BLOCKS {
             return format_err("FLAC file has too many metadata blocks");
@@ -226,7 +227,9 @@ fn parse_container<R: Read + Seek>(
             (0, _) => return format_err("FLAC file does not start with STREAMINFO"),
             (_, 0) => return format_err("FLAC file has a second STREAMINFO block"),
             (_, 127) => return format_err("FLAC metadata block type 127 is invalid"),
-            (_, 4) if mask.is_none() => {
+            // Only the first Vorbis comment block (FLAC allows one).
+            (_, 4) if !comments_seen => {
+                comments_seen = true;
                 mask = vorbis_channel_mask(r, pos, len)?;
                 seek_to(r, pos + len)?;
             }

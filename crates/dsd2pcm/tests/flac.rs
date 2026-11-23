@@ -456,6 +456,10 @@ fn channel_mask_from_vorbis_comment() {
     assert_eq!(six.channel_mask(), Some(0x3F));
     let mono = FlacReader::new(Cursor::new(fixture("s8_1ch_8000.flac"))).unwrap();
     assert_eq!(mono.channel_mask(), Some(0x01));
+    // Only the first Vorbis comment block counts: one without the field before the
+    // encoder's block gives none.
+    let first = with_comments(&f, &[&b"TITLE=first"[..]], None);
+    assert_eq!(mask(first), None);
     // Without it: none.
     let f = without_comments(&f);
     assert_eq!(mask(f.clone()), None);

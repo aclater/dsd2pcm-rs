@@ -283,8 +283,9 @@ pub struct WavWriter<W: Write + Seek> {
 }
 
 /// Bytes before the first sample in a file from [`WavWriter::new`] of `format` and
-/// `channels`: 44, or 68 with `WAVE_FORMAT_EXTENSIBLE` (always 68 from
-/// [`WavWriter::with_channel_mask`] with a mask other than the count's).
+/// `channels`: 44, or 68 with `WAVE_FORMAT_EXTENSIBLE`. For [`WavWriter::with_channel_mask`]
+/// it is a lower bound: a mask other than the count's ([`channel_mask`]) always gives 68;
+/// [`WavWriter::data_offset`] gives the real value.
 pub fn header_len(format: WavFormat, channels: u16) -> u64 {
     if channels > 2 || format.bytes() > 2 {
         68
