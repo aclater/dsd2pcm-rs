@@ -444,8 +444,10 @@ file the user had, nor leave a partial WAV that a reader would take as complete.
   `renamex_np(RENAME_EXCL)`, which also fail on some file systems. Where linking fails for
   another reason (no hard links: FAT, exFAT, some SMB, NFS and FUSE mounts), the output path
   is created empty with an exclusive create (`O_EXCL`; `CREATE_NEW` on Windows), which
-  fails the same way, and the result is renamed over it. That keeps the guarantee, at the
-  cost of a moment in which an empty file is at the output path: a crash then leaves it.
+  fails the same way, and the result is renamed over it. That path is best effort: a crash
+  in the moment between the two leaves the empty file, and a process with write access to
+  the directory that replaces the empty file in that moment has its file replaced by the
+  rename. With hard links there is no such moment.
   Not exposed through `PcmOptions`, because adding a field to that struct would break
   every caller that builds it with a struct literal; `OutputOptions` is
   `#[non_exhaustive]`, so later output settings can be added to it.

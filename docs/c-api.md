@@ -89,8 +89,9 @@ without ever replacing a file that appeared during the conversion: it is hard-li
 `output_path`, which fails if anything is there by then, and the temporary name is
 removed. On a file system without hard links (FAT, exFAT, some network and FUSE file
 systems) `output_path` is first created empty and exclusively, which fails the same way,
-and the result is renamed over that empty file; a crash at that moment can leave an empty
-output there. Either way a refused output is left as it was and the temporary file is
+and the result is renamed over that empty file. That fallback is best effort: a crash at
+that moment can leave an empty output, and a file another process puts there in that
+moment is replaced. Either way a refused output is left as it was and the temporary file is
 removed. Values other than 0 and 1 give `DSD2PCM_E_INVALID_ARGUMENT`.
 
 `crates/dsd2pcm-capi/examples/convert.c` is a complete program:

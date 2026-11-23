@@ -174,8 +174,9 @@ pub fn convert_file_with(
 /// output path, which fails if anything is there by then, and the temporary name is
 /// removed. Where the file system has no hard links (FAT and exFAT, some network and FUSE
 /// file systems), the output path is first created empty with an exclusive create, which
-/// fails the same way, and the result is renamed over that empty file; there a crash at
-/// that moment can leave an empty output. A refusal is [`Error::Io`] of kind
+/// fails the same way, and the result is renamed over that empty file. That fallback is
+/// best effort: a crash at that moment can leave an empty output, and a file another
+/// process puts there in that moment is replaced. A refusal is [`Error::Io`] of kind
 /// [`std::io::ErrorKind::AlreadyExists`]; the temporary file is removed and the existing
 /// file is left as it was.
 pub fn convert_file_to(
