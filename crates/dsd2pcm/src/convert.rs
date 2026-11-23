@@ -9,10 +9,11 @@ use crate::error::{Error, Result};
 use crate::filters::{pysacd, Filter};
 use crate::io::{DsdRead, PcmRead};
 use crate::wav::{WavFormat, WavReader, WavWriter};
-use std::fs::File;
+use std::ffi::OsString;
+use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::ops::ControlFlow;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
@@ -115,13 +116,21 @@ pub fn open_input(path: &Path) -> Result<Input> {
     }
 }
 
-/// Converts a DSF or DFF file (DSD64) to a 24-bit WAV file.
+/// Converts a DSF or DFF file (DSD64) to a 24-bit WAV file. The output is written to a
+/// temporary file and renamed into place on success; see [`convert_file_with`].
 pub fn convert_file(input: &Path, output: &Path, opts: &PcmOptions) -> Result<Report> {
     convert_file_with(input, output, opts, &mut |_| ControlFlow::Continue(()))
 }
 
-/// [`convert_file`] with a progress hook (see [`ProgressHook`]). On an error, including
-/// [`Error::Cancelled`], the output file may exist but is incomplete.
+/// [`convert_file`] with a progress hook (see [`ProgressHook`]).
+///
+/// The input, its rate and channels, the options and the output size are checked before
+/// anything is written. The WAV is then written to a new temporary file next to `output`
+/// (in the same directory, created exclusively), synced, and renamed over `output` only
+/// when the conversion succeeds. On any error, including [`Error::Cancelled`], the
+/// temporary file is removed and an existing `output` is left as it was. An `output` that
+/// is the input file (by path, symbolic link or hard link) is refused. A symbolic link at
+/// `output` is replaced by the new file, not followed.
 pub fn convert_file_with(
     input: &Path,
     output: &Path,
@@ -132,10 +141,11 @@ pub fn convert_file_with(
         return Err(Error::Unsupported("input is PCM, not DSD".into()));
     };
     check_options(opts)?;
+    let info = r.info();
+    check_dsd64(info.sample_rate)?;
     if same_file(input, output) {
         return Err(Error::InvalidArgument("output is the input file".into()));
     }
-    let info = r.info();
     let data = decimator::output_len(info.samples, opts.rate) * u64::from(info.channels) * 3;
     // The RIFF size: everything after its own 8 bytes.
     let header = crate::wav::header_len(WavFormat::I24, info.channels);
@@ -144,18 +154,109 @@ pub fn convert_file_with(
             "WAV output over 4 GiB (RF64 is not supported yet)".into(),
         ));
     }
-    let out = BufWriter::with_capacity(1 << 20, File::create(output)?);
-    let mut w = WavWriter::new(out, WavFormat::I24, r.info().channels, opts.rate.hz())?;
+    let mut tmp = TempFile::create(output)?;
+    let file = tmp.file.take().expect("a new temporary file is open");
+    let out = BufWriter::with_capacity(1 << 20, file);
+    let mut w = WavWriter::new(out, WavFormat::I24, info.channels, opts.rate.hz())?;
     let rep = dsd64_to_pcm_with(r, &mut w, opts, progress)?;
     w.finish()?;
+    let file = w.into_inner().into_inner().map_err(|e| e.into_error())?;
+    file.sync_all()?;
+    drop(file);
+    tmp.persist(output)?;
     Ok(rep)
 }
 
+/// A temporary output file next to its target, removed on drop unless persisted.
+struct TempFile {
+    path: Option<PathBuf>,
+    file: Option<File>,
+}
+
+impl TempFile {
+    /// Creates `.<name>.<pid>-<n>.tmp` in `target`'s directory, failing if it exists.
+    fn create(target: &Path) -> Result<TempFile> {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let Some(name) = target.file_name() else {
+            return Err(Error::InvalidArgument(
+                "output path has no file name".into(),
+            ));
+        };
+        let dir = match target.parent() {
+            Some(d) if !d.as_os_str().is_empty() => d,
+            _ => Path::new("."),
+        };
+        let mut last = None;
+        for _ in 0..100 {
+            let mut tmp_name = OsString::from(".");
+            tmp_name.push(name);
+            tmp_name.push(format!(
+                ".{}-{}.tmp",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            let path = dir.join(tmp_name);
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(file) => {
+                    return Ok(TempFile {
+                        path: Some(path),
+                        file: Some(file),
+                    })
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(e),
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Err(last
+            .unwrap_or_else(|| std::io::ErrorKind::AlreadyExists.into())
+            .into())
+    }
+
+    /// Renames the file over `target`.
+    fn persist(mut self, target: &Path) -> Result<()> {
+        let path = self.path.take().expect("not yet persisted");
+        if let Err(e) = std::fs::rename(&path, target) {
+            let _ = std::fs::remove_file(&path);
+            return Err(e.into());
+        }
+        Ok(())
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        drop(self.file.take());
+        if let Some(p) = self.path.take() {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
+/// Whether `a` and `b` name the same file. On Unix this compares device and inode numbers,
+/// so hard links are caught as well; elsewhere it compares canonical paths (hard links are
+/// then not caught, but the output is still written to a new file and renamed into place,
+/// which leaves the input as it was).
 fn same_file(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let (Ok(x), Ok(y)) = (std::fs::metadata(a), std::fs::metadata(b)) {
+            return x.dev() == y.dev() && x.ino() == y.ino();
+        }
+    }
     match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
         (Ok(x), Ok(y)) => x == y,
         _ => false,
     }
+}
+
+fn check_dsd64(rate: u32) -> Result<()> {
+    if rate != decimator::DSD64_RATE {
+        return Err(Error::Unsupported(format!(
+            "PCM output from {rate} Hz DSD (only DSD64 so far)"
+        )));
+    }
+    Ok(())
 }
 
 /// Checks the gain range and the rate, cutoff and filter combination.
@@ -196,12 +297,7 @@ pub fn dsd64_to_pcm_with<W: Write + Seek>(
 ) -> Result<Report> {
     check_options(opts)?;
     let info = r.info();
-    if info.sample_rate != decimator::DSD64_RATE {
-        return Err(Error::Unsupported(format!(
-            "PCM output from {} Hz DSD (only DSD64 so far)",
-            info.sample_rate
-        )));
-    }
+    check_dsd64(info.sample_rate)?;
     if opts.filter == Filter::Pysacd {
         return pysacd::dsd64_to_pcm(r, w, opts, progress);
     }
