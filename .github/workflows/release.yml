@@ -194,7 +194,7 @@ jobs:
             if [[ "$LIBC" == musl ]]; then
               # The tool is static; the shared library needs musl's libc only.
               if [[ "$bin" == */dsd2pcm ]]; then
-                readelf -d "$bin" | grep -q NEEDED && { echo "::error::$bin is not static"; exit 1; }
+                readelf -d "$bin" | grep NEEDED > /dev/null && { echo "::error::$bin is not static"; exit 1; }
               else
                 needed=$(readelf -d "$bin" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | tr '\n' ' ')
                 [[ "$needed" == "libc.so " ]] || { echo "::error::$bin needs $needed"; exit 1; }
@@ -206,7 +206,7 @@ jobs:
                 echo "::error::$bin needs glibc $max, newer than $GLIBC_MAX"; exit 1
               fi
             fi
-            if readelf -S "$bin" | grep -q '\.symtab'; then
+            if readelf -S "$bin" | grep '\.symtab' > /dev/null; then
               echo "::error::$bin is not stripped"; exit 1
             fi
           done
@@ -257,7 +257,7 @@ jobs:
                   # A fully static program (docs/c-api.md): -static, -lgcc_eh in place of -lgcc_s.
                   gcc -std=c99 -static -I /archive/include -o /tmp/minimal-full-static /archive/examples/minimal.c \
                     /archive/lib/libdsd2pcm.a -lgcc_eh -lc
-                  readelf -d /tmp/minimal-full-static | grep -q NEEDED && { echo "not static"; exit 1; }
+                  readelf -d /tmp/minimal-full-static | grep NEEDED > /dev/null && { echo "not static"; exit 1; }
                   /tmp/minimal-full-static'
             done
           else

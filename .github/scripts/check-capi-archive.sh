@@ -50,7 +50,7 @@ case "$os" in
         soname=$(readelf -d "$so" | sed -n 's/.*(SONAME).*\[\(.*\)\]/\1/p')
         echo "SONAME: $soname"
         [[ "$soname" == "libdsd2pcm.so.$abi" ]] || { echo "::error::SONAME is '$soname', not libdsd2pcm.so.$abi"; exit 1; }
-        readelf -d "$work/minimal" | grep -q "NEEDED.*\[libdsd2pcm.so.$abi\]" \
+        readelf -d "$work/minimal" | grep "NEEDED.*\[libdsd2pcm.so.$abi\]" > /dev/null \
             || { echo "::error::the program does not depend on libdsd2pcm.so.$abi"; exit 1; }
         readelf -d "$so" | grep NEEDED
         # x86-64: every object of the static library carries the CET shadow-stack property
@@ -58,7 +58,7 @@ case "$os" in
         # when it links the library. The shared library is not marked: it holds zig's
         # libunwind, which does not unwind the shadow stack. Never IBT: Rust's standard
         # library has no ENDBR64.
-        if readelf -h "$so" | grep -q 'Machine:.*X86-64'; then
+        if readelf -h "$so" | grep 'Machine:.*X86-64' > /dev/null; then
             a=$dir/lib/libdsd2pcm.a
             members=$(ar t "$a" | wc -l)
             marked=$(readelf -n "$a" | grep -c 'x86 feature: SHSTK$' || true)
@@ -77,7 +77,7 @@ case "$os" in
             # does not unwind the shadow stack: a panic caught at the C boundary would crash a
             # process running with shadow stacks (docs/design.md, "Intel CET").
             if grep -q 'libunwind: ' "$so"; then
-                if readelf -n "$so" | grep -q 'x86 feature:.*SHSTK'; then
+                if readelf -n "$so" | grep 'x86 feature:.*SHSTK' > /dev/null; then
                     echo "::error::$so is marked SHSTK but holds libunwind, which does not unwind the shadow stack"; exit 1
                 fi
                 echo "shared library: holds libunwind, not marked SHSTK"
@@ -88,12 +88,12 @@ case "$os" in
         id=$(otool -D "$dir/lib/libdsd2pcm.$abi.dylib" | tail -n 1)
         echo "install name: $id"
         [[ "$id" == "@rpath/libdsd2pcm.$abi.dylib" ]] || { echo "::error::install name is '$id'"; exit 1; }
-        otool -L "$work/minimal" | grep -q "@rpath/libdsd2pcm.$abi.dylib" \
+        otool -L "$work/minimal" | grep "@rpath/libdsd2pcm.$abi.dylib" > /dev/null \
             || { echo "::error::the program does not depend on @rpath/libdsd2pcm.$abi.dylib"; exit 1; }
         ;;
     Windows)
         objdump -p "$dir/bin/dsd2pcm.dll" | grep 'DLL Name'
-        objdump -p "$work/minimal.exe" | grep -q 'DLL Name: dsd2pcm.dll' \
+        objdump -p "$work/minimal.exe" | grep 'DLL Name: dsd2pcm.dll' > /dev/null \
             || { echo "::error::the program does not import dsd2pcm.dll"; exit 1; }
         cp "$dir/bin/dsd2pcm.dll" "$work/"
         ;;

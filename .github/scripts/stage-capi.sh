@@ -66,7 +66,7 @@ esac
 
 # Without the crate's `flac` feature (off by default), the library holds no third-party code:
 # no claxon symbol in the static library. The names are plain bytes in a .a or .lib.
-if ! sed -n '/^\[features\]/,/^\[/p' crates/dsd2pcm-capi/Cargo.toml | grep -Eq '^default *=.*"flac"'; then
+if ! sed -n '/^\[features\]/,/^\[/p' crates/dsd2pcm-capi/Cargo.toml | grep -E '^default *=.*"flac"' > /dev/null; then
     for a in "$dir"/lib/*.a "$dir"/lib/*.lib; do
         [[ -e "$a" ]] || continue
         if grep -aq claxon "$a"; then
