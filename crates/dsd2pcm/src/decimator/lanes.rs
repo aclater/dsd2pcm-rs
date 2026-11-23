@@ -21,7 +21,7 @@
     allow(dead_code)
 )]
 
-use super::kernel::{round_even, s1, Mac, S1Lut, Sym};
+use super::kernel::{round_even, s1, Mac, Sym};
 use super::Op;
 
 /// Lanes per vector: runs per pass.
@@ -49,7 +49,7 @@ pub(super) struct Bufs {
 
 /// One pass: what `Plan::pass_run` computes for each run.
 pub(super) struct Pass<'a> {
-    pub lut: &'a S1Lut,
+    pub lut: super::S1Src,
     /// The same S1 as paired tables, if the level uses them.
     pub pair: Option<&'a S1Pair>,
     pub ops: &'a [Op],
@@ -267,7 +267,7 @@ impl S1Pair {
     /// S1 for each pair of `out`: pair `k` over the windows at `bytes[2 k ..]` and
     /// `bytes[2 k + 1 ..]`; `lut` (the same filter) serves any other window size.
     #[inline(always)]
-    pub(super) fn run(&self, lut: &S1Lut, bytes: &[u8], out: &mut impl PairSink) {
+    pub(super) fn run(&self, lut: super::S1Src, bytes: &[u8], out: &mut impl PairSink) {
         const T9: usize = pair_tables(9);
         const T13: usize = pair_tables(13);
         if let (8, Ok(t)) = (self.bytes, <&[PTable; T9]>::try_from(&self.tables[..])) {
@@ -277,7 +277,7 @@ impl S1Pair {
         } else {
             for k in 0..out.pairs() {
                 let mut v = [0.0; 2];
-                s1(lut, bytes, 2 * k, 1, &mut v);
+                s1(lut.get(), bytes, 2 * k, 1, &mut v);
                 out.put(k, v[0], v[1]);
             }
         }
@@ -323,7 +323,7 @@ fn s1_lanes(p: &Pass<'_>, a: &mut [Lanes]) {
         } else if let Some((12, t, bias)) = pr.filter(|pr| pr.1.len() == T13) {
             s1_pairs_lane::<13, T13>(t.try_into().unwrap(), bias, bytes, a, w);
         } else {
-            s1(p.lut, bytes, 0, 1, a.iter_mut().map(|v| &mut v.0[w]));
+            s1(p.lut.get(), bytes, 0, 1, a.iter_mut().map(|v| &mut v.0[w]));
         }
     }
 }
