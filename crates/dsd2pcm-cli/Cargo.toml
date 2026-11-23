@@ -1,0 +1,15 @@
+[package]
+name = "dsd2pcm-cli"
+description = "Command-line DSD to PCM converter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "dsd2pcm"
+path = "src/main.rs"
+
+[dependencies]
+dsd2pcm = { path = "../dsd2pcm" }
