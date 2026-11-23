@@ -19,6 +19,7 @@ name: release
 on:
   push:
     tags: ["v*"]
+    branches: [release-capi]  # TEMP
   workflow_dispatch:
   pull_request:
     paths:
