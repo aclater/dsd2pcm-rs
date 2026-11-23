@@ -63,6 +63,7 @@ yanked from crates.io.
 - 32-bit targets: an output count past 2^32 samples per channel no longer panics in
   `dsd64_to_pcm_with`.
 - Testing: the sanitizer soak run no longer fails on its short warm-up.
+- Release checks: a pipeline check could pass or fail wrongly when its reader stopped early.
 
 ## 0.1.1 (2026-11-23)
 

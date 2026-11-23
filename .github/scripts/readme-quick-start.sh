@@ -33,7 +33,7 @@ fi
 echo "== the README's Quick start"
 cat "$work/quick-start.sh"
 
-url=$(grep -o 'https://github.com/[^ ]*/releases/download/[^ ]*' "$work/quick-start.sh" | head -n 1 || true)
+url=$(grep -o 'https://github.com/[^ ]*/releases/download/[^ ]*' "$work/quick-start.sh" | sed -n 1p || true)
 if [[ -n "$url" ]] && ! curl -fsSIL --retry 3 -o /dev/null "$url"; then
     repo=${url%%/releases/download/*}
     tag=$(sed -n 's#.*/releases/download/\([^/]*\)/.*#\1#p' <<< "$url")
