@@ -12,8 +12,9 @@
 #      dependency order: dsd2pcm, then dsd2pcm-capi if it is publishable (not for 0.1.0),
 #      then dsd2pcm-cli (.github/scripts/publish-crates.sh). This job runs in the GitHub
 #      environment `release`, whose required reviewers approve it;
-#   3. create the GitHub release with seventeen archives (dsd2pcm-<v>-<platform> for eight
-#      platforms and libdsd2pcm-<v>-<platform> for nine), a .sha256 file for each,
+#   3. create the GitHub release with eighteen archives (dsd2pcm-<v>-<platform> for eight
+#      platforms, libdsd2pcm-<v>-<platform> for nine, and the source, dsd2pcm-<v>-src made
+#      with git archive), a .sha256 file for each,
 #      SHA256SUMS and a build provenance attestation (Sigstore) for each archive.
 # Any other run (a pull request that changes the release files, or a manual run) is a dry run:
 # the same builds and checks, and `cargo publish --dry-run`, with nothing published.
@@ -755,12 +756,60 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The source archive: the release commit's whole tree (the workspace, fuzz/, docs/), as
+  # `git archive --format=tar --prefix=dsd2pcm-<v>/ v<v> | gzip -n -9` makes it from the tag:
+  # the files' times are the commit's, so anyone can make the same bytes again. Checked by
+  # unpacking it in a fresh folder and building the C library from it.
+  source:
+    name: source archive
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust
+        run: |
+          rustup toolchain install "$RUST_STABLE" --profile minimal
+          rustup default "$RUST_STABLE"
+      - name: Pack
+        run: |
+          src="dsd2pcm-$VERSION-src"
+          mkdir -p dist
+          git archive --format=tar --prefix="dsd2pcm-$VERSION/" "$SHA" | gzip -n -9 > "dist/$src.tar.gz"
+          # The same bytes a second time (deterministic).
+          git archive --format=tar --prefix="dsd2pcm-$VERSION/" "$SHA" | gzip -n -9 | cmp - "dist/$src.tar.gz"
+          (cd dist && sha256sum "$src.tar.gz" > "$src.tar.gz.sha256" && cat "$src.tar.gz.sha256")
+          tar -tzf "dist/$src.tar.gz" | grep -E "^dsd2pcm-$VERSION/(Cargo.lock|fuzz/Cargo.toml|docs/c-api.md|crates/dsd2pcm-capi/include/dsd2pcm.h)$"
+          echo "SRC=$src" >> "$GITHUB_ENV"
+      - name: The C library builds from the unpacked source
+        run: |
+          mkdir -p "$RUNNER_TEMP/src"
+          tar -C "$RUNNER_TEMP/src" -xzf "dist/$SRC.tar.gz"
+          cd "$RUNNER_TEMP/src/dsd2pcm-$VERSION"
+          cargo build --release --locked -p dsd2pcm-capi
+          ls -l target/release/libdsd2pcm.so target/release/libdsd2pcm.a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: bin-source
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 7
+
   # Every platform's binary made the same bytes from the test file, and every archive matches
   # its .sha256. On a dry run, the list of what a tag would publish.
   check:
     name: same output everywhere
-    needs: [preflight, linux, macos-check, windows, windows-gnu]
+    needs: [preflight, linux, macos-check, windows, windows-gnu, source]
     runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
@@ -776,7 +825,8 @@ jobs:
           n=$(wc -l < hashes)
           [[ "$n" -eq 1 ]] || { echo "::error::the platforms' binaries converted the test file to $n different outputs"; exit 1; }
           [[ $(ls smoke-*.sha256 | wc -l) -eq 9 ]] || { echo "::error::expected nine platforms' outputs"; exit 1; }
-          [[ $(ls ./dsd2pcm-*.tar.gz ./dsd2pcm-*.zip | wc -l) -eq 8 ]] || { echo "::error::expected eight archives of the tool"; exit 1; }
+          [[ $(ls ./dsd2pcm-*.tar.gz ./dsd2pcm-*.zip | grep -vc -- '-src\.tar\.gz$') -eq 8 ]] || { echo "::error::expected eight archives of the tool"; exit 1; }
+          [[ -f "dsd2pcm-${VERSION}-src.tar.gz" ]] || { echo "::error::no source archive"; exit 1; }
           [[ $(ls ./libdsd2pcm-*.tar.gz ./libdsd2pcm-*.zip | wc -l) -eq 9 ]] || { echo "::error::expected nine archives of the C library"; exit 1; }
           echo "all nine binaries: the same output"
       - name: What a tag would publish
@@ -884,6 +934,8 @@ jobs:
             echo "- \`dsd2pcm-$VERSION-x86_64-windows.zip\`: Windows 10 or 11, x86_64. Not code-signed."
             echo
             echo "The C library (\`include/dsd2pcm.h\`, shared and static libraries, a pkg-config file; ABI version 1), \`libdsd2pcm-$VERSION-<platform>\` for the same eight platforms (on Linux with musl: musl 1.2.3 or later) and for Windows with MinGW-w64 (\`x86_64-windows-gnu\`, for gcc): \`.tar.gz\`, and \`.zip\` for Windows. On x86_64 Linux the libraries are marked for the CET shadow stack. See [docs/c-api.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/c-api.md#binary-releases)."
+            echo
+            echo "The source: \`dsd2pcm-$VERSION-src.tar.gz\`, the tagged commit's whole tree (\`git archive --format=tar --prefix=dsd2pcm-$VERSION/ v$VERSION | gzip -n -9\` makes the same bytes)."
             echo
             echo "Verify a download: \`sha256sum -c <asset>.sha256\` and \`gh attestation verify <asset> -R $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml --source-ref refs/tags/v$VERSION --deny-self-hosted-runners\`."
             echo

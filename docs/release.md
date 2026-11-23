@@ -23,6 +23,7 @@ The GitHub release, with these assets:
 
 | Asset | Platform |
 |---|---|
+| `dsd2pcm-0.1.2-src.tar.gz` | The source: the tagged commit's whole tree (workspace, `fuzz/`, `docs/`) |
 | `dsd2pcm-0.1.2-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
 | `dsd2pcm-0.1.2-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
 | `dsd2pcm-0.1.2-i686-linux.tar.gz` | Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later |
@@ -50,9 +51,14 @@ under its ABI-versioned name (`libdsd2pcm.so.1` with a `libdsd2pcm.so` link, SON
 `lib/pkgconfig/dsd2pcm.pc` (not for MSVC), `examples/minimal.c`, a README taken from
 [docs/c-api.md](c-api.md#binary-releases) and the licences. The command-line tool has eight
 platforms and the C library nine: the MinGW-w64 build is the C library only (the MSVC
-`dsd2pcm.exe` serves Windows). Every archive has a `.sha256` file and a build provenance
+`dsd2pcm.exe` serves Windows). `dsd2pcm-0.1.2-src.tar.gz` is
+`git archive --format=tar --prefix=dsd2pcm-0.1.2/ v0.1.2 | gzip -n -9`: the files carry the
+commit's time, so the same command on the tag gives the same tar (and, with GNU gzip, the
+same bytes); the workflow checks
+that the C library builds from it (`cargo build --release --locked -p dsd2pcm-capi` in the
+unpacked folder). Every archive has a `.sha256` file and a build provenance
 attestation (`.intoto.jsonl`, also stored with GitHub). `SHA256SUMS` lists every archive:
-52 files in all (17 archives, 17 `.sha256`, 17 `.intoto.jsonl`, `SHA256SUMS`).
+55 files in all (18 archives, 18 `.sha256`, 18 `.intoto.jsonl`, `SHA256SUMS`).
 
 ## How the workflow runs
 
@@ -101,7 +107,8 @@ attestation (`.intoto.jsonl`, also stored with GitHub). `SHA256SUMS` lists every
    the smoke tests. Bare Mach-O files cannot be stapled: macOS looks the ticket up online.
    A tag without the signing secrets fails here, before anything is published; a dry run
    skips signing with a notice.
-3. **same output everywhere**: all seventeen archives are there and match their `.sha256`,
+3. **same output everywhere**: all eighteen archives (with the source archive, job
+   `source archive`) are there and match their `.sha256`,
    and all nine binaries made byte-identical output from the test file.
 4. **publish to crates.io** (tag only): in the GitHub environment `release`, so it waits for
    a required reviewer's approval. Trusted publishing: the job's OIDC token is exchanged for
@@ -217,7 +224,7 @@ steps 1 to 5 for that crate alone.
    deployments): `sign and notarise (macos)` early in the run, then
    `publish to crates.io` once every build is checked. Notarisation usually takes a few
    minutes.
-5. Check: the crates on crates.io, the GitHub release with its 52 files (seventeen
+5. Check: the crates on crates.io, the GitHub release with its 55 files (eighteen
    archives, their `.sha256` and `.intoto.jsonl` files, and `SHA256SUMS`), and an asset:
 
    ```

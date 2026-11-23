@@ -7,7 +7,8 @@ yanked from crates.io.
 
 - Releases: the C library for Linux with musl (x86_64, aarch64), macOS on Intel (signed and
   notarised) and Windows with MinGW-w64 (`x86_64-windows-gnu`, for gcc); the command-line
-  tool for musl (statically linked) and macOS on Intel. On x86_64 Linux the static
+  tool for musl (statically linked) and macOS on Intel; an attested source archive
+  (`dsd2pcm-<version>-src.tar.gz`, from `git archive`). On x86_64 Linux the static
   library's objects and the glibc shared library are marked for the CET shadow stack.
   [c-api.md](docs/c-api.md#binary-releases) explains how to embed the static library in a
   shared library with its symbols hidden.

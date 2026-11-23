@@ -178,6 +178,20 @@ The C library is built without the crate's `flac` feature: its whole-file conver
 DSD input only, and without FLAC reading it holds no third-party code, only Rust's standard
 library (MIT OR Apache-2.0). `--features flac` adds it back.
 
+From 0.1.3 on, each release has the source as an attested archive,
+`dsd2pcm-0.1.3-src.tar.gz`: the tagged commit's whole tree, made with
+`git archive --format=tar --prefix=dsd2pcm-0.1.3/ v0.1.3 | gzip -n -9` (the same command
+gives the same tar, and with GNU gzip the same bytes). To pin and check it:
+
+```
+gh release download v0.1.3 -R aclater/dsd2pcm-rs -p 'dsd2pcm-0.1.3-src.tar.gz*'
+sha256sum -c dsd2pcm-0.1.3-src.tar.gz.sha256
+gh attestation verify dsd2pcm-0.1.3-src.tar.gz -R aclater/dsd2pcm-rs --signer-workflow aclater/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.3
+tar -xzf dsd2pcm-0.1.3-src.tar.gz
+cd dsd2pcm-0.1.3
+cargo build --release --locked -p dsd2pcm-capi
+```
+
 A minimal program, `crates/dsd2pcm-capi/tests/minimal.c`, converts one stereo frame of
 DSD silence. To build and run it on Linux, from the repository root:
 
