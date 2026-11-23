@@ -21,7 +21,8 @@ quantiser, bit-exact with its reference; 88200 and 176400 only, fixed response).
 --: every later argument is a file name, even one that starts with '-'.
 File names may be in any encoding the system allows.";
 
-/// Parses the arguments (without the program name). File names stay `OsString`s, so any
+/// Parses the arguments (without the program name). Messages quote argument text with
+/// `{:?}`, so control characters in it reach the terminal escaped. File names stay `OsString`s, so any
 /// name the operating system allows works; option values must be UTF-8. `Err("")` asks for
 /// the usage on standard output.
 fn parse(args: Vec<OsString>) -> Result<(PathBuf, PathBuf, PcmOptions), String> {
@@ -38,7 +39,7 @@ fn parse(args: Vec<OsString>) -> Result<(PathBuf, PathBuf, PcmOptions), String> 
             let v = it.next().ok_or_else(|| format!("{name} needs a value"))?;
             v.into_string().map_err(|v| {
                 format!(
-                    "{name}: the value {} is not valid UTF-8",
+                    "{name}: the value {:?} is not valid UTF-8",
                     v.to_string_lossy()
                 )
             })
@@ -46,7 +47,7 @@ fn parse(args: Vec<OsString>) -> Result<(PathBuf, PathBuf, PcmOptions), String> 
         match s {
             "--rate" => {
                 let v = val("--rate")?;
-                let hz: u32 = v.parse().map_err(|_| format!("bad rate {v}"))?;
+                let hz: u32 = v.parse().map_err(|_| format!("bad rate {v:?}"))?;
                 opts.rate = PcmRate::from_hz(hz)
                     .ok_or_else(|| format!("rate {hz}: 88200, 176400 or 352800"))?;
             }
@@ -55,18 +56,18 @@ fn parse(args: Vec<OsString>) -> Result<(PathBuf, PathBuf, PcmOptions), String> 
                     "30" => Cutoff::Low,
                     "40" => Cutoff::Standard,
                     "wide" | "80" => Cutoff::Wide,
-                    v => return Err(format!("cutoff {v}: 30, 40 or wide")),
+                    v => return Err(format!("cutoff {v:?}: 30, 40 or wide")),
                 }
             }
             "--gain" => {
                 let v = val("--gain")?;
-                opts.gain_db = v.parse().map_err(|_| format!("bad gain {v}"))?;
+                opts.gain_db = v.parse().map_err(|_| format!("bad gain {v:?}"))?;
             }
             "--filter" => {
                 opts.filter = match val("--filter")?.as_str() {
                     "default" => Filter::Default,
                     "pysacd" => Filter::Pysacd,
-                    v => return Err(format!("filter {v}: default or pysacd")),
+                    v => return Err(format!("filter {v:?}: default or pysacd")),
                 }
             }
             "--single-thread" => opts.threads = false,
@@ -77,7 +78,7 @@ fn parse(args: Vec<OsString>) -> Result<(PathBuf, PathBuf, PcmOptions), String> 
             }
             s if s.starts_with('-') && s.len() > 1 => {
                 return Err(format!(
-                    "unknown option {s} (put -- before file names that start with '-')"
+                    "unknown option {s:?} (put -- before file names that start with '-')"
                 ))
             }
             _ => pos.push(PathBuf::from(a)),

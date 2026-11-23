@@ -73,7 +73,7 @@ fn dash_names_without_double_dash_are_options() {
     let o = run(&d, &os(&["-x.dsf", "out.wav"]));
     assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
     let e = stderr(&o);
-    assert!(e.contains("unknown option -x.dsf"), "{e}");
+    assert!(e.contains("unknown option \"-x.dsf\""), "{e}");
     assert!(e.contains("put -- before"), "{e}");
     assert!(!d.join("out.wav").exists());
     std::fs::remove_dir_all(&d).unwrap();
@@ -85,12 +85,17 @@ fn usage_errors_exit_2() {
     for (args, want) in [
         (&["in.dsf"][..], "need IN and OUT"),
         (&["in.dsf", "out.wav", "--rate"][..], "--rate needs a value"),
-        (&["in.dsf", "out.wav", "--rate", "x"][..], "bad rate x"),
+        (&["in.dsf", "out.wav", "--rate", "x"][..], "bad rate \"x\""),
         (
             &["in.dsf", "out.wav", "--gain", "loud"][..],
-            "bad gain loud",
+            "bad gain \"loud\"",
         ),
         (&["in.dsf", "out.wav", "--frobnicate"][..], "unknown option"),
+        // Control characters are escaped, not sent to the terminal.
+        (
+            &["in.dsf", "out.wav", "--cutoff", "\x1b[2J"][..],
+            "cutoff \"\\u{1b}[2J\"",
+        ),
     ] {
         let o = run(&d, &os(args));
         assert_eq!(o.status.code(), Some(2), "{args:?}: {}", stderr(&o));
