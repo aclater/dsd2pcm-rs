@@ -90,6 +90,29 @@ scarletbook-pcm on the P-core (0.96x to 1.00x across runs). With AVX2 and FMA, t
 picked on this CPU, i686 builds run at 1.25x to 1.87x on the P-core and 1.05x to 1.40x on
 the E-core.
 
+## aarch64 (GitHub-hosted runners, indicative)
+
+From `.github/workflows/bench.yml` on dsd2pcm 0.1.1: generated 60 s test files (not SACD
+rips), one thread, median ratio of dsd2pcm's speed to scarletbook-pcm 0.7.0's over the
+rounds (lowest to highest in brackets). Linux: `ubuntu-24.04-arm` (Neoverse N2, 4 rounds, the
+round-to-round spread under 0.02). macOS: `macos-15` (Apple M1, virtual, 5 rounds; shared
+and noisy, spreads up to about ±0.2).
+
+| Rate | Cutoff | Linux `run 4` 2 ch / 6 ch | Linux whole file 2 ch / 6 ch | macOS `run 4` 2 ch / 6 ch | macOS whole file 2 ch / 6 ch |
+|---|---|---|---|---|---|
+| 88.2 kHz | Low | 1.02x / 1.02x | 1.02x / 1.02x | 1.11x / 1.08x | 1.06x / 0.96x |
+| 88.2 kHz | Standard | 1.02x / 1.02x | 1.01x / 1.02x | 1.12x / 1.05x | 1.05x / 1.02x |
+| 176.4 kHz | Low | 1.00x / 1.00x | 0.97x / 0.99x | 1.08x / 0.95x | 1.05x / 1.04x |
+| 176.4 kHz | Standard | 1.00x / 1.00x | 0.97x / 0.99x | 0.96x / 1.03x | 1.07x / 1.03x |
+| 176.4 kHz | Wide | 1.00x / 1.00x | 0.98x / 0.99x | 1.05x / 0.99x | 0.91x / 1.09x |
+| 352.8 kHz | Low | 1.03x / 1.03x | 1.01x / 1.01x | 1.13x / 1.06x | 1.03x / 1.09x |
+| 352.8 kHz | Standard | 1.04x / 1.04x | 1.02x / 1.01x | 1.11x / 1.12x | 1.12x / 1.09x |
+| 352.8 kHz | Wide | 0.98x / 0.98x | 0.97x / 0.97x | 0.98x / 1.01x | 1.04x / 0.94x |
+
+On aarch64 dsd2pcm is level with scarletbook-pcm 0.7.0 (0.97x to 1.04x on Linux, every mode,
+`run 1` included); the x86-64 lead comes from the AVX2 kernels. Every run checked that both
+crates give the same bytes on both platforms.
+
 ## Known gaps
 
 - Whole-file conversion of the 2-channel file at 176.4 kHz `wide` on the P-core reads 0.99x.
@@ -98,3 +121,5 @@ the E-core.
   writing), not in the filter.
 - On x86-64 without AVX2 (the generic level, older CPUs) dsd2pcm runs at 0.6x to 0.9x of
   scarletbook-pcm 0.7.0; 32-bit x86 has its own `sse2` level (above).
+- aarch64 (above): level with scarletbook-pcm 0.7.0, 2 to 3 % behind at 352.8 kHz `wide`
+  and in whole-file conversion at 176.4 kHz.
