@@ -143,6 +143,10 @@ Both run without arguments.
 
 ## Building from source
 
+The C library is built without the crate's `flac` feature: its whole-file conversion takes
+DSD input only, and without FLAC reading it holds no third-party code, only Rust's standard
+library (MIT OR Apache-2.0). `--features flac` adds it back.
+
 A minimal program, `crates/dsd2pcm-capi/tests/minimal.c`, converts one stereo frame of
 DSD silence. To build and run it on Linux, from the repository root:
 
