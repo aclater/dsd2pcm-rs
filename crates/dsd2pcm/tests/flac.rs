@@ -299,6 +299,10 @@ fn open_input_detects_flac() {
 /// Every truncation and many single-byte corruptions give a result or an error, never a
 /// panic, with known and unknown length.
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: thousands of corrupted files; the fuzz targets cover it"
+)]
 fn malformed_inputs_do_not_panic() {
     let mut files = Vec::new();
     for (name, ..) in FILES {
