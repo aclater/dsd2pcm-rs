@@ -20,7 +20,8 @@
 //! It checks, after the warm-up (the first 20 % of iterations):
 //! - the live heap (bytes allocated and not freed, counted by a global allocator) after
 //!   each iteration of the second half is at most 64 KiB above the highest value of 20 to
-//!   50 % of the run;
+//!   50 % of the run (`DSD2PCM_SOAK_HEAP_REPORT_ONLY` only reports it, for short sanitizer
+//!   runs; the check needs 1000 iterations or more);
 //!
 //! and on Linux, from `/proc/self`:
 //! - the resident set size (`VmRSS`) of the second half stays within 10 % or 32 MiB
@@ -519,8 +520,13 @@ fn soak() {
         live_plateau / 1024,
         live_late / 1024
     );
+    // A short run (the sanitizer jobs run 100 iterations) is about races and ends before
+    // the warm-up has: the kept converters are still growing in the 20 to 50 % window, so
+    // the check needs 1000 iterations or more. DSD2PCM_SOAK_HEAP_REPORT_ONLY reports the
+    // live heap without checking it.
     assert!(
-        live_late <= live_plateau + 64 * 1024,
+        live_late <= live_plateau + 64 * 1024
+            || std::env::var_os("DSD2PCM_SOAK_HEAP_REPORT_ONLY").is_some(),
         "live heap grew: {live_late} bytes in the second half, plateau {live_plateau} bytes"
     );
     if have_rss {

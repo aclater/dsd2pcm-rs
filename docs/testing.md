@@ -43,8 +43,12 @@ DSD2PCM_SOAK_ITERATIONS=1000 cargo test --release -p dsd2pcm --test soak -- --ig
 DSD2PCM_SOAK_SECONDS=3600 cargo test --release -p dsd2pcm --test soak -- --ignored --nocapture
 ```
 
-`DSD2PCM_SOAK_RSS_REPORT_ONLY=1` prints the memory figures without the check, for sanitizer
-builds, whose shadow memory grows with the run.
+The live-heap check needs 1000 iterations or more: in shorter runs, the default of 300
+included, the kept converters are still growing in the 20 to 50 % window, and the check
+fails without a leak (0.1.3 moves the window). Set `DSD2PCM_SOAK_ITERATIONS` as above.
+`DSD2PCM_SOAK_RSS_REPORT_ONLY=1` prints the resident set without the check, for sanitizer
+builds, whose shadow memory grows with the run; `DSD2PCM_SOAK_HEAP_REPORT_ONLY=1` does the
+same for the live heap, for short sanitizer runs.
 
 Before 0.1.2, with the live-heap check, one hour each:
 
@@ -113,12 +117,16 @@ and 12 for the core crate on a Ryzen AI Max+ 395 (one core each):
 ## ThreadSanitizer
 
 ```
-RUSTFLAGS=-Zsanitizer=thread DSD2PCM_SOAK_ITERATIONS=100 DSD2PCM_SOAK_RSS_REPORT_ONLY=1 \
+RUSTFLAGS=-Zsanitizer=thread DSD2PCM_SOAK_ITERATIONS=100 DSD2PCM_SOAK_RSS_REPORT_ONLY=1 DSD2PCM_SOAK_HEAP_REPORT_ONLY=1 \
   cargo +nightly-2026-11-01 test -Zbuild-std --target x86_64-unknown-linux-gnu \
   -p dsd2pcm --test progress --test frames --test soak -- --include-ignored
 RUSTFLAGS=-Zsanitizer=thread \
   cargo +nightly-2026-11-01 test -Zbuild-std --target x86_64-unknown-linux-gnu -p dsd2pcm-capi --lib
 ```
+
+The two flags make the soak test print its memory figures without checking them: TSan's
+shadow memory grows the resident set with the run, and 100 iterations end before the live
+heap's warm-up does, so this run looks for races, not leaks.
 
 Standard library and crates are rebuilt instrumented, so the scoped worker threads of the
 whole-file path, their atomics and mutexes, and the C interface's busy-handle checks are all

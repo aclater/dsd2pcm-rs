@@ -62,6 +62,7 @@ yanked from crates.io.
   messages); identical output on x86 assumes SSE2 floating point.
 - 32-bit targets: an output count past 2^32 samples per channel no longer panics in
   `dsd64_to_pcm_with`.
+- Testing: the sanitizer soak run no longer fails on its short warm-up.
 
 ## 0.1.1 (2026-11-23)
 
