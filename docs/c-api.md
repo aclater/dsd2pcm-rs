@@ -176,7 +176,9 @@ Both run without arguments.
 
 The C library is built without the crate's `flac` feature: its whole-file conversion takes
 DSD input only, and without FLAC reading it holds no third-party code, only Rust's standard
-library (MIT OR Apache-2.0). `--features flac` adds it back.
+library (MIT OR Apache-2.0). `--features flac` adds it back. Build it on its own
+(`-p dsd2pcm-capi`): a workspace build (`cargo build --workspace`) turns the feature on for
+it too, through the command-line tool, and its libraries then hold claxon's code.
 
 A minimal program, `crates/dsd2pcm-capi/tests/minimal.c`, converts one stereo frame of
 DSD silence. To build and run it on Linux, from the repository root:
@@ -255,10 +257,15 @@ minimal.exe
 equals cbindgen's output (cbindgen from `PATH`, or the binary named by the `CBINDGEN`
 environment variable; install it with `cargo install cbindgen`), then builds and runs
 `tests/*.c` and `examples/convert.c` under gcc and clang with `-Wall -Wextra -Werror`,
-compiles the header and its init macros as C++11, and runs the smoke test and the leak loop
+compiles the header and its init macros as C++11, checks that the static library holds no
+claxon symbols (`.github/scripts/check-capi-no-claxon.sh`, which lists the symbol table with
+`nm`, so a stripped library fails instead of passing unchecked), and runs the smoke test and the leak loop
 (`tests/leakloop.c`: create, convert and free on every path, many times over) under clang's
 AddressSanitizer, LeakSanitizer and UndefinedBehaviorSanitizer (`ASAN=0` skips that). CI
-does the same in the C library job. The Rust tests of the interface
+does the same in the C library job, runs the claxon check on both libraries, and checks that
+it fails on a library built with `--features flac`. The release workflow runs it on the
+static library of every Linux and macOS archive (`check-capi-archive.sh`; the shared
+libraries there are stripped). The Rust tests of the interface
 (`cargo test -p dsd2pcm-capi`) cover NULL pointers, bad lengths and values, `struct_size`,
 overlapping buffers, cancelling, busy and poisoned handles, allocation after warm-up, and
 byte identity with the Rust API. They also run under Miri

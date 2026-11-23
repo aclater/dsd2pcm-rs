@@ -175,7 +175,7 @@ jobs:
         shell: bash
     steps:
       - name: Packages
-        run: dnf -y -q --setopt=install_weak_deps=False install git-core gcc clang compiler-rt python3 diffutils findutils && dnf clean all
+        run: dnf -y -q --setopt=install_weak_deps=False install git-core gcc clang compiler-rt python3 diffutils findutils binutils && dnf clean all
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
@@ -195,3 +195,15 @@ jobs:
         env:
           ASAN_CC: clang
           LEAKLOOP_ITERATIONS: "100"
+      # The C library is built without the `flac` feature, so it holds no third-party code:
+      # no claxon symbol in the libraries capi-check.sh built (nm, not strings). Then the
+      # check must catch a build with the feature, so it cannot pass vacuously.
+      - name: No claxon in the C library (.github/scripts/check-capi-no-claxon.sh)
+        if: hashFiles('crates/dsd2pcm-capi/Cargo.toml') != ''
+        run: |
+          .github/scripts/check-capi-no-claxon.sh target/release/libdsd2pcm.a target/release/libdsd2pcm.so
+          cargo build --locked --release -p dsd2pcm-capi --features flac --target-dir target/with-flac
+          if .github/scripts/check-capi-no-claxon.sh target/with-flac/release/libdsd2pcm.a > /dev/null; then
+            echo "::error::the check passed a library built with the flac feature"; exit 1
+          fi
+          echo "the check catches a library built with the flac feature"

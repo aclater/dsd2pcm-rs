@@ -41,7 +41,9 @@ under its ABI-versioned name (`libdsd2pcm.so.1` with a `libdsd2pcm.so` link, SON
 `@rpath/libdsd2pcm.1.dylib`; `bin/dsd2pcm.dll` with the import library
 `lib/dsd2pcm.dll.lib`), the static library, `lib/pkgconfig/dsd2pcm.pc` (not on Windows),
 `examples/minimal.c`, a README taken from [docs/c-api.md](c-api.md#binary-releases) and the
-licences. Every archive has a `.sha256` file and a build provenance attestation
+licences. The C library holds no third-party code: it is built without the `flac` feature,
+and `.github/scripts/check-capi-no-claxon.sh` checks every Linux and macOS archive's static
+library for claxon symbols with `nm` (in `check-capi-archive.sh`). Every archive has a `.sha256` file and a build provenance attestation
 (`.intoto.jsonl`, also stored with GitHub). `SHA256SUMS` lists every archive: 31 files in
 all.
 
