@@ -13,6 +13,7 @@
 | `crates/dsd2pcm/tests/pysacd-ref/pysacd/` | pysacd `csrc/dsp.c`, `csrc/dsp.h` and `licenses/dsp-LICENSE-*`, copied unchanged from pysacd commit 94b2c53 | MIT OR Apache-2.0 | Test reference only (`gen.sh`); not compiled into the crate |
 | `crates/dsd2pcm/tests/pysacd-ref/pysacd_ref.c`, `gen.sh` | The quantiser loop follows pysacd `tools/pcm_vectors/pcm_vectors.c` (pysacd PR #197; itself copied from `process_batch()`), changed to one stream per area and a per-frame seed | MIT OR Apache-2.0 | Generates the taps and the reference hashes |
 | Stage 1 byte lookup tables (technique) | Sebastian Gesemann's dsd2pcm (2009), credited by pysacd's `dsp.c`; no code taken | BSD-3-Clause (technique credit) | `Filter::Pysacd` stage 1 |
+| `tools/quality/` | New: test signal generator, reference sigma-delta modulator (designed from Schreier and Temes, *Understanding Delta-Sigma Data Converters*, 2005), analysis and plots; no code copied. `tools/quality/sbpcm` calls scarletbook-pcm 0.7.0 from crates.io. SoX-DSD (GPL) is only run as a separate program by `gen_signals.py --sox`, never included | MIT OR Apache-2.0 | `docs/pcm-quality.md` measurements |
 | DSF reader/writer | Sony, "DSF File Format Specification" v1.01 | Public specification | `dsf.rs` |
 | DSDIFF reader/writer | Philips, "DSDIFF File Format Specification" 1.5 | Public specification | `dff.rs` |
 | WAV reader/writer | Microsoft/IBM RIFF WAVE and `WAVE_FORMAT_EXTENSIBLE` documentation | Public specification | `wav.rs` |

@@ -9,6 +9,10 @@
   exited with 2); the usage explains `--single-thread`.
 - Docs: checked against the code and the 0.1.1 release (commands, file names, versions);
   a security policy (`SECURITY.md`).
+- Docs: [PCM quality](docs/pcm-quality.md), the measured audio quality of every filter and
+  rate (frequency response, aliasing, ringing, noise, ultrasonic noise, headroom, an
+  RMAA-style summary, the pysacd preset and scarletbook-pcm 0.7.0 compared), with the
+  measurement scripts in `tools/quality`.
 
 ## 0.1.1
 

@@ -1,1 +1,7 @@
 /target
+/venv/
+/out/
+/foobar-in/
+/foobar-out/
+/tools/quality/sbpcm/target/
+__pycache__/
