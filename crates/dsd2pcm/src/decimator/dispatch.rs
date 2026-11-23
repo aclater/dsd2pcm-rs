@@ -261,10 +261,10 @@ pub(super) fn lanes_level(isa: Isa) -> bool {
         || matches!(isa.0, SimdLevel::Sse2 | SimdLevel::Neon)
 }
 
-/// Whether passes run in lanes from fewer outputs at `isa` (`super::LANES_MIN_SSE2`): at
-/// the `sse2` level.
+/// Whether passes run in lanes from fewer outputs at `isa` (`super::LANES_MIN_SHORT`): at
+/// the `sse2` and `neon` levels.
 pub(super) fn short_lanes(isa: Isa) -> bool {
-    isa.0 == SimdLevel::Sse2
+    matches!(isa.0, SimdLevel::Sse2 | SimdLevel::Neon)
 }
 
 /// The layout of the S1 tables at `isa`: bytes on 32-bit targets below AVX2 (small
@@ -504,13 +504,17 @@ mod neon {
     use super::kernel::{self, Sym};
     use super::{lanes, Fused};
 
-    /// Outputs per block of the ordered fused kernels.
+    /// Outputs per block of the ordered fused kernels (32 measured the same).
     const L: usize = 16;
-    /// Output vectors per block of the lanes in Fir1 and Interp2.
-    pub(super) const SV1: usize = 8;
-    /// Output vectors per block of the lanes in Dec2.
-    pub(super) const SV2: usize = 8;
-    /// Whether the lanes load whole windows (`lanes::pairs`).
+    /// Output vectors per block of the lanes in Fir1 and Interp2: 4 (8 sums). On a
+    /// GitHub-hosted Neoverse N2 runner 2 ran 1.15x slower, 8 about 2 % slower and 16 1.2x
+    /// slower.
+    pub(super) const SV1: usize = 4;
+    /// Output vectors per block of the lanes in Dec2: 4 (8 sums); 2 ran 1.18x slower, 8
+    /// 1.15x and 16 1.55x slower at 88.2 kHz (two Dec2 stages).
+    pub(super) const SV2: usize = 4;
+    /// Whether the lanes load whole windows (`lanes::pairs`): 1 to 2 % faster on the same
+    /// runner (3 % slower only for Dec2 of the wide filter at 176.4 kHz).
     const WHOLE: bool = true;
 
     pub(super) fn fir1(s: &Sym, x: &[f64], out: &mut [f64]) {

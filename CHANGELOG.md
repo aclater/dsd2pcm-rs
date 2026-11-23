@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- aarch64 (Linux and macOS): a new SIMD level, `neon` (`DSD2PCM_SIMD=neon`), picked on every
+  aarch64 CPU: passes in lanes with fused multiply-adds where proven exact, the paired S1
+  tables and the frame carry. About 2x the speed of scarletbook-pcm 0.7.0 on a GitHub-hosted
+  Neoverse N2 runner, where the generic level ran at 0.97x to 1.04x
+  ([performance](docs/performance.md)). Output bytes unchanged; no new `unsafe`.
+
 - x86_64 without AVX2 (e.g. Celeron and Pentium J and N series of NAS units): the `sse2`
   level now runs there too, where the generic level ran at 0.6x to 0.9x the speed of
   scarletbook-pcm 0.7.0 ([performance](docs/performance.md)). Output bytes unchanged.

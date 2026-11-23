@@ -195,11 +195,18 @@ run property the bytes equal one call.
   An SSE4.2 build measured within noise of SSE2, so there is no SSE4 level. AVX2 CPUs never
   pick this level; their loop loads vectors through slices, which measured 10-15 % faster
   with AVX2 than the whole-vector form.
-- Run-time dispatch (`decimator/dispatch.rs`, the crate's only `unsafe`): generic, SSE2
+- Lanes on aarch64 (level `neon`, every aarch64 CPU: NEON and FMA are the baseline): the
+  same loop as at `sse2` on x86-64 (whole-vector loads, blocks of 4 output vectors, 8 sums,
+  in every stage; 2, 8 and 16 measured slower on a Neoverse N2), the paired S1 tables and
+  the frame carry, lanes from 1024 outputs (2048 wide), and fused multiply-adds in every
+  stage proven exact, in lanes and in the ordered kernels of short passes. No
+  `#[target_feature]` is needed, so the level adds no `unsafe`.
+- Run-time dispatch (`decimator/dispatch.rs`, the crate's only `unsafe`): generic, NEON
+  (aarch64), SSE2
   (picked on x86 and x86-64 CPUs without AVX2), AVX2, and AVX2 with FMA. FMA is used only in stages that `decimator/exact.rs` proves exact from
   the tables and stage plan (every product and partial sum an integer below 2^53); the
   test `sums_are_exact` fails if a table or stage change breaks the proof, and such a stage
-  runs unfused. `DSD2PCM_SIMD=generic|sse2|avx2|avx2fma` caps the level; the golden hashes in
+  runs unfused. `DSD2PCM_SIMD=generic|neon|sse2|avx2|avx2fma` caps the level; the golden hashes in
   `tests/identity.rs` are checked at every level the CPU has.
 - Whole-file conversion quantises each piece straight into its slot of a per-block sample
   buffer and interleaves once into the output bytes; stage input is read straight from the
