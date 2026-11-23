@@ -18,7 +18,7 @@
 mod dispatch;
 mod exact;
 mod kernel;
-mod stagger;
+mod lanes;
 mod tables;
 
 pub(crate) use dispatch::Isa;
@@ -118,6 +118,18 @@ fn lut(half: &[i32]) -> Lut {
 
 type Lut = kernel::S1Lut;
 
+/// [`lut`] as paired tables (`lanes`).
+fn pair(half: &[i32]) -> lanes::S1Pair {
+    let bytes = half.len() / 4;
+    let centre = 8 * (bytes / 2);
+    lanes::S1Pair::new(bytes, |i| {
+        half.get(i.abs_diff(centre)).copied().unwrap_or(0)
+    })
+}
+
+static PAIR_S1: OnceLock<lanes::S1Pair> = OnceLock::new();
+static PAIR_S1_WIDE: OnceLock<lanes::S1Pair> = OnceLock::new();
+
 static LUT_S1: OnceLock<Lut> = OnceLock::new();
 static LUT_S1_WIDE: OnceLock<Lut> = OnceLock::new();
 
@@ -128,6 +140,10 @@ const PAD: usize = kernel::MAX_L;
 
 /// S1 bytes per pass: the scratch buffers stay in the L2 cache.
 const PASS_BYTES: usize = 32 << 10;
+
+/// The fewest outputs a pass runs in lanes: shorter passes would mostly compute runs
+/// that overlap.
+const LANES_MIN: usize = 8 * PAD;
 
 /// Most stages after S1 in any plan.
 const MAX_OPS: usize = 3;
@@ -171,6 +187,7 @@ pub(crate) struct Scratch {
     b: Vec<f64>,
     even: Vec<f64>,
     odd: Vec<f64>,
+    lanes: lanes::Bufs,
 }
 
 /// The stages of one rate and cutoff. Output `o` is centred on DSD byte `o k` (`k` = 4, 2
@@ -187,6 +204,9 @@ pub(crate) struct Plan {
     pass: usize,
     /// The bytes that outputs `0` and `1` need: `win.0 .. win.0 + win.1`.
     win: (i64, usize),
+    /// Whether passes run in lanes (`lanes`): every stage proven exact and taken, on a
+    /// level that runs them; with S1's paired tables.
+    lanes: Option<&'static lanes::S1Pair>,
 }
 
 impl Plan {
@@ -232,13 +252,26 @@ impl Plan {
         exact::prove(s1_half, &mut ops);
         let k = (rate.decimation() / 8) as i64;
         let pass = (PASS_BYTES / k as usize).div_ceil(PAD) * PAD;
+        let isa = Isa::current();
+        let lanes = (dispatch::lanes_level(isa)
+            && ops.iter().all(|op| match op {
+                Op::Fir1(s) | Op::Dec2(s) | Op::Interp2(s) => lanes::takes(s),
+            }))
+        .then(|| {
+            if cutoff == Cutoff::Wide {
+                PAIR_S1_WIDE.get_or_init(|| pair(&tables::S1_WIDE))
+            } else {
+                PAIR_S1.get_or_init(|| pair(&tables::S1))
+            }
+        });
         let mut plan = Plan {
             lut,
-            isa: Isa::current(),
+            isa,
             ops,
             k,
             pass,
             win: (0, 0),
+            lanes,
         };
         plan.win = plan.byte_range((0, 2), false);
         Ok(plan)
@@ -387,30 +420,20 @@ impl Plan {
 
     /// One pass: outputs `o0 .. o0 + n` into `sc.a[..n]`.
     fn pass_run(&self, src: &[u8], src0: i64, o0: i64, n: usize, sc: &mut Scratch) {
+        if let Some(pair) = self.lanes.filter(|_| n >= LANES_MIN) {
+            return self.pass_lanes(pair, src, src0, o0, n, sc);
+        }
         let Scratch {
             bytes: buf,
             a,
             b,
             even,
             odd,
+            ..
         } = sc;
         let levels = self.levels((o0, n), true);
         let (p0, plen) = self.byte_range((o0, n), true);
-        // The bytes `p0 .. p0 + plen`: straight from `src` when it holds them all, else
-        // copied, with the idle pattern beyond `src`.
-        let bytes: &[u8] = if src0 <= p0 && p0 + plen as i64 <= src0 + src.len() as i64 {
-            &src[(p0 - src0) as usize..][..plen]
-        } else {
-            buf.clear();
-            buf.resize(plen, IDLE);
-            let lo = src0.max(p0);
-            let hi = (src0 + src.len() as i64).min(p0 + plen as i64);
-            if lo < hi {
-                buf[(lo - p0) as usize..(hi - p0) as usize]
-                    .copy_from_slice(&src[(lo - src0) as usize..(hi - src0) as usize]);
-            }
-            buf
-        };
+        let bytes = fetch(src, src0, p0, plen, buf);
         // The buffers the kernels write are resized, not cleared: they write every element.
         if !matches!(self.ops.first(), Some(Op::Dec2(_))) {
             let n1 = levels[0].1.div_ceil(PAD) * PAD;
@@ -459,6 +482,69 @@ impl Plan {
             }
             std::mem::swap(a, b);
         }
+    }
+
+    /// [`pass_run`](Self::pass_run) in lanes: `lanes::W` runs of `q` outputs (`n / W`
+    /// rounded up to whole blocks), the last ones moved back to end with the padded pass
+    /// (runs may overlap; they give the same outputs where they do), each computed as
+    /// `pass_run` would.
+    fn pass_lanes(
+        &self,
+        pair: &lanes::S1Pair,
+        src: &[u8],
+        src0: i64,
+        o0: i64,
+        n: usize,
+        sc: &mut Scratch,
+    ) {
+        let n_pad = n.div_ceil(PAD) * PAD;
+        let q = n.div_ceil(lanes::W).div_ceil(PAD) * PAD;
+        let runs: [usize; lanes::W] = std::array::from_fn(|w| (w * q).min(n_pad - q));
+        let levels = self.levels((o0, q), true);
+        let mut len = [0usize; MAX_OPS + 1];
+        for (l, v) in len.iter_mut().zip(&levels) {
+            *l = v.1;
+        }
+        // The bytes of each run; every run's level lengths are the same.
+        let ranges = runs.map(|r| self.byte_range((o0 + r as i64, q), true));
+        let b0 = ranges[0].0;
+        let starts = ranges.map(|(b, _)| (b - b0) as usize);
+        let plen = starts[lanes::W - 1] + ranges[lanes::W - 1].1;
+        let bytes = fetch(src, src0, b0, plen, &mut sc.bytes);
+        let pass = lanes::Pass {
+            lut: self.lut,
+            pair,
+            ops: &self.ops,
+            bytes,
+            starts,
+            lens: &len[..=self.ops.len()],
+        };
+        let out = dispatch::lanes(self.isa, &pass, PAD, &mut sc.lanes);
+        sc.a.resize(n, 0.0);
+        for (w, &r) in runs.iter().enumerate() {
+            let end = (r + q).min(n);
+            for (d, v) in sc.a[r..end].iter_mut().zip(out) {
+                *d = v.0[w];
+            }
+        }
+    }
+}
+
+/// The bytes `p0 .. p0 + plen`: straight from `src` (bytes `src0 ..`) when it holds them
+/// all, else copied into `buf`, with the idle pattern beyond `src`.
+fn fetch<'a>(src: &'a [u8], src0: i64, p0: i64, plen: usize, buf: &'a mut Vec<u8>) -> &'a [u8] {
+    if src0 <= p0 && p0 + plen as i64 <= src0 + src.len() as i64 {
+        &src[(p0 - src0) as usize..][..plen]
+    } else {
+        buf.clear();
+        buf.resize(plen, IDLE);
+        let lo = src0.max(p0);
+        let hi = (src0 + src.len() as i64).min(p0 + plen as i64);
+        if lo < hi {
+            buf[(lo - p0) as usize..(hi - p0) as usize]
+                .copy_from_slice(&src[(lo - src0) as usize..(hi - src0) as usize]);
+        }
+        buf
     }
 }
 
@@ -617,6 +703,61 @@ mod tests {
             // The gain multiply (at most +24 dB, below 16) of an integer output is exact
             // too; the quantiser rounds it.
             assert!(16 * x < exact::LIMIT);
+        }
+        // The paired S1 tables of the lanes: no half of a sum reaches 2^32, so the halves
+        // never carry into each other; and the tables stay small enough for the L2 cache.
+        for half in [&tables::S1[..], &tables::S1_WIDE[..]] {
+            let p = pair(half);
+            for w in p.worst() {
+                assert!((0..1 << 32).contains(&w), "pair half bound {w}");
+            }
+            assert!(p.size() <= 160 << 10, "pair tables {} bytes", p.size());
+        }
+    }
+
+    /// Passes in lanes give the ordered passes' outputs, for every plan, at every level,
+    /// for pass lengths with and without whole blocks per run, on random bytes, idle and
+    /// full-scale runs.
+    #[test]
+    fn lanes_match_ordered() {
+        let mut seed = 0x2545_F491_4F6C_DD1Du64;
+        let bytes: Vec<u8> = (0..40_000)
+            .map(|i| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                match (i / 3000) % 4 {
+                    1 => 0xFF,
+                    2 => IDLE,
+                    3 => 0x00,
+                    _ => seed as u8,
+                }
+            })
+            .collect();
+        for level in SimdLevel::available() {
+            for (rate, cutoff) in ALL {
+                let plan = with_simd_level(level, || Plan::new(rate, cutoff))
+                    .unwrap()
+                    .unwrap();
+                let mut lanes = plan.clone();
+                lanes.lanes = Some(if cutoff == Cutoff::Wide {
+                    PAIR_S1_WIDE.get_or_init(|| pair(&tables::S1_WIDE))
+                } else {
+                    PAIR_S1.get_or_init(|| pair(&tables::S1))
+                });
+                let mut ordered = plan.clone();
+                ordered.lanes = None;
+                for (o0, n) in [(0, LANES_MIN), (-200, 1176 * 6), (64, 2050), (10, 4096)] {
+                    let n = n.min(plan.pass);
+                    let (mut a, mut b) = (Scratch::default(), Scratch::default());
+                    ordered.pass_run(&bytes, 300, o0, n, &mut a);
+                    lanes.pass_run(&bytes, 300, o0, n, &mut b);
+                    assert!(
+                        a.a[..n] == b.a[..n],
+                        "{level:?} {rate:?} {cutoff:?} o0 {o0} n {n}"
+                    );
+                }
+            }
         }
     }
 

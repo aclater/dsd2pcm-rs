@@ -116,15 +116,19 @@ impl S1Lut {
 
 /// S1: `out[k]` = the S1 sum over the window `bytes[start + stride k ..]`.
 #[inline(always)]
-pub(super) fn s1(lut: &S1Lut, bytes: &[u8], start: usize, stride: usize, out: &mut [f64]) {
+pub(super) fn s1<'a, O>(lut: &S1Lut, bytes: &[u8], start: usize, stride: usize, out: O)
+where
+    O: IntoIterator<Item = &'a mut f64>,
+    O::IntoIter: ExactSizeIterator,
+{
     // S1's 8-byte window and the wide filter's 12-byte one, with a constant table count, so
     // that the loops unroll.
     const T8: usize = s1_tables(8);
     const T12: usize = s1_tables(12);
     if let (8, Ok(t)) = (lut.bytes, <&[S1Table; T8]>::try_from(&lut.tables[..])) {
-        s1_n::<8, T8>(t, bytes, start, stride, out)
+        s1_n::<8, T8, _>(t, bytes, start, stride, out)
     } else if let (12, Ok(t)) = (lut.bytes, <&[S1Table; T12]>::try_from(&lut.tables[..])) {
-        s1_n::<12, T12>(t, bytes, start, stride, out)
+        s1_n::<12, T12, _>(t, bytes, start, stride, out)
     } else {
         s1_any(lut, bytes, start, stride, out)
     }
@@ -153,20 +157,24 @@ fn load(part: &[u8]) -> u64 {
 /// [`s1`] with a window of `B` bytes and `T` tables: each window is read as 64-bit words
 /// and cut into chunks, with the loops unrolled.
 #[inline(always)]
-fn s1_n<const B: usize, const T: usize>(
+fn s1_n<'a, const B: usize, const T: usize, O>(
     t: &[S1Table; T],
     bytes: &[u8],
     start: usize,
     stride: usize,
-    out: &mut [f64],
-) {
+    out: O,
+) where
+    O: IntoIterator<Item = &'a mut f64>,
+    O::IntoIter: ExactSizeIterator,
+{
+    let out = out.into_iter();
     let Some(last) = out.len().checked_sub(1) else {
         return;
     };
     let windows = bytes[start..start + stride * last + B]
         .windows(B)
         .step_by(stride);
-    for (o, w) in out.iter_mut().zip(windows) {
+    for (o, w) in out.zip(windows) {
         let mut sum = 0i32;
         let mut k = 0;
         for part in w.chunks(8) {
@@ -184,9 +192,15 @@ fn s1_n<const B: usize, const T: usize>(
 }
 
 /// [`s1`] for any window.
-pub(super) fn s1_any(lut: &S1Lut, bytes: &[u8], start: usize, stride: usize, out: &mut [f64]) {
+pub(super) fn s1_any<'a>(
+    lut: &S1Lut,
+    bytes: &[u8],
+    start: usize,
+    stride: usize,
+    out: impl IntoIterator<Item = &'a mut f64>,
+) {
     let chunks = S1Lut::chunks(lut.bytes);
-    for (k, o) in out.iter_mut().enumerate() {
+    for (k, o) in out.into_iter().enumerate() {
         let w = &bytes[start + stride * k..][..lut.bytes];
         let sum = chunks
             .iter()
@@ -245,7 +259,7 @@ pub(super) struct Sym {
     pub odd: Vec<f64>,
     /// 2^-q: from the product scale back to the sample grid.
     pub scale: f64,
-    /// Whether a fused multiply-add, or another summation order (`super::stagger`), may be
+    /// Whether a fused multiply-add, or another summation order (`super::lanes`), may be
     /// used: set by the plan only when `super::exact` proved every sum of this stage exact.
     pub fused: bool,
 }

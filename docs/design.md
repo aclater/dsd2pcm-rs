@@ -143,20 +143,26 @@ run property the bytes equal one call.
   sum is the same integer.
 - The FIR kernels compute blocks of independent outputs (16 generic, 32 with AVX2), so
   the compiler puts them in vector lanes; each output keeps its own sum in tap order.
-- Staggered kernels (`decimator/stagger.rs`, x86-64 with AVX2 and FMA, proven stages with
-  32 to 128 tap offsets: the 30, 40 and 80 kHz filters). The ordered kernels load two
-  unaligned input vectors per tap pair and vector, which makes them bound by loads (and by
-  loads that cross cache lines). The staggered kernels split each block of up to 1024
-  outputs into 4 lanes of consecutive outputs and copy the input once into aligned
-  vectors whose lane `w` is lane `w`'s input; one loaded vector then serves every (output,
-  tap) pair with the same sum of indices, so a group of 4 taps and 4 output vectors loads
-  7 vectors per side instead of 32. Each group's products go into a partial sum that is
-  added to the output's sum, so that groups do not wait on the FMA latency. The terms are
-  summed in another order and grouping, which gives the same integer only because the
-  stage is proven exact; `staggered_matches_ordered` checks it at the proven input bounds.
-  The half-band stages stay on the ordered kernels (8 odd taps: the copy costs more than
-  it saves); x86 (32-bit) and the generic level do too (fewer registers: the groups would
-  spill).
+- Lanes (`decimator/lanes.rs`; x86-64 with AVX2 and FMA, plans whose every stage is proven
+  exact, passes of at least 256 outputs). The ordered kernels load two unaligned input
+  vectors per tap pair and output vector, so they are bound by loads, many of them across
+  cache lines. A pass in lanes splits its outputs into 4 runs of consecutive outputs (each a
+  whole number of blocks; the last runs move back to end with the padded pass, so runs may
+  overlap) and computes each run as the ordered pass would, with run `w` in lane `w` of
+  every vector. Every stage is then an FIR over aligned vectors; decimation and
+  interpolation are index arithmetic, and nothing is copied between stages. A group of 4
+  tap pairs and 4 output vectors loads 7 vectors per side instead of 32, and sums into a
+  partial sum that is then added to the output's, so that groups do not wait on the FMA
+  latency. S1 runs at every byte with paired tables: the windows of two neighbouring
+  outputs are read as one window one byte longer, cut into 11-bit chunks, and each entry
+  holds both contributions, biased to be non-negative, in the two 32-bit halves of a
+  `u64` (no half of a sum reaches 2^32, so they never carry into each other); one set of
+  lookups (7, or 10 for the wide filter) gives two outputs. Tables: 112 KiB, wide 160
+  KiB. The terms of each output are summed in another order and grouping than the ordered
+  kernels', which gives the same integers only because the stages are proven exact;
+  `lanes_match_ordered` compares the two at every level, and the golden hashes run at
+  every level. 32-bit x86 and the generic level keep the ordered kernels (fewer
+  registers).
 - Run-time dispatch (`decimator/dispatch.rs`, the crate's only `unsafe`): generic, AVX2,
   and AVX2 with FMA. FMA is used only in stages that `decimator/exact.rs` proves exact from
   the tables and stage plan (every product and partial sum an integer below 2^53); the

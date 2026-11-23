@@ -9,9 +9,9 @@
 //! AVX2 builds do the same IEEE-754 operations in the same order per output (the compiler
 //! never fuses or reorders floating-point operations on its own), and a fused multiply-add
 //! gives the same result as a product and an addition when both are exact. On x86-64 the
-//! third level also runs the long proven stages with the staggered kernels
-//! ([`super::stagger`]), which sum each output's terms in another order and grouping: the
-//! same integer, because every partial sum is exact.
+//! third level runs plans whose every stage is proven exact in lanes ([`super::lanes`]),
+//! which sum each output's terms in another order and grouping: the same integers, because
+//! every partial sum is exact.
 //!
 //! This is the only module of the crate with `unsafe`: calling a `#[target_feature]`
 //! function is `unsafe`. Every call is made with an [`Isa`] whose level is at most the one
@@ -22,8 +22,7 @@
 #![allow(unsafe_code)]
 
 use super::kernel::{self, Plain, S1Lut, Sym};
-#[cfg(target_arch = "x86_64")]
-use super::stagger;
+use super::lanes;
 
 /// A SIMD level of the kernels. Every level gives the same output bytes.
 #[doc(hidden)]
@@ -150,13 +149,9 @@ pub(crate) fn s1(
     }
 }
 
-/// [`kernel::fir1`]; fused only if `s.fused`, staggered ([`stagger::fir1_st`]) only if
-/// [`stagger::st_ok`] and on x86-64 with AVX2 and FMA.
+/// [`kernel::fir1`]; fused only if `s.fused`.
 pub(crate) fn fir1(isa: Isa, s: &Sym, x: &[f64], out: &mut [f64]) {
     match isa.0 {
-        #[cfg(target_arch = "x86_64")]
-        // SAFETY: the level guarantees AVX2 and FMA (see above).
-        SimdLevel::Avx2Fma if stagger::st_ok(s) => unsafe { avx2fma::fir1_st(s, x, out) },
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees AVX2 and FMA (see above).
         SimdLevel::Avx2Fma if s.fused => unsafe { avx2fma::fir1(s, x, out) },
@@ -167,13 +162,9 @@ pub(crate) fn fir1(isa: Isa, s: &Sym, x: &[f64], out: &mut [f64]) {
     }
 }
 
-/// [`kernel::dec2`]; fused only if `s.fused`, staggered ([`stagger::dec2_st`]) only if
-/// [`stagger::st_ok`] and on x86-64 with AVX2 and FMA.
+/// [`kernel::dec2`]; fused only if `s.fused`.
 pub(crate) fn dec2(isa: Isa, s: &Sym, xe: &[f64], xo: &[f64], out: &mut [f64]) {
     match isa.0 {
-        #[cfg(target_arch = "x86_64")]
-        // SAFETY: the level guarantees AVX2 and FMA (see above).
-        SimdLevel::Avx2Fma if stagger::st_ok(s) => unsafe { avx2fma::dec2_st(s, xe, xo, out) },
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees AVX2 and FMA (see above).
         SimdLevel::Avx2Fma if s.fused => unsafe { avx2fma::dec2(s, xe, xo, out) },
@@ -184,13 +175,9 @@ pub(crate) fn dec2(isa: Isa, s: &Sym, xe: &[f64], xo: &[f64], out: &mut [f64]) {
     }
 }
 
-/// [`kernel::interp2_odd`]; fused only if `s.fused`, staggered ([`stagger::interp2_odd_st`]) only if
-/// [`stagger::st_ok`] and on x86-64 with AVX2 and FMA.
+/// [`kernel::interp2_odd`]; fused only if `s.fused`.
 pub(crate) fn interp2_odd(isa: Isa, s: &Sym, w: &[f64], out: &mut [f64]) {
     match isa.0 {
-        #[cfg(target_arch = "x86_64")]
-        // SAFETY: the level guarantees AVX2 and FMA (see above).
-        SimdLevel::Avx2Fma if stagger::st_ok(s) => unsafe { avx2fma::interp2_odd_st(s, w, out) },
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         // SAFETY: the level guarantees AVX2 and FMA (see above).
         SimdLevel::Avx2Fma if s.fused => unsafe { avx2fma::interp2_odd(s, w, out) },
@@ -198,6 +185,26 @@ pub(crate) fn interp2_odd(isa: Isa, s: &Sym, w: &[f64], out: &mut [f64]) {
         // SAFETY: the level guarantees AVX2 (see above).
         SimdLevel::Avx2 | SimdLevel::Avx2Fma => unsafe { avx2::interp2_odd(s, w, out) },
         _ => kernel::interp2_odd::<{ kernel::L }, Plain>(s, w, out),
+    }
+}
+
+/// Whether passes may run in lanes ([`lanes::run`]) at `isa`: x86-64 with AVX2 and FMA.
+pub(super) fn lanes_level(isa: Isa) -> bool {
+    cfg!(target_arch = "x86_64") && isa.0 == SimdLevel::Avx2Fma
+}
+
+/// [`lanes::run`], fused (every stage must be proven exact: [`lanes::takes`]).
+pub(super) fn lanes<'b>(
+    isa: Isa,
+    p: &lanes::Pass<'_>,
+    pad: usize,
+    bufs: &'b mut lanes::Bufs,
+) -> &'b [lanes::Lanes] {
+    match isa.0 {
+        #[cfg(target_arch = "x86_64")]
+        // SAFETY: the level guarantees AVX2 and FMA (see above).
+        SimdLevel::Avx2Fma => unsafe { avx2fma::run_lanes(p, pad, bufs) },
+        _ => lanes::run::<Plain>(p, pad, bufs),
     }
 }
 
@@ -274,7 +281,7 @@ mod avx2 {
 mod avx2fma {
     use super::kernel::{self, Mac, Sym};
     #[cfg(target_arch = "x86_64")]
-    use super::stagger;
+    use super::lanes;
 
     /// Outputs per block of the ordered kernels: 8 vectors of AVX, 8 independent chains to
     /// cover the FMA latency.
@@ -295,21 +302,9 @@ mod avx2fma {
         kernel::fir1::<L, Fused>(s, x, out)
     }
 
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2,fma")]
-    pub(super) unsafe fn fir1_st(s: &Sym, x: &[f64], out: &mut [f64]) {
-        stagger::fir1_st::<Fused>(s, x, out)
-    }
-
     #[target_feature(enable = "avx2,fma")]
     pub(super) unsafe fn dec2(s: &Sym, xe: &[f64], xo: &[f64], out: &mut [f64]) {
         kernel::dec2::<L, Fused>(s, xe, xo, out)
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2,fma")]
-    pub(super) unsafe fn dec2_st(s: &Sym, xe: &[f64], xo: &[f64], out: &mut [f64]) {
-        stagger::dec2_st::<Fused>(s, xe, xo, out)
     }
 
     #[target_feature(enable = "avx2,fma")]
@@ -319,8 +314,12 @@ mod avx2fma {
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2,fma")]
-    pub(super) unsafe fn interp2_odd_st(s: &Sym, w: &[f64], out: &mut [f64]) {
-        stagger::interp2_odd_st::<Fused>(s, w, out)
+    pub(super) unsafe fn run_lanes<'b>(
+        p: &lanes::Pass<'_>,
+        pad: usize,
+        bufs: &'b mut lanes::Bufs,
+    ) -> &'b [lanes::Lanes] {
+        lanes::run::<Fused>(p, pad, bufs)
     }
 }
 
