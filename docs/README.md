@@ -1,5 +1,7 @@
 [dsd2pcm-rs](../README.md) › Documentation
 
+<img src="https://raw.githubusercontent.com/aclater/dsd2pcm-rs/main/docs/assets/icon-256.png" alt="" width="96">
+
 # Documentation
 
 The documentation of dsd2pcm: the command-line tool, the Rust crate and the C library.
@@ -31,5 +33,6 @@ Start with the [Quick start](../README.md#quick-start) in the README.
 - [Changelog](../CHANGELOG.md) · [Plan](plan.md)
 - [Contributing](../CONTRIBUTING.md) · [Development](development.md) · [Releases](release.md)
 - [Security policy](../SECURITY.md) · [Provenance](../PROVENANCE.md)
+- [Icons](assets/README.md): the project icon set, part of the DSD Toolbox family
 
 Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
