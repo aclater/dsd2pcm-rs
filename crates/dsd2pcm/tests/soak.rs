@@ -20,7 +20,8 @@
 //! On Linux it checks, from `/proc/self`:
 //! - after the warm-up (the first 20 % of iterations), the resident set size (`VmRSS`) of
 //!   the second half of the run stays within 5 % or 16 MiB (whichever is larger) of the
-//!   highest value of the first half;
+//!   highest value of the first half (`DSD2PCM_SOAK_RSS_REPORT_ONLY` only reports it, for
+//!   sanitizer builds);
 //! - the thread count is back at its value from before the run after every threaded
 //!   conversion.
 
@@ -472,8 +473,10 @@ fn soak() {
             late / 1024,
             bound / 1024
         );
+        // Under a sanitizer the resident set also holds its shadow memory and history,
+        // which grow with the run: DSD2PCM_SOAK_RSS_REPORT_ONLY reports without checking.
         assert!(
-            late <= bound,
+            late <= bound || std::env::var_os("DSD2PCM_SOAK_RSS_REPORT_ONLY").is_some(),
             "RSS grew: {late} KiB in the second half, plateau {plateau} KiB"
         );
     } else {

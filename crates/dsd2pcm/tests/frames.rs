@@ -161,6 +161,10 @@ impl Case<'_> {
 /// 0 and +7.5 dB in mono and 6 channels; at every SIMD level of this CPU. Every byte, every
 /// per-frame and per-channel clip count equals scarletbook-pcm's.
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: converts tens of frames at every setting"
+)]
 fn runs_identical_to_scarletbook_pcm() {
     let levels = SimdLevel::available();
     let mut cases = 0usize;
@@ -219,6 +223,10 @@ fn runs_identical_to_scarletbook_pcm() {
 /// A short frame padded with the idle pattern (as a caller does with a partial last frame)
 /// converts as scarletbook-pcm converts the same padded frame.
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: converts tens of frames at every setting"
+)]
 fn padded_short_frame() {
     let ch = 2;
     let mut a = area(ch, 3, 77);
@@ -274,6 +282,10 @@ fn whole_file(area: &[u8], ch: usize, rate: PcmRate, cutoff: Cutoff, gain_db: f6
 /// whole area as one run all give the same bytes and per-frame clip counts, and equal
 /// `dsd64_to_pcm`.
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: converts tens of frames at every setting"
+)]
 fn frame_by_frame_equals_whole_area() {
     for ch in [1usize, 2, 6] {
         let frames = 13;
@@ -344,6 +356,10 @@ fn frame_by_frame_equals_whole_area() {
 /// The neighbour context is less than one frame and matches scarletbook-pcm's; only that
 /// many bytes of each neighbour matter.
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: converts tens of frames at every setting"
+)]
 fn context_bytes() {
     let ch = 2;
     let a = area(ch, 5, 5);
@@ -421,6 +437,10 @@ fn errors_write_nothing() {
 /// that jump, repeat, go back, or whose neighbour differs from the frame converted before
 /// give the samples of a fresh converter.
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: converts tens of frames at every setting"
+)]
 fn calls_out_of_order_or_with_other_neighbours() {
     for ch in [1usize, 2] {
         let frames = 14;
