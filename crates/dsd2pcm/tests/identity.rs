@@ -163,7 +163,8 @@ fn digest(rate: PcmRate, cutoff: Cutoff) -> String {
                     rate,
                     cutoff,
                     gain_db,
-                    threads: true,
+                    // Both the threaded and the single-thread driver.
+                    threads: gain_db != -3.0,
                 };
                 let (bytes, clipped) = ours(chans, &opts);
                 // The hashed output is scarletbook-pcm's.

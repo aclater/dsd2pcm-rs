@@ -154,6 +154,7 @@ pub fn dsd64_to_pcm<W: Write + Seek>(
     } else {
         1
     };
+    let chunk = if workers > 1 { CHUNK } else { CHUNK_1 };
     let mut scratch: Vec<Scratch> = (0..workers).map(|_| Scratch::default()).collect();
     let mut clipped = vec![0u64; ch];
     // Each channel's bytes from `byte_start` on.
@@ -168,7 +169,7 @@ pub fn dsd64_to_pcm<W: Write + Seek>(
         let got = if eof {
             0
         } else {
-            r.read_bytes(CHUNK, &mut bufs)?
+            r.read_bytes(chunk, &mut bufs)?
         };
         eof |= got == 0;
         let end = byte_start + bufs[0].len() as i64;
@@ -228,6 +229,8 @@ pub fn dsd64_to_pcm<W: Write + Seek>(
 
 /// Input bytes per channel read at a time.
 const CHUNK: usize = 1 << 20;
+/// Input bytes per channel read at a time on one thread: the block stays in the cache.
+const CHUNK_1: usize = 64 << 10;
 /// Input bytes per piece of work.
 const PIECE: i64 = 64 << 10;
 
