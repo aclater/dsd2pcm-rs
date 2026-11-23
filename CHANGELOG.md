@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Channel layouts: `WavReader::channel_mask` and `FlacReader::channel_mask` (and
+  `PcmRead::channel_mask`) give the channel mask a file declares (`WAVE_FORMAT_EXTENSIBLE`,
+  or FLAC's `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` comment); `DsdRead::channel_mask` the
+  layout of a DSF channel type or of DSDIFF channel IDs; `WavWriter::with_channel_mask`,
+  `DsfWriter::set_channel_mask`, `dsf::channel_mask_for_type` and
+  `dsf::channel_type_for_mask` ([usage](docs/usage.md#formats)).
+
+### Changed
+
+- DSD to WAV conversion writes the channel mask of the input's layout (DSF channel type,
+  DSDIFF channel IDs) instead of the one of its channel count. The WAV header changes only
+  where the two differ: a DSF of type 5 (FL FR C LFE) was labelled quad (FL FR BL BR), and
+  DSDIFF files with other speaker sets, such as FL FR LFE, were labelled by their count.
+  The samples are unchanged.
+
 ## 0.1.2 (2026-11-23)
 
 This release contains security fixes; upgrading is recommended. Versions 0.1.0 and 0.1.1 are

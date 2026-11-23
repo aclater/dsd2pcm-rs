@@ -8,7 +8,10 @@
 //! This module parses the container itself: an optional leading ID3v2 tag (skipped, as the
 //! reference decoder does), the `fLaC` marker and the metadata blocks, of which only
 //! STREAMINFO is kept; the others are skipped by seeking, after checking their sizes
-//! against the file length, so nothing in them is allocated or parsed. `claxon` then sees
+//! against the file length, so nothing in them is allocated. Only the Vorbis comment block
+//! is looked into, for a `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` field: its length fields are
+//! checked against the block, comments longer than 64 bytes are skipped unread, and a
+//! malformed block is ignored as before. `claxon` then sees
 //! a minimal stream (marker and STREAMINFO) followed by the audio frames, and only decodes
 //! frames. Every frame must match STREAMINFO's channel count and sample range.
 //!
@@ -34,6 +37,11 @@ pub const MAX_CHUNK: usize = 1 << 20;
 const MAX_ID3_TAGS: usize = 16;
 /// Most metadata blocks, STREAMINFO included.
 const MAX_METADATA_BLOCKS: usize = 4096;
+/// The Vorbis comment field that carries a channel mask, as the reference encoder writes
+/// it from a `WAVE_FORMAT_EXTENSIBLE` input (matched without regard to case).
+const MASK_FIELD: &[u8] = b"WAVEFORMATEXTENSIBLE_CHANNEL_MASK=";
+/// Longest Vorbis comment read when looking for the mask; longer ones are skipped.
+const MAX_MASK_COMMENT: usize = 64;
 
 /// A reader whose `read` never returns more than the buffer length, whatever the inner
 /// reader claims.
@@ -67,6 +75,7 @@ pub struct FlacReader<R: Read + Seek> {
     flac: Inner<R>,
     info: PcmInfo,
     bits: u32,
+    channel_mask: Option<u32>,
     /// Decoded samples not yet returned: one block, channel after channel, `pend_len`
     /// frames each, from frame `pend_pos` on.
     pend: Vec<i32>,
@@ -93,8 +102,74 @@ fn map_err(e: claxon::Error) -> Error {
     }
 }
 
-/// Where the audio frames start, and the 34-byte STREAMINFO body.
-fn parse_container<R: Read + Seek>(r: &mut R, file_len: u64) -> Result<(u64, [u8; 34])> {
+/// A little-endian `u32` at `*pos` if it ends by `end`, advancing `*pos`.
+fn le_u32_until<R: Read>(r: &mut R, pos: &mut u64, end: u64) -> Result<Option<u32>> {
+    if *pos + 4 > end {
+        return Ok(None);
+    }
+    let b: [u8; 4] = read_exact_arr(r)?;
+    *pos += 4;
+    Ok(Some(u32::from_le_bytes(b)))
+}
+
+/// The value of a `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` field: hexadecimal after `0x`, as the
+/// reference encoder writes it, or decimal.
+fn parse_mask(v: &[u8]) -> Option<u32> {
+    let v = std::str::from_utf8(v).ok()?.trim();
+    match v.strip_prefix("0x").or_else(|| v.strip_prefix("0X")) {
+        Some(hex) => u32::from_str_radix(hex, 16).ok(),
+        None => v.parse().ok(),
+    }
+}
+
+/// The channel mask in the Vorbis comment block at `start..start + len` (the reader is at
+/// `start`), or `None` if it has none or is malformed. Reads at most the length fields and
+/// comments of up to [`MAX_MASK_COMMENT`] bytes; every length is checked against the block.
+fn vorbis_channel_mask<R: Read + Seek>(r: &mut R, start: u64, len: u64) -> Result<Option<u32>> {
+    let end = start + len;
+    let mut pos = start;
+    let Some(vendor) = le_u32_until(r, &mut pos, end)? else {
+        return Ok(None);
+    };
+    if pos + u64::from(vendor) > end {
+        return Ok(None);
+    }
+    pos += u64::from(vendor);
+    seek_to(r, pos)?;
+    let Some(count) = le_u32_until(r, &mut pos, end)? else {
+        return Ok(None);
+    };
+    // Each comment takes at least its 4-byte length, so the loop ends within the block.
+    for _ in 0..count {
+        let Some(n) = le_u32_until(r, &mut pos, end)? else {
+            return Ok(None);
+        };
+        let n = u64::from(n);
+        if pos + n > end {
+            return Ok(None);
+        }
+        if (MASK_FIELD.len() as u64..=MAX_MASK_COMMENT as u64).contains(&n) {
+            let mut buf = [0u8; MAX_MASK_COMMENT];
+            let c = &mut buf[..n as usize];
+            r.read_exact(c)?;
+            let (name, value) = c.split_at(MASK_FIELD.len());
+            if name.eq_ignore_ascii_case(MASK_FIELD) {
+                return Ok(parse_mask(value));
+            }
+        } else {
+            seek_to(r, pos + n)?;
+        }
+        pos += n;
+    }
+    Ok(None)
+}
+
+/// Where the audio frames start, the 34-byte STREAMINFO body, and the channel mask of the
+/// first Vorbis comment block that has one.
+fn parse_container<R: Read + Seek>(
+    r: &mut R,
+    file_len: u64,
+) -> Result<(u64, [u8; 34], Option<u32>)> {
     let mut pos = 0u64;
     let mut tags = 0;
     loop {
@@ -125,6 +200,7 @@ fn parse_container<R: Read + Seek>(r: &mut R, file_len: u64) -> Result<(u64, [u8
         tags += 1;
     }
     let mut streaminfo = None;
+    let mut mask = None;
     for n in 0.. {
         if n == MAX_METADATA_BLOCKS {
             return format_err("FLAC file has too many metadata blocks");
@@ -150,6 +226,10 @@ fn parse_container<R: Read + Seek>(r: &mut R, file_len: u64) -> Result<(u64, [u8
             (0, _) => return format_err("FLAC file does not start with STREAMINFO"),
             (_, 0) => return format_err("FLAC file has a second STREAMINFO block"),
             (_, 127) => return format_err("FLAC metadata block type 127 is invalid"),
+            (_, 4) if mask.is_none() => {
+                mask = vorbis_channel_mask(r, pos, len)?;
+                seek_to(r, pos + len)?;
+            }
             _ => {
                 seek_to(r, pos + len)?;
             }
@@ -160,7 +240,7 @@ fn parse_container<R: Read + Seek>(r: &mut R, file_len: u64) -> Result<(u64, [u8
         }
     }
     match streaminfo {
-        Some(s) => Ok((pos, s)),
+        Some(s) => Ok((pos, s, mask)),
         None => format_err("FLAC file has no STREAMINFO block"),
     }
 }
@@ -246,7 +326,7 @@ impl<R: Read + Seek> FlacReader<R> {
         let mut r = Honest(r);
         let file_len = r.seek(SeekFrom::End(0))?;
         r.seek(SeekFrom::Start(0))?;
-        let (frames_at, si) = parse_container(&mut r, file_len)?;
+        let (frames_at, si, channel_mask) = parse_container(&mut r, file_len)?;
         let mut flac = open_frames(r, &si, frames_at, file_len)?;
         let s = flac.streaminfo();
         if !(1..=6).contains(&s.channels) {
@@ -290,6 +370,7 @@ impl<R: Read + Seek> FlacReader<R> {
                 frames,
             },
             bits,
+            channel_mask,
             pend: Vec::new(),
             pend_len: 0,
             pend_pos: 0,
@@ -300,6 +381,14 @@ impl<R: Read + Seek> FlacReader<R> {
     /// Bits per sample.
     pub fn bits_per_sample(&self) -> u32 {
         self.bits
+    }
+
+    /// The channel mask of the `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` Vorbis comment (as the
+    /// reference encoder writes it for a `WAVE_FORMAT_EXTENSIBLE` input: `0x` and
+    /// hexadecimal digits; decimal is accepted too), as it is; `None` without one, or if
+    /// the comment block or the value is malformed.
+    pub fn channel_mask(&self) -> Option<u32> {
+        self.channel_mask
     }
 }
 
@@ -351,5 +440,9 @@ impl<R: Read + Seek> PcmRead for FlacReader<R> {
         }
         self.remaining -= done as u64;
         Ok(done)
+    }
+
+    fn channel_mask(&self) -> Option<u32> {
+        self.channel_mask
     }
 }

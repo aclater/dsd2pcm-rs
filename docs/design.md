@@ -278,6 +278,11 @@ checked against the file length, so nothing in it is allocated or parsed. `claxo
 Apache-2.0) is handed a minimal stream of `fLaC`, STREAMINFO marked last, and the file from
 the first audio frame, so it only decodes frames; its metadata parsers (Vorbis comment and
 application blocks, the code with its `set_len` on uninitialised buffers) never run.
+The reader looks into the first Vorbis comment block itself, for the
+`WAVEFORMATEXTENSIBLE_CHANNEL_MASK` field only: it reads the length fields, checks each
+against the block, reads comments of up to 64 bytes into a fixed buffer and skips longer
+ones by seeking, so nothing is allocated. A malformed block gives no mask rather than an
+error, so files that opened before still open.
 claxon's byte reader indexes its buffer unchecked with the count `read` returns, so every
 read from the caller's reader passes through an adapter that caps that count at the buffer
 length; an over-reporting `Read` gives errors or wrong samples, never out-of-bounds access
