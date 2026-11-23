@@ -1,7 +1,8 @@
-//! DSD to PCM conversion with DSF, DFF and WAV reading and writing.
+//! DSD to PCM conversion with DSF, DFF and WAV reading and writing, and FLAC reading.
 //!
 //! - [`dsf`], [`dff`], [`wav`]: container readers and writers. Parsers are bounds-checked
 //!   and return [`Error`] on bad input; nothing panics.
+//! - `flac` (feature `flac`, default): FLAC reader.
 //! - [`decimator`]: streaming DSD64 to 24-bit PCM at 88.2, 176.4 or 352.8 kHz, with the
 //!   filters of scarletbook-pcm 0.7.0 and identical output samples.
 //! - [`Filter`]: the filter choice: scarletbook-pcm's (default) or pysacd's
@@ -21,6 +22,8 @@ pub mod dff;
 pub mod dsf;
 pub mod error;
 pub mod filters;
+#[cfg(feature = "flac")]
+pub mod flac;
 pub mod frames;
 pub mod io;
 pub mod wav;

@@ -4,7 +4,7 @@
 [![crates.io](https://img.shields.io/crates/v/dsd2pcm.svg)](https://crates.io/crates/dsd2pcm)
 [![docs.rs](https://docs.rs/dsd2pcm/badge.svg)](https://docs.rs/dsd2pcm)
 
-DSD to PCM conversion in Rust, with DSF, DFF and WAV reading and writing.
+DSD to PCM conversion in Rust, with DSF, DFF and WAV reading and writing, and FLAC reading.
 It ships as a Rust crate (`dsd2pcm`), a C library and a command-line tool.
 
 Status: in development, nothing released yet. dsd2pcm-rs is an independent library.
@@ -26,9 +26,12 @@ Speed against scarletbook-pcm 0.7.0, including where it is still slower: [docs/p
 ## What it does
 
 - Reads DSF and DSDIFF (DFF, uncompressed; DST-compressed files are rejected with a clear
-  error) at DSD64 to DSD1024, and WAV (16/24/32-bit integer, 32/64-bit float). A WAV
+  error) at DSD64 to DSD1024, WAV (16/24/32-bit integer, 32/64-bit float) and FLAC
+  (8/12/16/20/24-bit, 1 to 6 channels, optionally after an ID3v2 tag). A WAV
   `data` size left at 0 or 0xFFFFFFFF (streaming writers, some encoders past 4 GiB) reads
-  to the end of the file; if other chunks follow it, the file is rejected.
+  to the end of the file; if other chunks follow it, the file is rejected. FLAC and WAV of
+  the same samples read identically. FLAC reading is the cargo feature `flac` (on by
+  default; `--no-default-features` builds without it and its one dependency, `claxon`).
 - Writes DSF, DSDIFF and WAV.
 - Converts DSD64 to 24-bit PCM at 88.2, 176.4 or 352.8 kHz with one of three linear-phase
   filters:

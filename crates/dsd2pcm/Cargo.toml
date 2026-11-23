@@ -1,6 +1,6 @@
 [package]
 name = "dsd2pcm"
-description = "DSD to PCM conversion with DSF, DFF and WAV reading and writing"
+description = "DSD to PCM conversion with DSF, DFF and WAV reading and writing, and FLAC reading"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,7 +12,13 @@ documentation = "https://docs.rs/dsd2pcm"
 keywords = ["dsd", "pcm", "audio", "dsf", "dff"]
 categories = ["multimedia::audio", "multimedia::encoding"]
 
+[features]
+default = ["flac"]
+# FLAC input (claxon, pure Rust).
+flac = ["dep:claxon"]
+
 [dependencies]
+claxon = { version = "0.4.3", optional = true }
 
 [dev-dependencies]
 scarletbook-pcm = "=0.7.0"

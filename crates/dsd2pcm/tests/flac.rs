@@ -1,0 +1,326 @@
+//! FLAC reader: decoded samples against the generator formula and against WAV, the
+//! unknown-length rule, detection, and malformed input. Test files: `tests/data/flac`
+//! (regenerate with `make.sh` there).
+#![cfg(feature = "flac")]
+
+use dsd2pcm::flac::FlacReader;
+use dsd2pcm::io::PcmRead;
+use dsd2pcm::wav::{WavFormat, WavReader, WavWriter};
+use dsd2pcm::{open_input, Error, Input};
+use std::io::Cursor;
+
+/// The sample formula of `tests/data/flac/gen.py`.
+fn sample(i: u64, c: u64, bits: u32) -> i64 {
+    let full = 1i64 << (bits - 1);
+    let period = 64 + 16 * c as i64;
+    let mut v = (i as i64 % period) * 2 * full / period - full;
+    v += (((i * 1_103_515_245 + c * 12_345) >> 7) % 16) as i64 - 8;
+    if i == 0 {
+        v = -full;
+    }
+    if i == 1 {
+        v = full - 1;
+    }
+    v.clamp(-full, full - 1)
+}
+
+fn fixture(name: &str) -> Vec<u8> {
+    let p = format!("{}/tests/data/flac/{name}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read(p).unwrap()
+}
+
+/// (file, bits, channels, rate, frames)
+const FILES: [(&str, u32, u16, u32, u64); 5] = [
+    ("s16_2ch_44100.flac", 16, 2, 44_100, 4100),
+    ("s24_6ch_96000.flac", 24, 6, 96_000, 1500),
+    ("s8_1ch_8000.flac", 8, 1, 8_000, 1200),
+    ("s12_1ch_22050.flac", 12, 1, 22_050, 1200),
+    ("s20_2ch_192000.flac", 20, 2, 192_000, 1200),
+];
+
+fn read_all(r: &mut dyn PcmRead, max: usize) -> dsd2pcm::Result<Vec<Vec<f64>>> {
+    let mut out = vec![Vec::new(); usize::from(r.info().channels)];
+    while r.read_frames(max, &mut out)? > 0 {}
+    Ok(out)
+}
+
+fn expected(bits: u32, ch: u16, frames: u64) -> Vec<Vec<f64>> {
+    let scale = f64::from(1u32 << (bits - 1));
+    (0..u64::from(ch))
+        .map(|c| {
+            (0..frames)
+                .map(|i| sample(i, c, bits) as f64 / scale)
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn decodes_every_bit_depth_exactly() {
+    for (name, bits, ch, rate, frames) in FILES {
+        let f = fixture(name);
+        let want = expected(bits, ch, frames);
+        for max in [1, 1000, 1152, 1153, 1 << 20, usize::MAX] {
+            let mut r = FlacReader::new(Cursor::new(f.clone())).unwrap();
+            let i = r.info();
+            assert_eq!(
+                (i.channels, i.sample_rate, i.frames, r.bits_per_sample()),
+                (ch, rate, frames, bits),
+                "{name}"
+            );
+            let got = read_all(&mut r, max).unwrap();
+            assert_eq!(got, want, "{name} max {max}");
+            assert_eq!(
+                r.read_frames(10, &mut vec![Vec::new(); ch.into()]).unwrap(),
+                0
+            );
+        }
+    }
+}
+
+/// A FLAC and a WAV of the same 16 or 24-bit samples read identically.
+#[test]
+fn matches_wav_of_the_same_samples() {
+    for (name, bits, ch, rate, frames) in FILES {
+        let fmt = match bits {
+            16 => WavFormat::I16,
+            24 => WavFormat::I24,
+            _ => continue,
+        };
+        let mut w = WavWriter::new(Cursor::new(Vec::new()), fmt, ch, rate).unwrap();
+        let mut raw = Vec::new();
+        for i in 0..frames {
+            for c in 0..u64::from(ch) {
+                let v = sample(i, c, bits) as i32;
+                raw.extend_from_slice(&v.to_le_bytes()[..fmt.bytes()]);
+            }
+        }
+        w.write_raw(&raw).unwrap();
+        w.finish().unwrap();
+        let mut wav = WavReader::new(Cursor::new(w.into_inner().into_inner())).unwrap();
+        let mut flac = FlacReader::new(Cursor::new(fixture(name))).unwrap();
+        assert_eq!(wav.info(), flac.info(), "{name}");
+        let (a, b) = (
+            read_all(&mut wav, 777).unwrap(),
+            read_all(&mut flac, 777).unwrap(),
+        );
+        let bits_of = |v: &Vec<Vec<f64>>| -> Vec<Vec<u64>> {
+            v.iter()
+                .map(|c| c.iter().map(|x| x.to_bits()).collect())
+                .collect()
+        };
+        assert_eq!(bits_of(&a), bits_of(&b), "{name}");
+    }
+}
+
+/// STREAMINFO starts at byte 8 of a file without ID3 tag.
+const SI: usize = 8;
+
+fn set_total(f: &mut [u8], total: u64) {
+    f[SI + 13] = (f[SI + 13] & 0xF0) | ((total >> 32) as u8 & 0x0F);
+    f[SI + 14..SI + 18].copy_from_slice(&(total as u32).to_be_bytes());
+}
+
+#[test]
+fn unknown_length_is_counted() {
+    let mut f = fixture("s16_2ch_44100.flac");
+    set_total(&mut f, 0);
+    let mut r = FlacReader::new(Cursor::new(f)).unwrap();
+    assert_eq!(r.info().frames, 4100);
+    assert_eq!(read_all(&mut r, 1000).unwrap(), expected(16, 2, 4100));
+}
+
+/// Where the first audio frame starts (after the last metadata block).
+fn frames_at(f: &[u8]) -> usize {
+    let mut p = 4;
+    loop {
+        let len = u32::from_be_bytes([0, f[p + 1], f[p + 2], f[p + 3]]) as usize;
+        let last = f[p] & 0x80 != 0;
+        p += 4 + len;
+        if last {
+            return p;
+        }
+    }
+}
+
+#[test]
+fn unknown_length_without_frames_is_an_error() {
+    let mut f = fixture("s16_2ch_44100.flac");
+    set_total(&mut f, 0);
+    f.truncate(frames_at(&f));
+    let e = FlacReader::new(Cursor::new(f)).unwrap_err();
+    assert!(
+        matches!(e, Error::Format(ref m) if m.contains("no audio frames")),
+        "{e}"
+    );
+}
+
+#[test]
+fn short_stream_is_an_error() {
+    let f = fixture("s16_2ch_44100.flac");
+    // Cut at a frame boundary: the reader sees a clean end after 1152 frames.
+    let mut r = FlacReader::new(Cursor::new(f.clone())).unwrap();
+    let mut out = vec![Vec::new(), Vec::new()];
+    assert_eq!(r.read_frames(1152, &mut out).unwrap(), 1152);
+    // Declared longer than the stream.
+    let mut g = f.clone();
+    set_total(&mut g, 5000);
+    let mut r = FlacReader::new(Cursor::new(g)).unwrap();
+    let e = read_all(&mut r, 1 << 20).unwrap_err();
+    assert!(
+        matches!(e, Error::Format(ref m) if m.contains("ended after 4100 of 5000")),
+        "{e}"
+    );
+    // Declared shorter: the rest is ignored.
+    let mut g = f.clone();
+    set_total(&mut g, 2000);
+    let mut r = FlacReader::new(Cursor::new(g)).unwrap();
+    let got = read_all(&mut r, 999).unwrap();
+    assert_eq!(got[0], expected(16, 2, 2000)[0]);
+    // Truncated inside a frame.
+    let mut r = FlacReader::new(Cursor::new(f[..f.len() - 100].to_vec())).unwrap();
+    assert!(matches!(read_all(&mut r, 1 << 20), Err(Error::Format(_))));
+}
+
+#[test]
+fn rejects_unsupported_streams() {
+    let e = FlacReader::new(Cursor::new(fixture("s32_1ch_48000.flac"))).unwrap_err();
+    assert!(matches!(e, Error::Unsupported(_)), "{e}");
+    // 7 channels.
+    let mut f = fixture("s16_2ch_44100.flac");
+    f[SI + 12] = (f[SI + 12] & 0xF1) | (6 << 1);
+    let e = FlacReader::new(Cursor::new(f)).unwrap_err();
+    assert!(
+        matches!(e, Error::Format(ref m) if m.contains("channel count 7")),
+        "{e}"
+    );
+    // A frame with a channel count other than STREAMINFO's.
+    let mut f = fixture("s16_2ch_44100.flac");
+    f[SI + 12] &= 0xF1;
+    let mut r = FlacReader::new(Cursor::new(f)).unwrap();
+    assert_eq!(r.info().channels, 1);
+    assert!(matches!(read_all(&mut r, 100), Err(Error::Format(_))));
+    // Samples beyond STREAMINFO's bit depth (24-bit frames, 16-bit STREAMINFO).
+    let mut f = fixture("s24_6ch_96000.flac");
+    // Bits per sample - 1 = 15: the top bit (0) ends byte 12, the rest opens byte 13.
+    f[SI + 12] &= 0xFE;
+    f[SI + 13] = (f[SI + 13] & 0x0F) | (15 << 4);
+    let mut r = FlacReader::new(Cursor::new(f)).unwrap();
+    assert_eq!(r.bits_per_sample(), 16);
+    let e = read_all(&mut r, 100).unwrap_err();
+    assert!(
+        matches!(e, Error::Format(ref m) if m.contains("bit depth")),
+        "{e}"
+    );
+}
+
+fn id3(body: usize, footer: bool) -> Vec<u8> {
+    let mut t = b"ID3\x04\x00".to_vec();
+    t.push(if footer { 0x10 } else { 0 });
+    t.extend((0..4).rev().map(|k| ((body >> (7 * k)) & 0x7F) as u8));
+    t.extend(std::iter::repeat_n(0xAAu8, body));
+    if footer {
+        t.extend_from_slice(b"3DI\x04\x00\x10\0\0\0\0");
+    }
+    t
+}
+
+#[test]
+fn skips_leading_id3_tags() {
+    let f = fixture("s20_2ch_192000.flac");
+    let mut g = id3(300, false);
+    g.extend(id3(1000, true));
+    g.extend_from_slice(&f);
+    let mut r = FlacReader::new(Cursor::new(g)).unwrap();
+    assert_eq!(read_all(&mut r, 500).unwrap(), expected(20, 2, 1200));
+    // Size bytes must be syncsafe; a tag past the end of the file is an error.
+    let mut g = id3(10, false);
+    g[6] = 0x80;
+    g.extend_from_slice(&f);
+    assert!(matches!(
+        FlacReader::new(Cursor::new(g)),
+        Err(Error::Format(_))
+    ));
+    let mut g = id3(10, false);
+    g[9] = 0x7F;
+    g[8] = 0x7F;
+    g.extend_from_slice(&f[..100]);
+    assert!(matches!(
+        FlacReader::new(Cursor::new(g)),
+        Err(Error::Format(_))
+    ));
+    // An ID3 tag not followed by FLAC.
+    let mut g = id3(10, false);
+    g.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x00]);
+    assert!(matches!(
+        FlacReader::new(Cursor::new(g)),
+        Err(Error::Format(_))
+    ));
+}
+
+#[test]
+fn open_input_detects_flac() {
+    let dir = env!("CARGO_TARGET_TMPDIR");
+    let f = fixture("s24_6ch_96000.flac");
+    let cases: [(&str, Vec<u8>); 2] = [
+        ("plain", f.clone()),
+        ("id3", {
+            let mut g = id3(64, false);
+            g.extend_from_slice(&f);
+            g
+        }),
+    ];
+    for (tag, bytes) in cases {
+        let p = std::path::Path::new(dir).join(format!("flac-detect-{tag}.flac"));
+        std::fs::write(&p, bytes).unwrap();
+        let Input::Pcm(mut r) = open_input(&p).unwrap() else {
+            panic!("{tag}: not PCM")
+        };
+        assert_eq!(read_all(r.as_mut(), 4096).unwrap(), expected(24, 6, 1500));
+        std::fs::remove_file(&p).unwrap();
+    }
+    let p = std::path::Path::new(dir).join("flac-detect-junk.bin");
+    std::fs::write(&p, b"OggS0000").unwrap();
+    let e = open_input(&p).unwrap_err();
+    assert!(e.to_string().contains("DSF, DFF, WAV or FLAC"), "{e}");
+    std::fs::remove_file(&p).unwrap();
+}
+
+/// Every truncation and many single-byte corruptions give a result or an error, never a
+/// panic, with known and unknown length.
+#[test]
+fn malformed_inputs_do_not_panic() {
+    let mut files = Vec::new();
+    for (name, ..) in FILES {
+        let f = fixture(name);
+        let mut g = f.clone();
+        set_total(&mut g, 0);
+        files.push(f);
+        files.push(g);
+    }
+    let try_one = |b: Vec<u8>| {
+        if let Ok(mut r) = FlacReader::new(Cursor::new(b)) {
+            let mut o = vec![Vec::new(); usize::from(r.info().channels)];
+            while let Ok(n) = r.read_frames(4096, &mut o) {
+                if n == 0 {
+                    break;
+                }
+            }
+        }
+    };
+    for f in &files {
+        let audio = frames_at(f);
+        let cuts = (0..(audio + 64).min(f.len())).chain((audio..f.len()).step_by(97));
+        for cut in cuts {
+            try_one(f[..cut].to_vec());
+        }
+        let positions = (0..(audio + 64).min(f.len())).chain((audio..f.len()).step_by(61));
+        for pos in positions {
+            for v in [0x00u8, 0xFF, 0x7F, 0x80, 0x01] {
+                let mut b = f.clone();
+                b[pos] = v;
+                try_one(b);
+            }
+        }
+    }
+}

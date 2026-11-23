@@ -15,10 +15,14 @@
 | DSF reader/writer | Sony, "DSF File Format Specification" v1.01 | Public specification | `dsf.rs` |
 | DSDIFF reader/writer | Philips, "DSDIFF File Format Specification" 1.5 | Public specification | `dff.rs` |
 | WAV reader/writer | Microsoft/IBM RIFF WAVE and `WAVE_FORMAT_EXTENSIBLE` documentation | Public specification | `wav.rs` |
+| FLAC container parsing | Xiph.Org FLAC format specification (RFC 9639); ID3v2.4 tag header (id3.org) | Public specification | `flac.rs` |
 
 scarletbook-pcm's own sources (listed in its README): Parks & McClellan 1972; Rabiner,
 McClellan & Parks 1975; Herrmann, Rabiner & Chan 1973; Crochiere & Rabiner 1981; Mintzer
 1982; Vaidyanathan & Nguyen 1987; Peled & Liu 1974; White 1989; Goldberg 1991.
+
+Dependencies: `claxon` 0.4.3 (Apache-2.0, optional, feature `flac`) decodes FLAC frames; no
+code is copied from it.
 
 scarletbook-pcm 0.7.0 is also a dev-dependency: the tests check that the output samples
 are identical.

@@ -79,7 +79,7 @@ pub type ProgressHook<'a> = &'a mut dyn FnMut(Progress) -> ControlFlow<()>;
 pub enum Input {
     /// DSD input (DSF or DFF).
     Dsd(Box<dyn DsdRead + Send>),
-    /// PCM input (WAV).
+    /// PCM input (WAV or FLAC).
     Pcm(Box<dyn PcmRead + Send>),
 }
 
@@ -92,7 +92,8 @@ impl std::fmt::Debug for Input {
     }
 }
 
-/// Opens a DSF, DFF or WAV file, recognised by its first four bytes.
+/// Opens a DSF, DFF, WAV or FLAC file, recognised by its first four bytes (FLAC also
+/// after a leading ID3v2 tag).
 pub fn open_input(path: &Path) -> Result<Input> {
     let mut f = BufReader::with_capacity(1 << 20, File::open(path)?);
     let mut magic = [0u8; 4];
@@ -102,7 +103,15 @@ pub fn open_input(path: &Path) -> Result<Input> {
         b"DSD " => Ok(Input::Dsd(Box::new(DsfReader::new(f)?))),
         b"FRM8" => Ok(Input::Dsd(Box::new(DffReader::new(f)?))),
         b"RIFF" => Ok(Input::Pcm(Box::new(WavReader::new(f)?))),
-        _ => Err(Error::Format("not a DSF, DFF or WAV file".into())),
+        #[cfg(feature = "flac")]
+        b"fLaC" => Ok(Input::Pcm(Box::new(crate::flac::FlacReader::new(f)?))),
+        #[cfg(feature = "flac")]
+        [b'I', b'D', b'3', _] => Ok(Input::Pcm(Box::new(crate::flac::FlacReader::new(f)?))),
+        #[cfg(not(feature = "flac"))]
+        b"fLaC" => Err(Error::Unsupported(
+            "FLAC input (built without the `flac` feature)".into(),
+        )),
+        _ => Err(Error::Format("not a DSF, DFF, WAV or FLAC file".into())),
     }
 }
 

@@ -6,6 +6,30 @@ Readers deliver DSD as one byte vector per channel, earliest sample in bit 7, 1 
 (DSDIFF order; the DSF reader and writer reverse the bits of each byte). PCM readers deliver
 `f64` per channel with full scale at +-1.0.
 
+## FLAC input (`flac.rs`, feature `flac`)
+
+`FlacReader` parses the container itself: leading ID3v2 tags are skipped (at most 16; sizes
+must be syncsafe and inside the file), then `fLaC` and the metadata blocks. STREAMINFO must
+come first and be 34 bytes; every other block is skipped by seeking after its length is
+checked against the file length, so nothing in it is allocated or parsed. `claxon` (0.4.3,
+Apache-2.0) is handed a minimal stream of `fLaC`, STREAMINFO marked last, and the file from
+the first audio frame, so it only decodes frames; its metadata parsers (Vorbis comment and
+application blocks, the code with its `set_len` on uninitialised buffers) never run.
+
+STREAMINFO must declare 1 to 6 channels and 8, 12, 16, 20 or 24 bits (claxon does not
+decode 32-bit frames: `Unsupported`). Each decoded block is checked against STREAMINFO: same
+channel count, every sample inside the declared bit depth. A `b`-bit sample `v` reads as
+`v * 2^-(b-1)`, the WAV reader's scaling, so 16 and 24-bit FLAC and WAV of the same
+samples give bit-identical `f64` (`tests/flac.rs`). Memory: one decoded block (at most
+65 535 frames by 6 channels of `i32`) plus the caller's output; `read_frames` returns at
+most 2^20 frames per call.
+
+Length: STREAMINFO's total. A total of 0 (unknown, as written by streaming encoders) is the
+FLAC form of WAV's read-to-end rule: the reader decodes the stream once to count the frames,
+then restarts at the first frame; a stream without frames is an error. A stream that ends
+before its declared length is an error; frames after it are ignored. Frame CRCs are checked
+(claxon skips the check only in `cfg(fuzzing)` builds).
+
 ## DSD64 to PCM
 
 The decimator follows scarletbook-pcm 0.7.0 exactly (see PROVENANCE.md):
@@ -126,6 +150,6 @@ run property the bytes equal one call.
 ## Robustness
 
 Parsers check every size against the file length, cap allocations (DSF metadata 16 MiB,
-block size 1 MiB) and return errors instead of panicking. The tests truncate and corrupt
-valid files byte by byte, and cargo-fuzz targets cover every reader
+block size 1 MiB; FLAC one decoded block) and return errors instead of panicking. The tests
+truncate and corrupt valid files byte by byte, and cargo-fuzz targets cover every reader
 (see [fuzzing.md](fuzzing.md)).
