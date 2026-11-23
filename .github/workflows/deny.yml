@@ -58,4 +58,4 @@ jobs:
           config=../deny.toml
           [[ -f deny.toml ]] && config=deny.toml
           echo "config: fuzz/$config"
-          cargo-deny --log-level warn --all-features check --config "$config" advisories bans licenses sources
+          cargo-deny --log-level warn --all-features --config "$config" check advisories bans licenses sources
