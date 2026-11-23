@@ -3,7 +3,9 @@
 //! `cargo run --release --example bench -- FILE.dsf [SECONDS]`: converts the first
 //! SECONDS (default 60) of FILE with every rate and cutoff, single-threaded and with one
 //! thread per channel, checks that both crates give the same bytes, and prints the speed as
-//! a multiple of real time (best of three runs).
+//! a multiple of real time (best of three runs). With `BENCH_OURS_FIRST=1` in the
+//! environment, dsd2pcm is timed before scarletbook-pcm (the order alternates between rounds
+//! in `.github/workflows/bench.yml`).
 
 use dsd2pcm::convert::dsd64_to_pcm;
 use dsd2pcm::dsf::{DsfReader, DsfWriter};
@@ -42,6 +44,7 @@ fn main() {
         c.truncate(frames * FRAME);
     }
     let audio = frames as f64 / 75.0;
+    let ours_first = std::env::var_os("BENCH_OURS_FIRST").is_some_and(|v| v == "1");
     // our input as an in-memory DSF
     let mut w = DsfWriter::new(Cursor::new(Vec::new()), ch as u16, 2_822_400, None).unwrap();
     w.write_bytes(&chans).unwrap();
@@ -100,9 +103,14 @@ fn main() {
                     .unwrap();
                 out
             };
-            let (t0, b) = best(theirs);
-            let (t1, a1) = best(|| ours(false));
-            let (t2, a2) = best(|| ours(true));
+            let ((t0, b), (t1, a1), (t2, a2)) = if ours_first {
+                let o1 = best(|| ours(false));
+                let o2 = best(|| ours(true));
+                (best(theirs), o1, o2)
+            } else {
+                let t = best(theirs);
+                (t, best(|| ours(false)), best(|| ours(true)))
+            };
             assert!(a1 == b && a2 == b, "output differs: {rate:?} {cutoff:?}");
             println!(
                 "{:<7} {:<9} {:>15.1} {:>14.1} {:>13.1}",

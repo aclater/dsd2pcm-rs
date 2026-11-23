@@ -11,7 +11,9 @@
 //!
 //! Every mode must give the same bytes in both crates and in every mode. Prints the speed as
 //! a multiple of real time (best of three). 176.4 kHz Standard only, or every rate and
-//! cutoff with `all`.
+//! cutoff with `all`. With `BENCH_OURS_FIRST=1` in the environment, dsd2pcm is timed
+//! before scarletbook-pcm (the order alternates between rounds in
+//! `.github/workflows/bench.yml`).
 
 use dsd2pcm::dsf::DsfReader;
 use dsd2pcm::frames::{self, Converter, PcmConfig, PcmOut, Run};
@@ -55,6 +57,7 @@ fn main() {
     drop(chans);
     let list: Vec<&[u8]> = area.chunks_exact(FRAME * ch).collect();
     let audio = frames as f64 / 75.0;
+    let ours_first = std::env::var_os("BENCH_OURS_FIRST").is_some_and(|v| v == "1");
     println!("{path}: {ch} ch, {frames} frames ({audio:.1} s); x real time, one thread, best of 3");
     println!("rate    cutoff    mode    scarletbook-pcm      ours   ours/sb");
     let configs: &[(PcmRate, Cutoff)] = if all {
@@ -88,7 +91,7 @@ fn main() {
             let mut fa = vec![0u64; frames];
             let mut fbc = vec![0u64; frames];
             let step = if mode == 0 { frames } else { mode };
-            let t_sb = best(|| {
+            let mut run_sb = || {
                 let mut t = 0;
                 while t < frames {
                     let u = (t + step).min(frames);
@@ -108,8 +111,8 @@ fn main() {
                         .unwrap();
                     t = u;
                 }
-            });
-            let t_ours = best(|| {
+            };
+            let mut run_ours = || {
                 let mut t = 0;
                 while t < frames {
                     let u = (t + step).min(frames);
@@ -128,7 +131,14 @@ fn main() {
                     .unwrap();
                     t = u;
                 }
-            });
+            };
+            let (t_sb, t_ours) = if ours_first {
+                let o = best(&mut run_ours);
+                (best(&mut run_sb), o)
+            } else {
+                let t = best(&mut run_sb);
+                (t, best(&mut run_ours))
+            };
             assert!(a == b && fa == fbc, "output differs: {rate:?} {cutoff:?}");
             match &reference {
                 Some(r) => assert!(*r == a, "mode differs: {rate:?} {cutoff:?}"),
