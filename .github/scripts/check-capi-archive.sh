@@ -70,6 +70,15 @@ case "$os" in
             $cc -std=c99 -fcf-protection=full -nostdlib -r "${cflags[@]}" -o "$work/minimal-cet.o" "$src" "$a"
             [[ "$(readelf -n "$work/minimal-cet.o" | grep 'x86 feature:')" == *'x86 feature: SHSTK' ]] \
                 || { echo "::error::a program object linked with libdsd2pcm.a is not marked SHSTK"; exit 1; }
+            # The shared library must stay unmarked while it carries LLVM's libunwind, which
+            # does not unwind the shadow stack: a panic caught at the C boundary would crash a
+            # process running with shadow stacks (docs/design.md, "Intel CET").
+            if grep -q 'libunwind: ' "$so"; then
+                if readelf -n "$so" | grep -q 'x86 feature:.*SHSTK'; then
+                    echo "::error::$so is marked SHSTK but holds libunwind, which does not unwind the shadow stack"; exit 1
+                fi
+                echo "shared library: holds libunwind, not marked SHSTK"
+            fi
         fi
         ;;
     Darwin)

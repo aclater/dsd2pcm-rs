@@ -229,6 +229,9 @@ steps 1 to 5 for that crate alone.
    gh release download v0.1.2 -R aclater/dsd2pcm-rs -p dsd2pcm-0.1.2-x86_64-linux.tar.gz
    gh attestation verify dsd2pcm-0.1.2-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs --signer-workflow aclater/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.2 --deny-self-hosted-runners
    ```
+
+   From 0.1.3 on, also run the source archive's commands in [c-api.md](c-api.md) (download,
+   `sha256sum -c`, `gh attestation verify`, unpack, build) against the new tag.
 6. Release notes: the workflow writes the same notes for every release. Put the version's
    CHANGELOG section on top of them, from a clone of the release commit:
 
