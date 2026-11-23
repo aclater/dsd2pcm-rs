@@ -16,35 +16,36 @@ of three runs over 60 s of audio, measured in memory.
 
 | Rate | Cutoff | 2 ch P-core | 2 ch E-core | 6 ch P-core | 6 ch E-core |
 |---|---|---|---|---|---|
-| 88.2 kHz | Low | 1.02x | 1.01x | 1.04x | 1.03x |
-| 88.2 kHz | Standard | 1.03x | 1.01x | 1.05x | 1.03x |
-| 176.4 kHz | Low | 1.02x | 1.00x | 1.03x | 1.02x |
-| 176.4 kHz | Standard | 1.03x | 1.01x | 1.04x | 1.02x |
-| 176.4 kHz | Wide | 1.03x | 0.99x | 1.04x | 1.00x |
-| 352.8 kHz | Low | 1.07x | 1.05x | 1.07x | 1.13x |
-| 352.8 kHz | Standard | 1.08x | 1.05x | 1.09x | 1.07x |
-| 352.8 kHz | Wide | 1.02x | 0.99x | 1.03x | 1.00x |
+| 88.2 kHz | Low | 1.08x | 1.11x | 1.10x | 1.13x |
+| 88.2 kHz | Standard | 1.11x | 1.12x | 1.11x | 1.15x |
+| 176.4 kHz | Low | 1.13x | 1.14x | 1.14x | 1.16x |
+| 176.4 kHz | Standard | 1.13x | 1.13x | 1.14x | 1.15x |
+| 176.4 kHz | Wide | 1.03x | 1.07x | 1.05x | 1.08x |
+| 352.8 kHz | Low | 1.22x | 1.17x | 1.20x | 1.26x |
+| 352.8 kHz | Standard | 1.21x | 1.16x | 1.22x | 1.18x |
+| 352.8 kHz | Wide | 1.17x | 1.15x | 1.18x | 1.16x |
 
 Ratio of dsd2pcm's speed to scarletbook-pcm 0.7.0's; below 1.00x is slower.
 
 ## Whole file, 2 channels, P-core
 
-| Rate | Cutoff | scarletbook-pcm 0.7.0 | dsd2pcm, 1 thread | dsd2pcm, 20 threads |
-|---|---|---|---|---|
-| 88.2 kHz | Low | 316 | 342 | 1025 |
-| 88.2 kHz | Standard | 361 | 382 | 1094 |
-| 176.4 kHz | Low | 236 | 231 | 525 |
-| 176.4 kHz | Standard | 273 | 265 | 494 |
-| 176.4 kHz | Wide | 186 | 183 | 614 |
-| 352.8 kHz | Low | 175 | 185 | 301 |
-| 352.8 kHz | Standard | 196 | 206 | 336 |
-| 352.8 kHz | Wide | 164 | 164 | 294 |
+| Rate | Cutoff | scarletbook-pcm 0.7.0 | dsd2pcm, 1 thread |
+|---|---|---|---|
+| 88.2 kHz | Low | 312 | 365 |
+| 88.2 kHz | Standard | 358 | 411 |
+| 176.4 kHz | Low | 235 | 258 |
+| 176.4 kHz | Standard | 271 | 292 |
+| 176.4 kHz | Wide | 185 | 184 |
+| 352.8 kHz | Low | 173 | 210 |
+| 352.8 kHz | Standard | 194 | 235 |
+| 352.8 kHz | Wide | 160 | 183 |
 
 scarletbook-pcm converts on one thread; dsd2pcm uses all cores unless told otherwise.
 
 ## Known gaps
 
-- On one thread, 2-channel 176.4 kHz whole-file conversion is 2 to 3 % slower than
-  scarletbook-pcm 0.7.0, and the `wide` cutoff on an E-core is up to 2 % slower (frame runs of one frame).
+- Frame runs of one frame at 88.2 kHz (mode `run 1`) and 176.4 kHz `wide` whole-file
+  conversion are level with scarletbook-pcm 0.7.0 (0.98x to 1.04x, within run-to-run
+  noise).
 - Without AVX2 (the generic level, used on 32-bit x86 and older CPUs) dsd2pcm runs at 0.6x
   to 0.9x of scarletbook-pcm 0.7.0. A dedicated SSE2 level is planned.
