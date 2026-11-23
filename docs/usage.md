@@ -51,6 +51,19 @@ the rates, the length of the audio, the time taken and the clipped samples, in a
 channel. Exit status: 0 on success, 1 when the conversion fails, 2 for a usage error.
 `--help` prints the usage.
 
+## Build settings for consumers
+
+dsd2pcm's kernels are fastest when the compiler sees each loop whole. A release profile
+with many codegen units and overflow checks (16 units, no LTO, overflow checks on) measured
+25 % slower; the output bytes are the same. Until 0.1.3 makes the kernels robust to such
+profiles, a project that depends on the crate can set, in its own `Cargo.toml`:
+
+```toml
+[profile.release.package.dsd2pcm]
+codegen-units = 1
+overflow-checks = false
+```
+
 ## Library
 
 As a library, `dsd2pcm::frames::Converter` converts Super Audio CD frames (channels
