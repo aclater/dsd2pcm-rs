@@ -39,7 +39,7 @@ jobs:
   linux:
     name: bench (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 120  # 5 rounds took over an hour on ubuntu-24.04-arm
     strategy:
       fail-fast: false
       matrix:
@@ -80,7 +80,7 @@ jobs:
   macos:
     name: bench (aarch64-macos)
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 120  # 5 rounds took over an hour on ubuntu-24.04-arm
     defaults:
       run:
         shell: bash
