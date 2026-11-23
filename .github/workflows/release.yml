@@ -180,7 +180,6 @@ jobs:
           retention-days: 7
 
   macos:
-    if: false  # TEMP
     name: binary (aarch64-macos)
     needs: preflight
     runs-on: macos-latest
@@ -242,7 +241,6 @@ jobs:
   # Windows x86_64, with the C runtime linked in (no Visual C++ redistributable needed),
   # packed as a zip.
   windows:
-    if: false  # TEMP
     name: binary (x86_64-windows)
     needs: preflight
     runs-on: windows-latest

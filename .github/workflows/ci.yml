@@ -127,7 +127,6 @@ jobs:
 
   # macOS arm64 and Windows x86_64, on the runners' own rustup.
   test-other:
-    if: false  # TEMP
     name: tests (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
     strategy:
