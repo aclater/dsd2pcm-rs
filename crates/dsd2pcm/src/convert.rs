@@ -145,11 +145,6 @@ pub fn dsd64_to_pcm<W: Write + Seek>(
     opts: &PcmOptions,
 ) -> Result<Report> {
     check_options(opts)?;
-    if opts.filter == Filter::Pysacd {
-        return pysacd::dsd64_to_pcm(r, w, opts);
-    }
-    let gain = decimator::db_to_linear(opts.gain_db);
-    let rate = opts.rate;
     let info = r.info();
     if info.sample_rate != decimator::DSD64_RATE {
         return Err(Error::Unsupported(format!(
@@ -157,6 +152,11 @@ pub fn dsd64_to_pcm<W: Write + Seek>(
             info.sample_rate
         )));
     }
+    if opts.filter == Filter::Pysacd {
+        return pysacd::dsd64_to_pcm(r, w, opts);
+    }
+    let gain = decimator::db_to_linear(opts.gain_db);
+    let rate = opts.rate;
     let plan = Plan::new(rate, opts.cutoff)?;
     let ch = usize::from(info.channels);
     let n_out = decimator::output_len(info.samples, rate);

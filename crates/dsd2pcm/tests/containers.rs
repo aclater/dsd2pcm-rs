@@ -247,3 +247,42 @@ fn source_ending_early_is_an_error() {
     assert!(matches!(r, Err(dsd2pcm::Error::Format(_))), "{r:?}");
     assert!(wav.into_inner().into_inner().len() < 1 << 20);
 }
+
+/// A DSD128 source: refused by every filter (only DSD64 is converted so far).
+struct Dsd128Source;
+
+impl dsd2pcm::io::DsdRead for Dsd128Source {
+    fn info(&self) -> dsd2pcm::io::DsdInfo {
+        dsd2pcm::io::DsdInfo {
+            channels: 2,
+            sample_rate: 5_644_800,
+            samples: 5_644_800,
+        }
+    }
+    fn read_bytes(&mut self, _max: usize, out: &mut [Vec<u8>]) -> dsd2pcm::Result<usize> {
+        for o in out.iter_mut() {
+            o.push(0x69);
+        }
+        Ok(1)
+    }
+}
+
+#[test]
+fn dsd128_input_is_refused_by_every_filter() {
+    for filter in [dsd2pcm::Filter::Default, dsd2pcm::Filter::Pysacd] {
+        let mut wav = dsd2pcm::wav::WavWriter::new(
+            std::io::Cursor::new(Vec::new()),
+            dsd2pcm::wav::WavFormat::I24,
+            2,
+            88_200,
+        )
+        .unwrap();
+        let mut opts = dsd2pcm::PcmOptions::new(dsd2pcm::PcmRate::Hz88200);
+        opts.filter = filter;
+        let r = dsd2pcm::convert::dsd64_to_pcm(Box::new(Dsd128Source), &mut wav, &opts);
+        assert!(
+            matches!(r, Err(dsd2pcm::Error::Unsupported(_))),
+            "{filter:?}: {r:?}"
+        );
+    }
+}
