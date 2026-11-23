@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Speed in a consumer's release profile (codegen units 16, no LTO, overflow checks on, as
+  a dependency): it was up to 25 % slower than with ours, now within 1 % on the measured
+  CPUs. CI checks it on every pull request. Output bytes unchanged.
 - x86_64 without AVX2 (e.g. Celeron and Pentium J and N series of NAS units): the `sse2`
   level now runs there too, where the generic level ran at 0.6x to 0.9x the speed of
   scarletbook-pcm 0.7.0 ([performance](docs/performance.md)). Output bytes unchanged.

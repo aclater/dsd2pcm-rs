@@ -1,7 +1,9 @@
 # CI: formatting, clippy, the docs, and the tests on Linux (x86_64, aarch64, i686), macOS
 # (arm64) and Windows (x86_64), each test run once per SIMD level the CPU has
 # (.github/scripts/test-simd-levels.sh), and the C library's header and smoke test once
-# crates/dsd2pcm-capi exists. MSRV, cargo-deny, fuzzing and zizmor have their own workflows.
+# crates/dsd2pcm-capi exists; and the speed in a consumer's release profile against ours
+# (.github/scripts/profile-ab.sh). MSRV, cargo-deny, fuzzing and zizmor have their own
+# workflows.
 name: ci
 
 on:
@@ -88,6 +90,44 @@ jobs:
           prefix-key: v0-rust-ubi10
       - name: Tests at every SIMD level
         run: .github/scripts/test-simd-levels.sh
+      # The release profile a consumer may build us with (codegen units 16, no LTO, overflow
+      # checks on, as a dependency): same bytes (the identity tests compare with
+      # scarletbook-pcm), and the examples build. Speed in it is measured locally
+      # (docs/performance.md).
+      - name: Tests in a consumer's release profile
+        if: matrix.name == 'x86_64-linux'
+        env:
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS: "true"
+        run: cargo test --workspace --locked --release
+
+  # The default release profile against a consumer's (codegen units 16, no LTO, overflow
+  # checks): same output, and the consumer build within 5 % of the default's speed, timed in
+  # interleaved rounds on one runner (.github/scripts/profile-ab.sh).
+  profile-ab:
+    name: speed in a consumer's release profile
+    runs-on: ubuntu-24.04
+    container:
+      # UBI 10 (ubi10/ubi 10.3), pinned by digest, as the test jobs.
+      image: registry.access.redhat.com/ubi10/ubi@sha256:1e9193f051ac70582821c8a941325c5053488c54c75cd0c31b577d871ac29dba
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Packages
+        run: dnf -y -q --setopt=install_weak_deps=False install git-core gcc python3 && dnf clean all
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust (.github/scripts/rust-setup.sh)
+        run: .github/scripts/rust-setup.sh "$RUST_STABLE"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          prefix-key: v0-rust-ubi10-profile-ab
+      - name: A/B, 7 interleaved rounds
+        run: .github/scripts/profile-ab.sh 7 1.05
 
   # 32-bit x86: built for i686-unknown-linux-gnu with gcc -m32 and run natively on the x86_64
   # runner. Fedora, pinned by digest: UBI has no 32-bit C libraries.

@@ -208,6 +208,13 @@ run property the bytes equal one call.
 - Whole-file conversion quantises each piece straight into its slot of a per-block sample
   buffer and interleaves once into the output bytes; stage input is read straight from the
   channel buffer when it holds the whole window.
+- Release profiles: a consumer builds us with its own profile, often codegen units 16, no LTO
+  and overflow checks on. Overflow checks in the inner loops once cost 25 % there (the tap
+  loop's index arithmetic, and the closures of `array::from_fn` that then stayed out of line,
+  so the sums went through the stack). The inner loops now use wrapping index arithmetic
+  where the values are in range (asserted in debug builds; the slices check them again) and
+  plain loops instead of closures. `.github/scripts/profile-ab.sh` times the default profile
+  against that one in CI and fails if it is more than 5 % slower.
 
 ## Robustness
 
