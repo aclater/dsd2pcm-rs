@@ -20,6 +20,9 @@ doc = false
 
 [dependencies]
 dsd2pcm.workspace = true
+# SIGINT/SIGTERM (Ctrl-C/Ctrl-Break on Windows) set a flag that cancels the conversion,
+# so the temporary output file is removed.
+signal-hook = { version = "0.4.6", default-features = false }
 
 [features]
 default = ["flac"]
