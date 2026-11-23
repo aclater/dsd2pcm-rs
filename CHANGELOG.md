@@ -8,6 +8,8 @@
   the libraries hold no claxon (FLAC decoder) symbols, by their symbol tables (`nm`), and
   CI checks that the check catches a library built with `--features flac`
   ([C interface](docs/c-api.md#checks)).
+- CI: a check that tracked files and commit identities hold no private names or addresses
+  ([testing](docs/testing.md#private-names)).
 
 ## 0.1.2 (2026-11-23)
 

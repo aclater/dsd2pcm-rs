@@ -1,7 +1,8 @@
 # CI: formatting, clippy, the docs, and the tests on Linux (x86_64, aarch64, i686), macOS
 # (arm64) and Windows (x86_64), each test run once per SIMD level the CPU has
 # (.github/scripts/test-simd-levels.sh), a short soak test on Linux (tests/soak.rs), and the
-# C library's header and C tests, also under AddressSanitizer and LeakSanitizer. MSRV,
+# C library's header and C tests, also under AddressSanitizer and LeakSanitizer, and a scan
+# for private names in the files and commit identities. MSRV,
 # cargo-deny, fuzzing, zizmor, Miri and ThreadSanitizer (sanitizers.yml) have their own
 # workflows.
 name: ci
@@ -28,6 +29,35 @@ env:
   CBINDGEN_VERSION: 0.29.4
 
 jobs:
+  # Tracked files and commit identities carry no private details: home.arpa names, private
+  # (RFC 1918) addresses, and the PRIVATE_NAMES repository variable, a regex kept outside
+  # the repository (.github/scripts/check-private-names.sh).
+  private-names:
+    name: no private names
+    runs-on: ubuntu-24.04
+    container:
+      # UBI 10 (ubi10/ubi 10.3), pinned by digest.
+      image: registry.access.redhat.com/ubi10/ubi@sha256:1e9193f051ac70582821c8a941325c5053488c54c75cd0c31b577d871ac29dba
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Packages
+        run: dnf -y -q --setopt=install_weak_deps=False install git-core findutils grep && dnf clean all
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Tests of the check (.github/scripts/check-private-names-test.sh)
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          .github/scripts/check-private-names-test.sh
+      - name: Scan tracked files and commit identities
+        env:
+          PRIVATE_NAMES: ${{ vars.PRIVATE_NAMES }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: .github/scripts/check-private-names.sh
+
   lint:
     name: fmt + clippy + docs
     runs-on: ubuntu-24.04
