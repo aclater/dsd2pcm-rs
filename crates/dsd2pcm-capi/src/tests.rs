@@ -109,6 +109,7 @@ fn file_opts(rate_hz: u32) -> dsd2pcm_file_options {
         gain_db: 0.0,
         progress: None,
         user_data: null_mut(),
+        no_clobber: 0,
     }
 }
 
@@ -169,7 +170,7 @@ fn convert_file_matches_rust_and_reports() {
             dsd2pcm_convert_file(cstr(&inp).as_ptr(), cstr(&ours).as_ptr(), &o, &mut rep)
         };
         assert_eq!(rc, DSD2PCM_OK, "{}", last_error());
-        let opts = file_options(&o).ok().unwrap();
+        let (opts, _) = file_options(&o).ok().unwrap();
         let want = dsd::convert_file(&inp, &theirs, &opts).unwrap();
         assert_eq!(
             std::fs::read(&ours).unwrap(),
@@ -1306,4 +1307,69 @@ fn versioned_structs_old_and_new_callers() {
     assert_eq!(new.known.struct_size as usize, size_of::<Newest>());
     assert_eq!((new.known.a, new.known.appended), (1, 3));
     assert_eq!(new.extra, 0xDEAD_BEEF);
+}
+
+/// `no_clobber` 1: an existing output is refused with `DSD2PCM_E_EXISTS` before converting
+/// and left as it was; a new one is written. Other values are invalid. A caller built
+/// against the 0.1.0 header (its struct ends before `no_clobber`) gets the old behaviour:
+/// only its bytes are read, so whatever follows them is not taken as `no_clobber`.
+#[test]
+#[cfg_attr(miri, ignore = "file I/O")]
+fn no_clobber() {
+    let d = TempDir::new("no-clobber");
+    let (inp, out) = (d.path("in.dsf"), d.path("out.wav"));
+    write_dsf(&inp, 2, 2);
+    let call = |o: *const dsd2pcm_file_options| {
+        // SAFETY (test): valid strings; `o` is readable for its struct_size bytes.
+        unsafe { dsd2pcm_convert_file(cstr(&inp).as_ptr(), cstr(&out).as_ptr(), o, null_mut()) }
+    };
+    let keep = dsd2pcm_file_options {
+        no_clobber: 1,
+        ..file_opts(88_200)
+    };
+    assert_eq!(call(&keep), DSD2PCM_OK, "{}", last_error());
+    let first = std::fs::read(&out).unwrap();
+    std::fs::write(&out, b"precious").unwrap();
+    assert_eq!(call(&keep), DSD2PCM_E_EXISTS);
+    assert!(last_error().contains("no-clobber"), "{}", last_error());
+    assert_eq!(std::fs::read(&out).unwrap(), b"precious");
+    // SAFETY (test): a static string.
+    let name = unsafe { CStr::from_ptr(dsd2pcm_status_str(DSD2PCM_E_EXISTS)) };
+    assert_eq!(name.to_str().unwrap(), "output exists");
+    let bad = dsd2pcm_file_options {
+        no_clobber: 2,
+        ..keep
+    };
+    assert_eq!(call(&bad), DSD2PCM_E_INVALID_ARGUMENT);
+    assert!(last_error().contains("no_clobber 2"), "{}", last_error());
+    // An old caller: the 0.1.0 bytes with struct_size 0.1.0, then (where a newer caller's
+    // no_clobber would be) a 1 that must not be read. In a u64 buffer for alignment.
+    let n = dsd2pcm_file_options::V1_SIZE;
+    let mut buf = vec![0u64; n / 8 + 1];
+    let p = buf.as_mut_ptr().cast::<u8>();
+    // SAFETY (test): `keep` is a live struct of more than `n` bytes; `buf` holds at least
+    // n + 4 bytes and does not overlap it.
+    unsafe {
+        std::ptr::copy_nonoverlapping((&keep as *const dsd2pcm_file_options).cast::<u8>(), p, n);
+        std::ptr::copy_nonoverlapping((n as u32).to_ne_bytes().as_ptr(), p, 4);
+        std::ptr::copy_nonoverlapping(1u32.to_ne_bytes().as_ptr(), p.add(n), 4);
+    }
+    assert_eq!(
+        call(p.cast::<dsd2pcm_file_options>()),
+        DSD2PCM_OK,
+        "{}",
+        last_error()
+    );
+    assert_eq!(std::fs::read(&out).unwrap(), first, "replaced, as in 0.1.0");
+}
+
+/// The sizes with the fields appended since 0.1.0.
+#[test]
+fn current_sizes() {
+    let want = match (size_of::<usize>(), std::mem::align_of::<u64>()) {
+        (8, _) => 56,
+        (4, 4) => 40,
+        _ => 48,
+    };
+    assert_eq!(size_of::<dsd2pcm_file_options>(), want);
 }

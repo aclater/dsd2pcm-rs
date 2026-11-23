@@ -59,7 +59,7 @@ output are unchanged.
 ## Command line
 
 ```
-dsd2pcm IN OUT [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread]
+dsd2pcm IN OUT [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread] [-n|--no-clobber]
 ```
 
 The `dsd2pcm` tool converts one DSF or DFF file (DSD64) to a 24-bit WAV file; WAV and FLAC
@@ -68,7 +68,8 @@ input is read by the library only. Defaults: `--rate 176400 --cutoff 40 --gain 0
 the rates, the length of the audio, the time taken and the clipped samples, in all and per
 channel. Exit status: 0 on success, 1 when the conversion fails, 2 for a usage error, 130
 or 143 when interrupted by SIGINT or SIGTERM.
-`--help` prints the usage.
+`--help` prints the usage. `-n` or `--no-clobber` refuses an existing OUT (exit status 1,
+the file left as it was) instead of replacing it.
 
 ## Build settings for consumers
 
@@ -105,6 +106,11 @@ and a directory that cannot be written. The WAV goes to a temporary file
 success and given the permissions of the file it replaces (not its owner, ACLs or extended
 attributes). On any error or cancel an existing output is left as it was and no partial
 file remains. A symbolic link at the output path is replaced, not followed.
+
+`convert_file_to` takes `OutputOptions` as well; with `no_clobber` set, anything at the
+output path is refused with `Error::Io` of kind `AlreadyExists`, before converting and again
+when the result is put in place, which never replaces a file that appeared meanwhile
+([design](design.md#output-files)).
 
 The `dsd2pcm` tool treats Ctrl-C, SIGINT and SIGTERM (on Windows Ctrl-C and Ctrl-Break) as a
 cancel: an interrupted conversion leaves no file and an existing output as it was, and the

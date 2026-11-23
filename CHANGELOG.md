@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- No-clobber output: the tool's `-n` / `--no-clobber`, the library's `convert_file_to` with
+  `OutputOptions { no_clobber, .. }`, and the C interface's
+  `dsd2pcm_file_options.no_clobber` (appended; callers built against the 0.1.0 header keep
+  working) with the new status `DSD2PCM_E_EXISTS`. An existing output is refused and left
+  as it was, and the result is put in place without ever replacing a file that appeared
+  during the conversion: a hard link, or on file systems without hard links an exclusive
+  create then a rename ([design](docs/design.md#output-files)).
+
 ## 0.1.2 (2026-11-23)
 
 This release contains security fixes; upgrading is recommended. Versions 0.1.0 and 0.1.1 are

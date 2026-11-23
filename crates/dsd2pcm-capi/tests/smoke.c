@@ -177,6 +177,20 @@ int main(int argc, char **argv) {
     CHECK(stop.calls == 1);
     CHECK(strcmp(dsd2pcm_last_error(), "conversion cancelled") == 0);
 
+    /* no_clobber: the existing output is refused and left as it was. */
+    dsd2pcm_file_options keep = DSD2PCM_FILE_OPTIONS_INIT;
+    keep.rate_hz = 88200;
+    keep.no_clobber = 1;
+    CHECK(dsd2pcm_convert_file(dsf, wav, &keep, NULL) == DSD2PCM_E_EXISTS);
+    CHECK(strstr(dsd2pcm_last_error(), "no-clobber") != NULL);
+    CHECK(strcmp(dsd2pcm_status_str(DSD2PCM_E_EXISTS), "output exists") == 0);
+    {
+        size_t kept_len = 0;
+        unsigned char *kept = read_wav_data(wav, &kept_len);
+        CHECK(kept != NULL && kept_len == wav_len && memcmp(kept, wav_data, wav_len) == 0);
+        free(kept);
+    }
+
     /* Frame runs, same settings. */
     dsd2pcm_frames_config cfg = {.struct_size = sizeof(dsd2pcm_frames_config), .rate_hz = 176400, .channels = CH, .gain_db = 6.0};
     dsd2pcm_frames *conv = NULL;
