@@ -40,6 +40,13 @@ when the CPU has them, chosen at run time, with the same output; the environment
 
 Options: `--gain DB` (-120 to +24, default 0), `--single-thread`.
 
+As a library, `dsd2pcm::frames::Converter` converts Super Audio CD frames (channels
+interleaved byte by byte, 4704 bytes per channel per frame) a run at a time, with the frames
+before and after the run as context, into interleaved 24-bit PCM, with clip counts per frame.
+Its interface and output bytes are those of scarletbook-pcm 0.7.0's `Converter::convert`;
+any run with its neighbours gives the bytes of that run in a whole-area conversion. One
+converter per thread; after the first call it allocates nothing.
+
 Limits of this version: DSD64 input only for PCM output; WAV output up to 4 GiB.
 
 ## Licence

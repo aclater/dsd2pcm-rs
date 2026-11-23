@@ -5,6 +5,8 @@
 //! - [`decimator`]: streaming DSD64 to 24-bit PCM at 88.2, 176.4 or 352.8 kHz, with the
 //!   filters of scarletbook-pcm 0.7.0 and identical output samples.
 //! - [`convert`]: whole-file conversion.
+//! - [`frames`]: Super Audio CD frame runs (with neighbour frames) to PCM, with the
+//!   interface of scarletbook-pcm 0.7.0's `Converter`, single-threaded per call.
 //!
 //! DSD data passes between modules as one byte vector per channel, earliest sample in the
 //! most significant bit, 1 = +1 (see [`io`]).
@@ -16,6 +18,7 @@ pub mod decimator;
 pub mod dff;
 pub mod dsf;
 pub mod error;
+pub mod frames;
 pub mod io;
 pub mod wav;
 

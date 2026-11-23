@@ -26,6 +26,23 @@ history; it starts 4096 idle bytes before the input and flushes with idle bytes,
 output sample is the same function of the input as in scarletbook-pcm's whole-area
 conversion. Output length: `ceil(samples / d)` per channel.
 
+## Frame runs (`frames`)
+
+`frames::Converter::convert` takes a run of Super Audio CD frames (one buffer, or one
+buffer per frame), the frame before and after it (`None` at an area edge: idle), and writes
+interleaved `i32` or 3-byte little-endian samples with per-frame and per-channel clip
+counts; types and semantics follow scarletbook-pcm 0.7.0's public API so that a caller can
+switch with a mechanical diff. The run is placed on a per-channel timeline (byte 0 = first
+byte of the run; neighbours at -4704 and after the last frame; idle beyond) and converted
+in blocks of 6 frames: each block's span of bytes, padding included (`Plan::span`), is
+de-interleaved per channel into a reused buffer, run through the same plan and kernels as
+whole-file conversion (one pass per channel; single-threaded), quantised with the clip
+count split at frame boundaries, and packed straight into the caller's buffer. Bytes
+outside each output's window only reach padded outputs that are discarded, so the output
+equals scarletbook-pcm's and `dsd64_to_pcm`'s. Buffers are bounded by the block size, not
+the run length; after the first call nothing is allocated (`tests/frames_alloc.rs`).
+`context_bytes` (the neighbour bytes that matter) equals scarletbook-pcm's.
+
 ## Speed
 
 - S1 reads each window as 64-bit words cut into 13-bit chunks, one table per chunk (5

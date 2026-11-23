@@ -128,6 +128,9 @@ const PAD: usize = kernel::MAX_L;
 /// S1 bytes per pass: the scratch buffers stay in the L2 cache.
 const PASS_BYTES: usize = 32 << 10;
 
+/// Most stages after S1 in any plan.
+const MAX_OPS: usize = 3;
+
 /// One stage after S1.
 #[derive(Clone, Debug)]
 enum Op {
@@ -224,6 +227,7 @@ impl Plan {
                 )
             }
         };
+        debug_assert!(ops.len() <= MAX_OPS);
         exact::prove(s1_half, &mut ops);
         let k = (rate.decimation() / 8) as i64;
         let pass = (PASS_BYTES / k as usize).div_ceil(PAD) * PAD;
@@ -239,11 +243,11 @@ impl Plan {
         Ok(plan)
     }
 
-    /// The ranges of every level for outputs `out`: `[0]` is S1's output, the last the
-    /// output itself.
-    fn levels(&self, out: (i64, usize), pad: bool) -> Vec<(i64, usize)> {
+    /// The ranges of every level for outputs `out`: `[0]` is S1's output, `[ops.len()]` the
+    /// output itself (a fixed array: no allocation per pass).
+    fn levels(&self, out: (i64, usize), pad: bool) -> [(i64, usize); MAX_OPS + 1] {
         let k = self.ops.len();
-        let mut levels = vec![(0, 0); k + 1];
+        let mut levels = [(0, 0); MAX_OPS + 1];
         levels[k] = out;
         for (i, op) in self.ops.iter().enumerate().rev() {
             levels[i] = op.need(levels[i + 1], pad);
@@ -314,14 +318,70 @@ impl Plan {
         sc: &mut Scratch,
         q: &mut [i32],
     ) -> u64 {
-        debug_assert!(o0 % 2 == 0);
         let mut clipped = 0;
+        self.run_quantised_segs(src, src0, o0, gain, sc, q, usize::MAX, |_, n| clipped += n);
+        clipped
+    }
+
+    /// As [`run_quantised`](Self::run_quantised), but counts the clamped samples per segment
+    /// of `seg` outputs of `q`: `clip(i, n)` adds `n` to segment `i` (called at least once
+    /// per pass and segment, possibly with 0).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn run_quantised_segs(
+        &self,
+        src: &[u8],
+        src0: i64,
+        o0: i64,
+        gain: f64,
+        sc: &mut Scratch,
+        q: &mut [i32],
+        seg: usize,
+        mut clip: impl FnMut(usize, u64),
+    ) {
+        debug_assert!(o0 % 2 == 0 && seg > 0);
         for (i, q) in q.chunks_mut(self.pass).enumerate() {
             let m = q.len().next_multiple_of(2);
-            self.pass_run(src, src0, o0 + (i * self.pass) as i64, m, sc);
-            clipped += dispatch::quantise(self.isa, &sc.a[..q.len()], gain, q);
+            let at = i * self.pass;
+            self.pass_run(src, src0, o0 + at as i64, m, sc);
+            let mut done = 0;
+            while done < q.len() {
+                let s = (at + done) / seg;
+                let end = ((s + 1).saturating_mul(seg) - at).min(q.len());
+                let n = dispatch::quantise(self.isa, &sc.a[done..end], gain, &mut q[done..end]);
+                clip(s, n);
+                done = end;
+            }
         }
-        clipped
+    }
+
+    /// The bytes that [`run_quantised`](Self::run_quantised) reads for outputs
+    /// `o0 .. o0 + n` (`o0` even), padding included: `(first, len)`. Bytes outside the
+    /// unpadded window of each output only reach outputs that are discarded.
+    pub(crate) fn span(&self, o0: i64, n: usize) -> (i64, usize) {
+        let mut lo = i64::MAX;
+        let mut hi = i64::MIN;
+        let mut done = 0;
+        while done < n {
+            let m = self.pass.min(n - done);
+            let (s, len) = self.byte_range((o0 + done as i64, m.next_multiple_of(2)), true);
+            lo = lo.min(s);
+            hi = hi.max(s + len as i64);
+            done += m;
+        }
+        if lo > hi {
+            return (o0 * self.k, 0);
+        }
+        (lo, (hi - lo) as usize)
+    }
+
+    /// Bytes per output (4, 2 or 1).
+    pub(crate) fn bytes_per_output(&self) -> i64 {
+        self.k
+    }
+
+    /// The bytes that outputs `0` and `1` need, unpadded: `(first, len)`.
+    pub(crate) fn window(&self) -> (i64, usize) {
+        self.win
     }
 
     /// One pass: outputs `o0 .. o0 + n` into `sc.a[..n]`.
