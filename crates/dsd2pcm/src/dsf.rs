@@ -160,7 +160,7 @@ impl<R: Read + Seek> DsdRead for DsfReader<R> {
                 "output channel count mismatch".into(),
             ));
         }
-        let groups = (max_bytes / self.block).max(1);
+        let groups = (max_bytes.min(crate::io::MAX_CHUNK) / self.block).max(1);
         let groups = groups.min(self.remaining.div_ceil(self.block as u64) as usize);
         let total = groups * self.block * ch;
         self.buf.resize(total, 0);

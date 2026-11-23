@@ -88,11 +88,28 @@ pub fn convert_file(input: &Path, output: &Path, opts: &PcmOptions) -> Result<Re
         return Err(Error::Unsupported("input is PCM, not DSD".into()));
     };
     check_options(opts)?;
+    if same_file(input, output) {
+        return Err(Error::InvalidArgument("output is the input file".into()));
+    }
+    let info = r.info();
+    let data = decimator::output_len(info.samples, opts.rate) * u64::from(info.channels) * 3;
+    if 36 + data + (data & 1) > u64::from(u32::MAX) {
+        return Err(Error::Unsupported(
+            "WAV output over 4 GiB (RF64 is not supported yet)".into(),
+        ));
+    }
     let out = BufWriter::with_capacity(1 << 20, File::create(output)?);
     let mut w = WavWriter::new(out, WavFormat::I24, r.info().channels, opts.rate.hz())?;
     let rep = dsd64_to_pcm(r, &mut w, opts)?;
     w.finish()?;
     Ok(rep)
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => false,
+    }
 }
 
 /// Checks the gain range and the rate/cutoff combination.

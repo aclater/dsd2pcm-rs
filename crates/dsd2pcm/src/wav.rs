@@ -8,6 +8,9 @@ use crate::error::{format_err, unsupported, Result};
 use crate::io::{le_u16, le_u32, read_exact_arr, PcmInfo, PcmRead};
 use std::io::{Read, Seek, SeekFrom, Write};
 
+/// Largest number of frames one `read_frames` call returns.
+pub const MAX_CHUNK: usize = 1 << 20;
+
 /// Sample encoding of a WAV file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WavFormat {
@@ -172,7 +175,7 @@ impl<R: Read + Seek> PcmRead for WavReader<R> {
                 "output channel count mismatch".into(),
             ));
         }
-        let n = (max_frames.max(1) as u64).min(self.remaining) as usize;
+        let n = (max_frames.clamp(1, MAX_CHUNK) as u64).min(self.remaining) as usize;
         if n == 0 {
             return Ok(0);
         }
@@ -207,6 +210,9 @@ impl<W: Write + Seek> WavWriter<W> {
             ));
         }
         let bs = format.bytes() as u16;
+        let byte_rate = rate
+            .checked_mul(u32::from(channels) * u32::from(bs))
+            .ok_or_else(|| crate::Error::InvalidArgument("WAV writer: rate too high".into()))?;
         let tag: u16 = if format.is_float() { 3 } else { 1 };
         let mut h = Vec::with_capacity(44);
         h.extend_from_slice(b"RIFF");
@@ -216,7 +222,7 @@ impl<W: Write + Seek> WavWriter<W> {
         h.extend_from_slice(&tag.to_le_bytes());
         h.extend_from_slice(&channels.to_le_bytes());
         h.extend_from_slice(&rate.to_le_bytes());
-        h.extend_from_slice(&(rate * u32::from(channels) * u32::from(bs)).to_le_bytes());
+        h.extend_from_slice(&byte_rate.to_le_bytes());
         h.extend_from_slice(&(channels * bs).to_le_bytes());
         h.extend_from_slice(&(bs * 8).to_le_bytes());
         h.extend_from_slice(b"data");

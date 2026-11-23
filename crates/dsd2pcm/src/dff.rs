@@ -187,7 +187,7 @@ impl<R: Read + Seek> DsdRead for DffReader<R> {
                 "output channel count mismatch".into(),
             ));
         }
-        let n = (max_bytes.max(1) as u64).min(self.remaining) as usize;
+        let n = (max_bytes.clamp(1, crate::io::MAX_CHUNK) as u64).min(self.remaining) as usize;
         if n == 0 {
             return Ok(0);
         }

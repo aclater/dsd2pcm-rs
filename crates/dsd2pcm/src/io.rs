@@ -7,6 +7,10 @@
 use crate::error::{format_err, Result};
 use std::io::Read;
 
+/// Largest number of bytes per channel one `DsdRead::read_bytes` call returns (larger
+/// requests are reduced), which bounds the reader's buffer.
+pub const MAX_CHUNK: usize = 16 << 20;
+
 /// Description of a DSD stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DsdInfo {
