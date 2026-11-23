@@ -340,8 +340,13 @@ impl<W: Write + Seek> WavWriter<W> {
         })
     }
 
-    /// Appends interleaved sample bytes.
+    /// Appends interleaved sample bytes. Fails, writing nothing, if the data would pass the
+    /// 4 GiB RIFF limit.
     pub fn write_raw(&mut self, bytes: &[u8]) -> Result<()> {
+        let data_len = self.data_len + bytes.len() as u64;
+        if self.size_at - 4 + data_len + (data_len & 1) > u64::from(u32::MAX) {
+            return unsupported("WAV output over 4 GiB (RF64 is not supported yet)");
+        }
         self.w.write_all(bytes)?;
         self.data_len += bytes.len() as u64;
         Ok(())

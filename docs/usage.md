@@ -80,4 +80,11 @@ converter per thread; after the first call it allocates nothing.
 samples done and the total at each block, on the calling thread, and stops the conversion
 with `Error::Cancelled` when it returns `ControlFlow::Break`. `Error` is `#[non_exhaustive]`.
 
+`convert_file` and `convert_file_with` (and the `dsd2pcm` tool) check the input, its rate,
+the options and the output size before writing, write the WAV to a temporary file in the
+output's directory and rename it over the output only on success. On any error or cancel an
+existing output is left as it was and no partial file remains. An output that is the input
+(by path, symbolic link or, on Unix, hard link) is refused; a symbolic link at the output
+path is replaced, not followed.
+
 Limits of this version: DSD64 input only for PCM output; WAV output up to 4 GiB.

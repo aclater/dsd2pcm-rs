@@ -458,3 +458,50 @@ fn output_counts_past_32_bits_do_not_panic() {
         assert!(matches!(r, Err(Error::Format(_))), "{filter:?}: {r:?}");
     }
 }
+
+/// A writer that keeps only its length.
+struct Discard(u64, u64);
+
+impl std::io::Write for Discard {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+        self.0 += b.len() as u64;
+        self.1 = self.1.max(self.0);
+        Ok(b.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl std::io::Seek for Discard {
+    fn seek(&mut self, p: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.0 = match p {
+            std::io::SeekFrom::Start(n) => n,
+            std::io::SeekFrom::End(d) => self.1.checked_add_signed(d).unwrap(),
+            std::io::SeekFrom::Current(d) => self.0.checked_add_signed(d).unwrap(),
+        };
+        Ok(self.0)
+    }
+}
+
+#[test]
+fn wav_writer_refuses_data_past_4_gib() {
+    let mut w = WavWriter::new(Discard(0, 0), WavFormat::I24, 6, 176_400).unwrap();
+    let block = vec![0u8; 1 << 20];
+    let mut written = 0u64;
+    let err = loop {
+        match w.write_raw(&block) {
+            Ok(()) => written += block.len() as u64,
+            Err(e) => break e,
+        }
+    };
+    assert!(matches!(err, Error::Unsupported(_)), "{err:?}");
+    // The refused block was not written, and the file still finishes within the limit.
+    assert_eq!(w.data_offset() + written, w.into_inner().0);
+    let mut w = WavWriter::new(Discard(0, 0), WavFormat::I24, 6, 176_400).unwrap();
+    for _ in 0..written >> 20 {
+        w.write_raw(&block).unwrap();
+    }
+    w.finish().unwrap();
+    assert!(w.into_inner().1 <= u64::from(u32::MAX) + 8);
+}

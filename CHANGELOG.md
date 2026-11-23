@@ -18,6 +18,13 @@
 - Readers: opening a DFF, WAV or FLAC file with many small chunks takes time linear in its
   size with any buffered reader; DFF and WAV files may have at most 4096 chunks before the
   audio data (and DFF 4096 property chunks), as FLAC already had for metadata blocks.
+- Output files: `convert_file`, `convert_file_with`, `dsd2pcm_convert_file` and the tool
+  check the input and options before writing, write to a temporary file next to the output
+  and rename it into place only on success, so a failed or cancelled conversion leaves an
+  existing output as it was and never leaves a partial WAV; an output that is a hard link to
+  the input is refused on Unix, as the same path and symbolic links already were.
+- `WavWriter::write_raw` refuses data past the 4 GiB RIFF limit when it is written, not
+  only at `finish`.
 - 32-bit targets: an output count past 2^32 samples per channel no longer panics in
   `dsd64_to_pcm_with`.
 

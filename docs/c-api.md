@@ -16,7 +16,8 @@
 - Every pointer is checked for NULL (`DSD2PCM_E_NULL`). A buffer always comes with its
   length; a NULL buffer is allowed only with length 0 where the function says so.
 - Output buffers must not overlap each other or any input; the library checks and returns
-  `DSD2PCM_E_INVALID_ARGUMENT`. On any error nothing is written to the outputs.
+  `DSD2PCM_E_INVALID_ARGUMENT`. On any error nothing is written to the output buffers and
+  structs, and `dsd2pcm_convert_file` leaves an existing output file as it was.
 - No panic crosses the interface: each entry point catches it and returns
   `DSD2PCM_E_INTERNAL`.
 - The only memory the caller frees is a converter, with `dsd2pcm_frames_free`. Strings
@@ -59,7 +60,15 @@ typedef int (*dsd2pcm_progress_fn)(uint64_t done, uint64_t total, void *user_dat
 It is called on the calling thread, once before the first block and after each block, with
 the output samples per channel done and in all; a non-zero return stops the conversion with
 `DSD2PCM_E_CANCELLED`. It must not unwind (C++ exceptions, `longjmp`) into the library.
-After an error the output file may exist and be incomplete.
+
+The input, its rate, the options and the output size are checked before anything is
+written. The WAV is then written to a new temporary file in the output's directory
+(`.NAME.PID-N.tmp`, created exclusively), synced, and renamed over `output_path` only on
+success. On any error, including a cancel, the temporary file is removed and an existing
+output file is left as it was, so a partial WAV never appears under `output_path`. An
+output that is the input file (the same path, a symbolic link to it, or on Unix a hard
+link) is refused with `DSD2PCM_E_INVALID_ARGUMENT`. A symbolic link at `output_path` is
+replaced by the new file, not followed. The output's directory must be writable.
 
 `crates/dsd2pcm-capi/examples/convert.c` is a complete program:
 
