@@ -140,9 +140,15 @@ run property the bytes equal one call.
 
 - S1 reads each window as 64-bit words cut into 13-bit chunks, one table per chunk (5
   lookups per output instead of 8 byte tables; 12-byte wide windows: 8 instead of 12). The
-  sum is the same integer.
-- The FIR kernels compute blocks of independent outputs (16 generic, 32 with AVX2), so
-  the compiler puts them in vector lanes; each output keeps its own sum in tap order.
+  sum is the same integer. On 32-bit targets below AVX2 (the generic and `sse2` levels) it
+  reads 32-bit words (a 64-bit shift takes a register pair there) with byte tables, as
+  scarletbook-pcm does: 8 KiB for S1's window, which stays in the level-1 cache of small
+  in-order cores such as Atom, where every table read from the level-2 cache stalls the
+  core. The AVX2 levels keep the 13-bit chunks on 32-bit targets too (CPUs with large
+  caches, where fewer lookups win). `s1_chunks_match_bytes` checks both layouts.
+- The FIR kernels compute blocks of independent outputs (16 generic, 32 with AVX2; the
+  generic Fir1 8 on 32-bit x86, whose SSE2 has 8 vector registers), so the compiler puts
+  them in vector lanes; each output keeps its own sum in tap order.
 - Lanes (`decimator/lanes.rs`; x86-64 with AVX2 and FMA, plans whose every stage is proven
   exact, passes of at least 4096 outputs: below that, each run's own filter margins cost
   more than the lanes gain, e.g. one frame at 88.2 or 176.4 kHz). The ordered kernels load
@@ -152,9 +158,8 @@ run property the bytes equal one call.
   ordered pass would, with run `w` in lane `w` of every vector: the same operations per
   output in the same order, but every load aligned, decimation and interpolation as index
   arithmetic, and no copies between stages. Blocks of 8 output vectors keep 8 independent
-  sums. `lanes_match_ordered` compares lanes and ordered passes at every level, and the
-  golden hashes run at every level. 32-bit x86 and the generic level keep the ordered
-  kernels. Reusing loaded vectors across taps (groups of taps and outputs, partial sums) was
+  sums. `lanes_match_ordered` compares lanes and ordered passes, with and without the
+  paired tables, at every level, and the golden hashes run at every level. Reusing loaded vectors across taps (groups of taps and outputs, partial sums) was
   faster on P-cores and Zen 5 but slower than scarletbook-pcm on Gracemont E-cores, whose
   128-bit units make the extra additions and register pressure cost more; a hybrid CPU can
   move a thread between core types, so one layout serves both.
@@ -172,11 +177,22 @@ run property the bytes equal one call.
   repeats or has another neighbour gets fresh values
   (`calls_out_of_order_or_with_other_neighbours`). It saves recomputing the filter margins
   that the previous call already computed (about 5 % at 88.2 kHz).
-- Run-time dispatch (`decimator/dispatch.rs`, the crate's only `unsafe`): generic, AVX2,
-  and AVX2 with FMA. FMA is used only in stages that `decimator/exact.rs` proves exact from
+- Lanes on 32-bit x86 (level `sse2`): the same 4 runs, with blocks sized for the 8 SSE2
+  registers (2 output vectors, 4 sums, in Fir1 and Interp2; 4 output vectors in Dec2,
+  which measured faster so). Each tap step slices its windows once and loads whole
+  vectors, so the additions take aligned memory operands: no unaligned or cache-line
+  splitting loads, which in-order Atom cores pay heavily for. S1 uses the byte tables of
+  the ordered kernels, in lanes and in short ordered passes, without paired tables or the
+  frame carry (each 64-bit addition takes two instructions there). Passes run in lanes from
+  1024 outputs (2048 with the wide filter): one frame at 88.2 kHz, and at 176.4 kHz wide, is
+  faster in lanes there. The AVX2 levels on 32-bit x86 and the generic level keep the
+  ordered kernels. An SSSE3 build measured within noise of SSE2 (only the 24-bit packing
+  could use `pshufb`), so there is no SSSE3 level.
+- Run-time dispatch (`decimator/dispatch.rs`, the crate's only `unsafe`): generic, SSE2
+  (32-bit x86 only), AVX2, and AVX2 with FMA. FMA is used only in stages that `decimator/exact.rs` proves exact from
   the tables and stage plan (every product and partial sum an integer below 2^53); the
   test `sums_are_exact` fails if a table or stage change breaks the proof, and such a stage
-  runs unfused. `DSD2PCM_SIMD=generic|avx2|avx2fma` caps the level; the golden hashes in
+  runs unfused. `DSD2PCM_SIMD=generic|sse2|avx2|avx2fma` caps the level; the golden hashes in
   `tests/identity.rs` are checked at every level the CPU has.
 - Whole-file conversion quantises each piece straight into its slot of a per-block sample
   buffer and interleaves once into the output bytes; stage input is read straight from the

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- 32-bit x86: a new SIMD level, `sse2` (`DSD2PCM_SIMD=sse2`), picked on CPUs without AVX2
+  such as Atom: 1.1x to 1.3x the speed of scarletbook-pcm 0.7.0 where the generic level ran
+  at 0.9x to 1.0x. Output bytes unchanged.
+
 ## 0.1.0
 
 First release.

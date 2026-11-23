@@ -57,11 +57,37 @@ What a caller that converts one frame at a time, with its neighbours, sees.
 
 scarletbook-pcm converts on one thread; dsd2pcm uses all cores unless told otherwise.
 
+## 32-bit x86 (i686), one thread
+
+Built for `i686-unknown-linux-gnu` and run on the Intel Core i9-13900H above (P-core: CPU 0;
+E-core: CPU 12, a Gracemont core of the Atom family), 2 channels, 30 s of audio. The SIMD
+level is forced to `sse2` (`DSD2PCM_SIMD=sse2`), the level that a CPU with SSE2 to SSSE3
+and no AVX2 picks, such as the Intel Atom of small NAS units; scarletbook-pcm 0.7.0 has
+one path on 32-bit x86. "Before" is the generic level of the kernels before the `sse2`
+level existed (what such a CPU ran then).
+
+| Rate | Cutoff | `run 4` P-core before | `run 4` P-core | `run 4` E-core before | `run 4` E-core | Whole file E-core: scarletbook-pcm 0.7.0 | Whole file E-core: dsd2pcm |
+|---|---|---|---|---|---|---|---|
+| 88.2 kHz | Low | 1.03x | 1.12x | 0.98x | 1.19x | 88.7 | 102.8 |
+| 88.2 kHz | Standard | 1.03x | 1.11x | 0.97x | 1.14x | 101.8 | 119.6 |
+| 176.4 kHz | Low | 0.90x | 1.17x | 0.92x | 1.19x | 61.3 | 73.4 |
+| 176.4 kHz | Standard | 0.93x | 1.10x | 0.91x | 1.15x | 62.3 | 78.4 |
+| 176.4 kHz | Wide | 1.02x | 1.14x | 0.97x | 1.19x | 44.8 | 52.7 |
+| 352.8 kHz | Low | 0.94x | 1.12x | 1.01x | 1.24x | 48.0 | 60.8 |
+| 352.8 kHz | Standard | 0.96x | 1.20x | 0.95x | 1.19x | 55.3 | 69.4 |
+| 352.8 kHz | Wide | 0.93x | 1.24x | 0.90x | 1.21x | 45.0 | 52.9 |
+
+Whole-file ratios are 1.12x to 1.27x on both core types. Frame by frame (`run 1`) the
+`sse2` level is 1.00x to 1.22x on both core types; one frame at 88.2 kHz is level with
+scarletbook-pcm on the P-core (0.96x to 1.00x across runs). With AVX2 and FMA, the level
+picked on this CPU, i686 builds run at 1.25x to 1.87x on the P-core and 1.05x to 1.40x on
+the E-core.
+
 ## Known gaps
 
 - Whole-file conversion of the 2-channel file at 176.4 kHz `wide` on the P-core reads 0.99x.
   The same filter is ahead converting frame runs (1.04x to 1.10x) and on the 6-channel file
   (1.05x), so the gap is likely in the whole-file path around the filter (DSF reading, WAV
   writing), not in the filter.
-- Without AVX2 (the generic level, used on 32-bit x86 and older CPUs) dsd2pcm runs at 0.6x
-  to 0.9x of scarletbook-pcm 0.7.0. A dedicated SSE2 level is planned.
+- On x86-64 without AVX2 (the generic level, older CPUs) dsd2pcm runs at 0.6x to 0.9x of
+  scarletbook-pcm 0.7.0; 32-bit x86 has its own `sse2` level (above).
