@@ -5,9 +5,10 @@
 #     .github/scripts/check-capi-no-claxon.sh LIBRARY...
 #
 # Each LIBRARY (libdsd2pcm.a, libdsd2pcm.so, .dylib) is listed with nm, every symbol, defined
-# or not, and fails the check if a symbol name holds "claxon" (Rust's legacy and v0 manglings
-# both keep crate names readable: _ZN6claxon..., _R...6claxon...). The symbol table is read,
-# not the bytes, so a file name or message that mentions claxon does not count, and a
+# or not, and fails the check if a line holds "claxon" (Rust's legacy and v0 manglings both
+# keep crate names readable: _ZN6claxon..., _R...6claxon...; nm -A also prefixes each line
+# with the archive member, so a member named after claxon counts too). The symbol table is
+# read, not the bytes, so a message or path string that mentions claxon does not count, and a
 # library without symbols (stripped) fails rather than passing unchecked: a shared library
 # is checked through its full symbol table, so check it before stripping. NM names the nm
 # binary (default nm; llvm-nm on macOS works too).
