@@ -245,3 +245,18 @@ ntf_order = 8
 ntf_gain = 1.45
 ntf_limit = 50
 left = [{ freq_steps = [170000, 345000, 530000, 700000, 880000, 1050000, 1230000], dbfs = -26.02, step_seconds = 2.5 }]
+
+# Louder tones in the bands that fold onto 0-20 kHz at every output rate (333-372 kHz,
+# 686-724 kHz, 1040-1078 kHz), same 8th-order modulator, about -8 dBFS nominal. Analysed by
+# narrow-band detection (`analyse.py`, `narrow`), so a rejection of 150 dB and more stays
+# above the output's own floor.
+
+[[signal]]
+id = "loud_alias"
+desc = "Tones at 333, 345, 360, 372, 686, 700, 712, 723.7, 1040, 1060 and 1078 kHz, -8.02 dBFS nominal, 2.5 s each, from an 8th-order modulator"
+source = "dsd"
+dsd_rates = [64]
+ntf_order = 8
+ntf_gain = 1.45
+ntf_limit = 50
+left = [{ freq_steps = [333000, 345000, 360000, 372000, 686000, 700000, 712000, 723700, 1040000, 1060000, 1078000], dbfs = -8.02, step_seconds = 2.5 }]

@@ -162,6 +162,28 @@ def floor_table(R, F):
     return "\n".join(out)
 
 
+def folding_table(R):
+    """The worst rejection of the alias tones that fold onto 0-20 kHz at each output rate,
+    relative to each tone's level measured in the bitstream (`analyse.py --sources` must
+    include the signal): `quiet_alias` from the FFT lobes, `loud_alias` by narrow-band
+    detection with the measurement's ceiling."""
+    out = ["| Output | quiet_alias, worst (dB) | loud_alias, worst (dB) | loud_alias ceiling at that tone (dB) |",
+           "|---|---:|---:|---:|"]
+    keys = sorted({k.rsplit("/", 1)[0] for k in R if k.endswith(("quiet_alias-dsd-dsd64-ref", "loud_alias-dsd-dsd64-ref"))
+                   and not k.startswith("source/")})
+    for base in keys:
+        def worst(sig, field):
+            st = [x for x in (R.get(f"{base}/{sig}-dsd-dsd64-ref") or {}).get("steps", [])
+                  if field in x and x["out_hz"] <= 20000 and x["aliased"]]
+            return min(st, key=lambda x: x[field]) if st else None
+        q = worst("quiet_alias", "rejection_re_source_db")
+        lo = worst("loud_alias", "narrow_rejection_db")
+        cell = lambda x, k: f"{x[k]:.1f} ({x['in_hz'] / 1000:.1f} kHz)" if x else "–"
+        out.append(f"| {base} | {cell(q, 'rejection_re_source_db')} | {cell(lo, 'narrow_rejection_db')} | "
+                   f"{f(lo['narrow_ceiling_db']) if lo else '–'} |")
+    return "\n".join(out)
+
+
 def identity(R):
     same = differ = 0
     bad = []
@@ -195,6 +217,9 @@ def main():
     if any("quiet_sine1k" in k for k in R):
         print("\n## Filter floor (quiet source)\n")
         print(floor_table(R, F))
+    if any(k.endswith(("quiet_alias-dsd-dsd64-ref", "loud_alias-dsd-dsd64-ref")) for k in R):
+        print("\n## Folding tones (re the bitstream's tone levels)\n")
+        print(folding_table(R))
     if any(k.startswith("foobar/") for k in R):
         print("\n## foobar2000\n")
         print(foobar_tables(R))

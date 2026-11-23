@@ -113,8 +113,10 @@ and the largest partial sum of every plan).
   matched to the taps. Its largest partial sums are 2^52.95 (352.8 kHz with the 30 kHz
   filter, the final P), 2^52.59 (the same at 40 kHz) and 2^52.49 (`wide` at 352.8 kHz, the
   first F40), under the 2^53 limit by 0.05 to 0.5 bit; a table change that crosses it fails
-  `sums_are_exact`. The sums any bit stream can actually reach, from the composite taps,
-  are about 3 bits lower (2^49.6 at most for the stages up to the sharp filters);
+  `sums_are_exact`. The sums a bit stream can actually reach (from the composite taps,
+  the roundings between stages left out) are up to 2^52.09 in the first stage after S1,
+  which sees S1's sums unrounded (`wide` at 352.8 kHz; P 2^51.56, `wide` F80 2^51.26), and
+  at most about 2^50.1 in every later stage;
   `plans_match_reference` checks every plan of both filters, at every SIMD level, against a
   direct computation of its definition in 128-bit integers; `precise_plans_match_the_design`
   writes the precise plans out as in the table above (taps by table, scale, order), checks

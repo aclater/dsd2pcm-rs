@@ -110,6 +110,25 @@ def tone_metrics(x, fs, f0, n=None, band=(20.0, 20000.0)):
     }
 
 
+def narrow(x, fs, f, t0, dur=2.0):
+    """Narrow-band detection of a tone at exactly `f` Hz: the amplitude of its projection
+    over `dur` s from `t0` (Hann window), in dBFS (a full-scale sine is 0 dBFS), and the
+    floor beside it (the RMS of the same projection 7 to 23 Hz either side). Reaches far
+    below an FFT lobe's floor, for tones folded 150 dB and more down."""
+    a, n = int(round(t0 * fs)), int(round(dur * fs))
+    s = np.asarray(x[a:a + n], dtype=np.float64)
+    if len(s) < n:
+        return None, None
+    w = np.hanning(n)
+    t = np.arange(n) / fs
+
+    def amp(ff):
+        return 2 * abs(np.sum(s * w * np.exp(-2j * math.pi * ff * t))) / w.sum()
+
+    nb = math.sqrt(np.mean([amp(f + d) ** 2 for d in (-23, -17, -11, -7, 7, 11, 17, 23)]))
+    return 20 * math.log10(max(amp(f), 1e-300)), 20 * math.log10(max(nb, 1e-300))
+
+
 def seg(sig, fs, start_s, n):
     a = int(round(start_s * fs))
     return sig[a:a + n] if a + n <= len(sig) else None
@@ -369,7 +388,7 @@ def analyse_file(path, meta, key):
             res["post_ring_60_ms"] = float((idx[-1] - k) / fs * 1e3)
             res["symmetric_about_peak"] = bool(np.allclose(v[k - 50:k], v[k + 50:k:-1], atol=2 / 2**23)) if k >= 50 else None
         curves["time"] = {"fs": fs, "t0_ms": (lo - a) / fs * 1e3, "v": v.tolist()}
-    elif sid in ("alias_steps", "quiet_alias"):
+    elif sid in ("alias_steps", "quiet_alias", "loud_alias"):
         steps = meta["channels"][0]["steps"]
         out = []
         for stp in steps:
@@ -384,12 +403,18 @@ def analyse_file(path, meta, key):
                 for orate in (88200, 176400, 352800):
                     fa = abs(((fin + orate / 2) % orate) - orate / 2)
                     src[str(orate)] = {"hz": fa, "dbfs": dbfs(p[lobe(f, fa, fs, len(s))].sum())}
-                out.append({"in_hz": fin, "in_dbfs": stp["dbfs"], "tone_dbfs": dbfs(p[lobe(f, fin, fs, len(s))].sum()), "at_alias": src})
+                row = {"in_hz": fin, "in_dbfs": stp["dbfs"], "tone_dbfs": dbfs(p[lobe(f, fin, fs, len(s))].sum()), "at_alias": src}
+                if sid == "loud_alias":
+                    row["narrow_tone_dbfs"] = narrow(L, fs, fin, st + stp["start"] + 0.25)[0]
+                out.append(row)
                 continue
             fa = abs(((fin + fs / 2) % fs) - fs / 2)
             lev = dbfs(p[lobe(f, fa, fs, len(s))].sum())
-            out.append({"in_hz": fin, "out_hz": fa, "in_dbfs": stp["dbfs"], "out_dbfs": lev,
-                        "rejection_db": stp["dbfs"] - lev, "aliased": fin > fs / 2})
+            row = {"in_hz": fin, "out_hz": fa, "in_dbfs": stp["dbfs"], "out_dbfs": lev,
+                   "rejection_db": stp["dbfs"] - lev, "aliased": fin > fs / 2}
+            if sid == "loud_alias":
+                row["narrow_dbfs"], row["narrow_floor_dbfs"] = narrow(L, fs, fa, st + stp["start"] + 0.25)
+            out.append(row)
         res["steps"] = out
     elif sid == "hot_ramp":
         r = meta["channels"][0]["ramp"]
@@ -443,9 +468,33 @@ def main():
             for (r, c) in ex.map(_star, items):
                 results[r["key"]] = r
                 curves[r["key"]] = c
+    relate_to_sources(results)
     json.dump(results, open(a.out, "w"), indent=1, default=float)
     if a.curves:
         json.dump(curves, open(a.curves, "w"))
+
+
+def relate_to_sources(results):
+    """Tone rejection relative to each tone's level measured in the bitstream (the source's
+    analysis, `--sources`), not its nominal level: `rejection_re_source_db` from the FFT
+    lobes and, for `loud_alias`, `narrow_rejection_db` and the measurement's ceiling
+    `narrow_ceiling_db` (the tone over the output's own floor beside the alias)."""
+    for key, r in results.items():
+        if key.startswith(("source/", "_")) or not isinstance(r, dict) or "steps" not in r:
+            continue
+        src = results.get("source/" + key.rsplit("/", 1)[-1])
+        if not src or "steps" not in src:
+            continue
+        tones = {t["in_hz"]: t for t in src["steps"] if "tone_dbfs" in t}
+        for stp in r["steps"]:
+            t = tones.get(stp["in_hz"])
+            if t is None or "out_dbfs" not in stp:
+                continue
+            stp["source_tone_dbfs"] = t["tone_dbfs"]
+            stp["rejection_re_source_db"] = t["tone_dbfs"] - stp["out_dbfs"]
+            if "narrow_dbfs" in stp and t.get("narrow_tone_dbfs") is not None:
+                stp["narrow_rejection_db"] = t["narrow_tone_dbfs"] - stp["narrow_dbfs"]
+                stp["narrow_ceiling_db"] = t["narrow_tone_dbfs"] - stp["narrow_floor_dbfs"]
 
 
 def _star(w):

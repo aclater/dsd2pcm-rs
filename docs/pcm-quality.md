@@ -489,7 +489,8 @@ what it passes there.*
 decoder as a black box, `ffmpeg -i IN.dsf -ar RATE -c:a pcm_f32le OUT.wav`, 32-bit float
 output, at its native 352.8 kHz and resampled to 176.4 kHz by its default resampler). The
 tone column is the worst rejection of the `quiet_alias` tones that fold onto 0-20 kHz at
-that rate, relative to each tone's level measured in the bitstream:
+that rate, relative to each tone's level measured in the bitstream (`report.py` prints it,
+with the `loud_alias` figures, as "Folding tones"):
 
 | Converter | SINAD, 8th-order source (dB) | Noise and distortion (dBFS) | Noise, 5th-order modulated silence (dBFS) | Folding tones, worst rejection (dB) | Ultrasonic noise, 20 kHz to Nyquist at 352.8 kHz (dBFS) | DSD silence |
 |---|---:|---:|---:|---:|---:|---|
@@ -510,9 +511,12 @@ that rate, relative to each tone's level measured in the bitstream:
 - **The tone figures for precise are lower bounds.** Each reading is the tone's level over
   what the output shows at the alias frequency, and with the precise filter that is mostly
   the output's own noise in the tone's FFT lobe (24-bit rounding and the source's noise,
-  near -180 dBFS here), not the leaked tone. A second run with louder tones (11 tones
-  across 333-1078 kHz at about -8 dBFS) measured 157.5 dB at worst (686 kHz) and 151.0 dB
-  with `wide` (723.7 kHz), against 158.0 and 151.3 dB from the taps.
+  near -180 dBFS here), not the leaked tone. The `loud_alias` signal settles it: 11 tones
+  across 333-1078 kHz at about -8 dBFS, detected narrow-band (a 2 s projection at the
+  exact alias frequency, with the floor read beside it), so the measurement's ceiling is
+  184 to 188 dB. The precise filter measures 157.5 dB at worst (686 kHz; 30 and 40 kHz,
+  every rate) and 151.0 dB with `wide` (723.7 kHz), against 158.0 and 151.3 dB from the
+  taps; the default 114.5 dB (723.7 kHz; `wide` 111.2 dB), ffmpeg 152.5 dB (345 kHz).
 - **What is left is the 24-bit output, not the filter.** The same taps in floating point
   give 146.7 dB, the source's own 146.9 dB. The 24-bit rounding adds -152.7 dBFS in
   20 Hz-20 kHz at 176.4 kHz (-149.7 at 88.2, -155.7 at 352.8 kHz), and the source's -152.9
@@ -804,15 +808,16 @@ The [precise filter](#the-precise-filter)'s figures were made with the same tool
 use:
 
 ```sh
-venv/bin/python tools/quality/gen_signals.py --out out/sig --no-sox --only idle,silence,sine1k_0,fr_tones,alias_steps,bit_impulse,bit_step,quiet_sine1k,quiet_alias
+venv/bin/python tools/quality/gen_signals.py --out out/sig --no-sox --only idle,silence,sine1k_0,fr_tones,alias_steps,bit_impulse,bit_step,quiet_sine1k,quiet_alias,loud_alias
 venv/bin/python tools/quality/decode.py --signals-dir out/sig --out out/dec --tool dsd2pcm=target/release/dsd2pcm --tool ffmpeg=/usr/bin/ffmpeg --decoders dsd2pcm,dsd2pcm-precise,ffmpeg
 mkdir -p out/dec/taps-f64-precise/176k4-40 out/dec/taps-f64-precise/176k4-wide
 venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --precise crates/dsd2pcm/src/decimator/tables_precise.rs --apply out/sig/dsd/quiet_sine1k-dsd-dsd64-ref.dsf --rate 176400 --cutoff precise-40 --out out/dec/taps-f64-precise/176k4-40/quiet_sine1k-dsd-dsd64-ref.wav
 venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --precise crates/dsd2pcm/src/decimator/tables_precise.rs --apply out/sig/dsd/quiet_alias-dsd-dsd64-ref.dsf --rate 176400 --cutoff precise-40 --out out/dec/taps-f64-precise/176k4-40/quiet_alias-dsd-dsd64-ref.wav
 venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --precise crates/dsd2pcm/src/decimator/tables_precise.rs --apply out/sig/dsd/quiet_sine1k-dsd-dsd64-ref.dsf --rate 176400 --cutoff precise-wide --out out/dec/taps-f64-precise/176k4-wide/quiet_sine1k-dsd-dsd64-ref.wav
 venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --precise crates/dsd2pcm/src/decimator/tables_precise.rs --apply out/sig/dsd/quiet_alias-dsd-dsd64-ref.dsf --rate 176400 --cutoff precise-wide --out out/dec/taps-f64-precise/176k4-wide/quiet_alias-dsd-dsd64-ref.wav
-venv/bin/python tools/quality/analyse.py --signals-dir out/sig --decoded out/dec --out out/results.json --curves out/curves.json --sources quiet_sine1k,quiet_alias,silence,sine1k_0
+venv/bin/python tools/quality/analyse.py --signals-dir out/sig --decoded out/dec --out out/results.json --curves out/curves.json --sources quiet_sine1k,quiet_alias,loud_alias,silence,sine1k_0
 venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/tables.rs --pysacd crates/dsd2pcm/src/filters/pysacd_taps.rs --precise crates/dsd2pcm/src/decimator/tables_precise.rs --out out/filters.json
+venv/bin/python tools/quality/report.py --filters out/filters.json --results out/results.json
 ```
 
 The two precise charts are `plot_precise` in `plot.py`. The real-disc comparison used
