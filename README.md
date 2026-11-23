@@ -19,12 +19,12 @@ reproduces ([performance](docs/performance.md)).
 
 | System | How | Guide |
 |---|---|---|
-| Linux | Release builds of the tool and the C library for x86_64, aarch64 and 32-bit x86, glibc 2.17 or later; `cargo install dsd2pcm-cli` | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
-| macOS 11 or later | Release builds for Apple silicon (tool and C library), signed and notarised | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
-| Windows 10 and 11, x64 | Release builds (tool and C library, C runtime linked in). Not code-signed | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
+| Linux | Release builds of the tool and the C library for x86_64, aarch64 and 32-bit x86, glibc 2.17 or later; from 0.1.3 also for x86_64 and aarch64 with musl (a static tool; the C library for musl 1.2.3 or later, Alpine 3.17 or later); `cargo install dsd2pcm-cli` | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
+| macOS 11 or later | Release builds for Apple silicon (tool and C library), from 0.1.3 also for Intel, signed and notarised | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
+| Windows 10 and 11, x64 | Release builds (tool and C library, C runtime linked in); from 0.1.3 also the C library for MinGW-w64 gcc. Not code-signed | [usage](docs/usage.md) · [C interface](docs/c-api.md) |
 | Any Rust target | The `dsd2pcm` crate | [docs.rs](https://docs.rs/dsd2pcm) |
 
-Every release is tested in CI on all five release platforms; the speed figures come from an
+Every release is tested in CI on all its release platforms (nine from 0.1.3 on); the speed figures come from an
 Intel Core i9-13900H (P- and E-cores) and an AMD Ryzen 9 3950X.
 
 ## Quick start

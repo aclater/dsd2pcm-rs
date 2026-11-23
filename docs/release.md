@@ -23,24 +23,24 @@ The GitHub release, with these assets:
 
 | Asset | Platform |
 |---|---|
-| `dsd2pcm-0.1.2-src.tar.gz` | The source: the tagged commit's whole tree (workspace, `fuzz/`, `docs/`) |
+| `dsd2pcm-0.1.2-src.tar.gz` | (from 0.1.3) The source: the tagged commit's whole tree (workspace, `fuzz/`, `docs/`) |
 | `dsd2pcm-0.1.2-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
 | `dsd2pcm-0.1.2-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
 | `dsd2pcm-0.1.2-i686-linux.tar.gz` | Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later |
-| `dsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | Linux x86_64, statically linked (musl): any Linux |
-| `dsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | Linux aarch64, statically linked (musl): any Linux |
+| `dsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | (from 0.1.3) Linux x86_64, statically linked (musl): any Linux |
+| `dsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | (from 0.1.3) Linux aarch64, statically linked (musl): any Linux |
 | `dsd2pcm-0.1.2-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon; signed (Developer ID) and notarised |
-| `dsd2pcm-0.1.2-x86_64-macos.tar.gz` | macOS 11 or later, Intel; signed (Developer ID) and notarised |
+| `dsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.1.3) macOS 11 or later, Intel; signed (Developer ID) and notarised |
 | `dsd2pcm-0.1.2-x86_64-windows.zip` | Windows 10 and 11, x86_64; C runtime linked in; not code-signed |
 | `libdsd2pcm-0.1.2-x86_64-linux.tar.gz` | C library, Linux x86_64, glibc 2.17 or later; marked for the CET shadow stack |
 | `libdsd2pcm-0.1.2-aarch64-linux.tar.gz` | C library, Linux aarch64, glibc 2.17 or later |
 | `libdsd2pcm-0.1.2-i686-linux.tar.gz` | C library, Linux 32-bit x86, glibc 2.17 or later |
-| `libdsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | C library, Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later); static library marked for the CET shadow stack |
-| `libdsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | C library, Linux aarch64, musl 1.2.3 or later |
+| `libdsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | (from 0.1.3) C library, Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later); static library marked for the CET shadow stack |
+| `libdsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | (from 0.1.3) C library, Linux aarch64, musl 1.2.3 or later |
 | `libdsd2pcm-0.1.2-aarch64-macos.tar.gz` | C library, macOS 11 or later, Apple silicon; `libdsd2pcm.1.dylib` signed and notarised |
-| `libdsd2pcm-0.1.2-x86_64-macos.tar.gz` | C library, macOS 11 or later, Intel; `libdsd2pcm.1.dylib` signed and notarised |
+| `libdsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.1.3) C library, macOS 11 or later, Intel; `libdsd2pcm.1.dylib` signed and notarised |
 | `libdsd2pcm-0.1.2-x86_64-windows.zip` | C library, Windows 10 and 11, x86_64, for MSVC |
-| `libdsd2pcm-0.1.2-x86_64-windows-gnu.zip` | C library, Windows 10 and 11, x86_64, for MinGW-w64 gcc (msvcrt) |
+| `libdsd2pcm-0.1.2-x86_64-windows-gnu.zip` | (from 0.1.3) C library, Windows 10 and 11, x86_64, for MinGW-w64 gcc (msvcrt) |
 
 A `dsd2pcm-` archive holds `dsd2pcm` (or `dsd2pcm.exe`), `README.md`, `LICENSE-MIT` and
 `LICENSE-APACHE`. A `libdsd2pcm-` archive holds `include/dsd2pcm.h`, the shared library
@@ -54,10 +54,9 @@ platforms and the C library nine: the MinGW-w64 build is the C library only (the
 `dsd2pcm.exe` serves Windows). `dsd2pcm-0.1.2-src.tar.gz` is
 `git archive --format=tar --prefix=dsd2pcm-0.1.2/ v0.1.2 | gzip -n -9`: the files carry the
 commit's time, so the same command on the tag gives the same tar (and, with GNU gzip, the
-same bytes); the workflow checks
-that the C library builds from it (`cargo build --release --locked -p dsd2pcm-capi` in the
-unpacked folder). Every archive has a `.sha256` file and a build provenance
-attestation (`.intoto.jsonl`, also stored with GitHub). `SHA256SUMS` lists every archive:
+same bytes); the workflow checks that the C library builds from it (`cargo build --release
+--locked -p dsd2pcm-capi` in the unpacked folder). Every archive has a `.sha256` file and a
+build provenance attestation (`.intoto.jsonl`, also stored with GitHub). `SHA256SUMS` lists every archive:
 55 files in all (18 archives, 18 `.sha256`, 18 `.intoto.jsonl`, `SHA256SUMS`).
 
 ## How the workflow runs
@@ -79,8 +78,8 @@ attestation (`.intoto.jsonl`, also stored with GitHub). `SHA256SUMS` lists every
 
    | Platform | Build and test | C library check |
    |---|---|---|
-   | x86_64-linux, i686-linux, x86_64-linux-musl | `ubuntu-24.04` | the runner (`gcc -m32` for i686); musl in an Alpine 3.24 container |
-   | aarch64-linux, aarch64-linux-musl | `ubuntu-24.04-arm` | the runner; musl in an Alpine 3.24 container |
+   | x86_64-linux, i686-linux, x86_64-linux-musl | `ubuntu-24.04` | the runner (`gcc -m32` for i686); musl in Alpine 3.17 and 3.24 containers, where the static tool converts the test file too |
+   | aarch64-linux, aarch64-linux-musl | `ubuntu-24.04-arm` | the runner; musl in Alpine 3.17 and 3.24 containers, where the static tool converts the test file too |
    | aarch64-macos | `macos-15` | `macos-15` |
    | x86_64-macos | `macos-15-intel` (Intel, native) | `macos-15-intel` |
    | x86_64-windows | `windows-2025`, MSVC | MSVC `cl` |

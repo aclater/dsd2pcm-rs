@@ -179,16 +179,16 @@ DSD input only, and without FLAC reading it holds no third-party code, only Rust
 library (MIT OR Apache-2.0). `--features flac` adds it back.
 
 From 0.1.3 on, each release has the source as an attested archive,
-`dsd2pcm-0.1.3-src.tar.gz`: the tagged commit's whole tree, made with
-`git archive --format=tar --prefix=dsd2pcm-0.1.3/ v0.1.3 | gzip -n -9` (the same command
+`dsd2pcm-0.1.2-src.tar.gz` for this version: the tagged commit's whole tree, made with
+`git archive --format=tar --prefix=dsd2pcm-0.1.2/ v0.1.2 | gzip -n -9` (the same command
 gives the same tar, and with GNU gzip the same bytes). To pin and check it:
 
 ```
-gh release download v0.1.3 -R aclater/dsd2pcm-rs -p 'dsd2pcm-0.1.3-src.tar.gz*'
-sha256sum -c dsd2pcm-0.1.3-src.tar.gz.sha256
-gh attestation verify dsd2pcm-0.1.3-src.tar.gz -R aclater/dsd2pcm-rs --signer-workflow aclater/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.3
-tar -xzf dsd2pcm-0.1.3-src.tar.gz
-cd dsd2pcm-0.1.3
+gh release download v0.1.2 -R aclater/dsd2pcm-rs -p 'dsd2pcm-0.1.2-src.tar.gz*'
+sha256sum -c dsd2pcm-0.1.2-src.tar.gz.sha256
+gh attestation verify dsd2pcm-0.1.2-src.tar.gz -R aclater/dsd2pcm-rs --signer-workflow aclater/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.2 --deny-self-hosted-runners
+tar -xzf dsd2pcm-0.1.2-src.tar.gz
+cd dsd2pcm-0.1.2
 cargo build --release --locked -p dsd2pcm-capi
 ```
 
@@ -212,20 +212,20 @@ LD_LIBRARY_PATH=target/release ./minimal
 
 ## Binary releases
 
-Each GitHub release has the C library built for nine platforms, next to the command-line
-tool, each with a `.sha256` file and a build provenance attestation:
+Each GitHub release has the C library built for nine platforms (four of them from 0.1.3 on),
+next to the command-line tool, each with a `.sha256` file and a build provenance attestation:
 
 | Archive | Platform |
 |---|---|
 | `libdsd2pcm-0.1.2-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
 | `libdsd2pcm-0.1.2-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
 | `libdsd2pcm-0.1.2-i686-linux.tar.gz` | Linux 32-bit x86, glibc 2.17 or later |
-| `libdsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later) |
-| `libdsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | Linux aarch64, musl 1.2.3 or later |
+| `libdsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | (from 0.1.3) Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later) |
+| `libdsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | (from 0.1.3) Linux aarch64, musl 1.2.3 or later |
 | `libdsd2pcm-0.1.2-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon |
-| `libdsd2pcm-0.1.2-x86_64-macos.tar.gz` | macOS 11 or later, Intel |
+| `libdsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.1.3) macOS 11 or later, Intel |
 | `libdsd2pcm-0.1.2-x86_64-windows.zip` | Windows x86_64, for MSVC |
-| `libdsd2pcm-0.1.2-x86_64-windows-gnu.zip` | Windows x86_64, for MinGW-w64 gcc (MSYS2 MINGW64, msvcrt) |
+| `libdsd2pcm-0.1.2-x86_64-windows-gnu.zip` | (from 0.1.3) Windows x86_64, for MinGW-w64 gcc (MSYS2 MINGW64, msvcrt) |
 
 An archive holds:
 
@@ -313,9 +313,9 @@ in the same process, hide its symbols:
 - macOS: list your own exports, one per line with a leading underscore (`_PyInit_myext`), in
   a file and link with `-Wl,-exported_symbols_list,exports.txt`.
 
-The release workflow does this for every archive: it links `examples/minimal.c` and the
-static library into a shared library with these flags, checks that only the program's own
-function is exported, and runs it.
+The release workflow does this for every archive but the MSVC one: it links
+`examples/minimal.c` and the static library into a shared library with these flags, checks
+that only the program's own function is exported, and runs it.
 
 ### Intel CET
 
