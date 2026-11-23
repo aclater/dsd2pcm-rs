@@ -182,6 +182,22 @@ fn chunks_fill<R: Read + Seek>(r: &mut R, from: u64, file_len: u64) -> Result<bo
     Ok(fill)
 }
 
+/// Decodes little-endian samples of `format` from `bytes` and appends them to `out` as `f64`,
+/// by the same rules as [`WavReader`]: integers scaled so that digital full scale is +-1.0
+/// (2^-15, 2^-23, 2^-31), floats as they are, non-finite floats as 0. The order of the
+/// samples (interleaved or not) is kept. A trailing partial sample is ignored. Returns the
+/// number of samples appended.
+pub fn decode(format: WavFormat, bytes: &[u8], out: &mut Vec<f64>) -> usize {
+    let n = bytes.len() / format.bytes();
+    out.reserve(n);
+    out.extend(
+        bytes
+            .chunks_exact(format.bytes())
+            .map(|b| sample(format, b)),
+    );
+    n
+}
+
 fn sample(format: WavFormat, b: &[u8]) -> f64 {
     let v = match format {
         WavFormat::I16 => f64::from(i16::from_le_bytes([b[0], b[1]])) * (1.0 / 32768.0),

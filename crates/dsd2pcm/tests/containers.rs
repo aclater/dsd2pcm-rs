@@ -351,3 +351,46 @@ fn wav_empty_data_chunk_is_zero_frames() {
     b.extend_from_slice(b"LIST\x04\0\0\0INFO");
     assert_eq!(wav_samples(b).unwrap()[0].len(), 10);
 }
+
+/// `wav::decode` gives exactly what `WavReader` reads from the same bytes, for every format.
+#[test]
+fn wav_decode_matches_the_reader() {
+    use dsd2pcm::wav::{decode, WavFormat, WavReader, WavWriter};
+    for format in [
+        WavFormat::I16,
+        WavFormat::I24,
+        WavFormat::I32,
+        WavFormat::F32,
+        WavFormat::F64,
+    ] {
+        // 600 samples of 2 channels; pseudo-random bytes, so floats include NaN and inf.
+        let mut x = 0x9E37_79B9u32;
+        let data: Vec<u8> = (0..600 * format.bytes())
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                x as u8
+            })
+            .collect();
+        let mut w = WavWriter::new(Cursor::new(Vec::new()), format, 2, 88_200).unwrap();
+        w.write_raw(&data).unwrap();
+        w.finish().unwrap();
+        let mut r = WavReader::new(Cursor::new(w.into_inner().into_inner())).unwrap();
+        let mut read = vec![Vec::new(), Vec::new()];
+        while r.read_frames(1000, &mut read).unwrap() > 0 {}
+        // A trailing partial sample is ignored.
+        let mut with_tail = data.clone();
+        with_tail.push(0x7f);
+        let mut out = Vec::new();
+        assert_eq!(decode(format, &with_tail, &mut out), 600);
+        assert_eq!(out.len(), 600);
+        for (i, v) in out.iter().enumerate() {
+            assert_eq!(
+                v.to_bits(),
+                read[i % 2][i / 2].to_bits(),
+                "{format:?} sample {i}"
+            );
+        }
+    }
+}
