@@ -6,7 +6,7 @@ name: msrv
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, ci]
   workflow_dispatch:
 
 concurrency:

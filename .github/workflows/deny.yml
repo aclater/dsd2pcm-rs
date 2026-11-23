@@ -5,7 +5,7 @@ name: cargo-deny
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, ci]
   schedule:
     - cron: "37 5 * * 1"  # weekly: new advisories appear without a code change
   workflow_dispatch:
