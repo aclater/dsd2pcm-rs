@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Releases: the C library for Linux with musl (x86_64, aarch64), macOS on Intel (signed and
+  notarised) and Windows with MinGW-w64 (`x86_64-windows-gnu`, for gcc); the command-line
+  tool for musl (statically linked) and macOS on Intel. On x86_64 Linux the static
+  library's objects and the glibc shared library are marked for the CET shadow stack.
+  [c-api.md](docs/c-api.md#binary-releases) explains how to embed the static library in a
+  shared library with its symbols hidden.
 - x86_64 without AVX2 (e.g. Celeron and Pentium J and N series of NAS units): the `sse2`
   level now runs there too, where the generic level ran at 0.6x to 0.9x the speed of
   scarletbook-pcm 0.7.0 ([performance](docs/performance.md)). Output bytes unchanged.

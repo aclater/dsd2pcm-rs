@@ -163,22 +163,34 @@ LD_LIBRARY_PATH=target/release ./minimal
 
 ## Binary releases
 
-Each GitHub release has the C library built for five platforms, next to the command-line
-tool: `libdsd2pcm-0.1.1-x86_64-linux.tar.gz`, `-aarch64-linux.tar.gz`, `-i686-linux.tar.gz`
-(glibc 2.17 or later), `-aarch64-macos.tar.gz` (macOS 11 or later) and
-`-x86_64-windows.zip`, each with a `.sha256` file and a build provenance attestation.
+Each GitHub release has the C library built for nine platforms, next to the command-line
+tool, each with a `.sha256` file and a build provenance attestation:
+
+| Archive | Platform |
+|---|---|
+| `libdsd2pcm-0.1.1-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
+| `libdsd2pcm-0.1.1-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
+| `libdsd2pcm-0.1.1-i686-linux.tar.gz` | Linux 32-bit x86, glibc 2.17 or later |
+| `libdsd2pcm-0.1.1-x86_64-linux-musl.tar.gz` | Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later) |
+| `libdsd2pcm-0.1.1-aarch64-linux-musl.tar.gz` | Linux aarch64, musl 1.2.3 or later |
+| `libdsd2pcm-0.1.1-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon |
+| `libdsd2pcm-0.1.1-x86_64-macos.tar.gz` | macOS 11 or later, Intel |
+| `libdsd2pcm-0.1.1-x86_64-windows.zip` | Windows x86_64, for MSVC |
+| `libdsd2pcm-0.1.1-x86_64-windows-gnu.zip` | Windows x86_64, for MinGW-w64 gcc (MSYS2 MINGW64, msvcrt) |
+
 An archive holds:
 
 - `include/dsd2pcm.h`;
 - the shared library: `lib/libdsd2pcm.so.1` with the link `lib/libdsd2pcm.so` (Linux,
-  SONAME `libdsd2pcm.so.1`); `lib/libdsd2pcm.1.dylib` with the link `lib/libdsd2pcm.dylib`
+  SONAME `libdsd2pcm.so.1`; with musl it needs only musl's `libc.so`);
+  `lib/libdsd2pcm.1.dylib` with the link `lib/libdsd2pcm.dylib`
   (macOS, install name `@rpath/libdsd2pcm.1.dylib`, signed with a Developer ID and
   notarised);
-  `bin/dsd2pcm.dll` and its import library `lib/dsd2pcm.dll.lib` (Windows, C runtime
-  linked in);
-- the static library: `lib/libdsd2pcm.a` (`lib/dsd2pcm.lib` on Windows, built with the
-  static C runtime, `/MT`);
-- `lib/pkgconfig/dsd2pcm.pc` (Linux and macOS), relative to wherever the archive is
+  `bin/dsd2pcm.dll` and its import library `lib/dsd2pcm.dll.lib` (Windows, MSVC, C runtime
+  linked in), or `lib/libdsd2pcm.dll.a` (MinGW-w64; the DLL needs only Windows' own DLLs);
+- the static library: `lib/libdsd2pcm.a` (`lib/dsd2pcm.lib` for MSVC, built with the
+  static C runtime, `/MT`); position-independent, so it can go into a shared library;
+- `lib/pkgconfig/dsd2pcm.pc` (all but MSVC), relative to wherever the archive is
   unpacked; its `Libs.private` lists the system libraries the static library needs;
 - `examples/minimal.c` (`crates/dsd2pcm-capi/tests/minimal.c`), `README.md`,
   `LICENSE-MIT`, `LICENSE-APACHE`.
@@ -196,7 +208,8 @@ cc libdsd2pcm-0.1.1-x86_64-linux/examples/minimal.c $(pkg-config --cflags --libs
 ./minimal
 ```
 
-On macOS the same with the `aarch64-macos` archive, `shasum -a 256 -c` in place of
+The musl archives work the same way on Alpine (`apk add gcc musl-dev pkgconf`). On macOS
+the same with the `aarch64-macos` or `x86_64-macos` archive, `shasum -a 256 -c` in place of
 `sha256sum -c`, and `-Wl,-rpath,@executable_path/libdsd2pcm-0.1.1-aarch64-macos/lib`.
 Static linking instead (Linux):
 
@@ -213,6 +226,63 @@ cl /I include examples\minimal.c lib\dsd2pcm.dll.lib
 copy bin\dsd2pcm.dll .
 minimal.exe
 ```
+
+With MinGW-w64, in an MSYS2 MINGW64 shell (`pacman -S mingw-w64-x86_64-gcc
+mingw-w64-x86_64-pkgconf`), in the folder holding the unpacked
+`libdsd2pcm-0.1.1-x86_64-windows-gnu` folder:
+
+```
+export PKG_CONFIG_PATH=libdsd2pcm-0.1.1-x86_64-windows-gnu/lib/pkgconfig
+gcc libdsd2pcm-0.1.1-x86_64-windows-gnu/examples/minimal.c $(pkg-config --cflags --libs dsd2pcm) -o minimal.exe
+cp libdsd2pcm-0.1.1-x86_64-windows-gnu/bin/dsd2pcm.dll .
+./minimal.exe
+```
+
+`-ldsd2pcm` takes the import library `libdsd2pcm.dll.a`; for the static library name
+`lib/libdsd2pcm.a` and add `$(pkg-config --libs-only-l --static dsd2pcm | sed
+'s/-ldsd2pcm//')`, as on Linux. The library uses msvcrt, like Rust's
+`x86_64-pc-windows-gnu`: use the MINGW64 environment, not UCRT64.
+
+On musl, Rust links the C runtime into a program statically by default and then builds
+no shared library; the release's musl C library is built with `-C
+target-feature=-crt-static`, so its shared library links musl dynamically and its static
+library's `Libs.private` is `-lgcc_s -lc`. For a fully static program on musl, link the
+static library with `-static` and `-lgcc_eh -lc` in place of `-lgcc_s -lc`.
+
+### Embedding the static library
+
+The static library holds the Rust standard library's global symbols as well as the
+`dsd2pcm_*` functions: over a thousand on Linux, a few hundred of which end up exported
+from a shared library that links it plainly (the shared library `libdsd2pcm` exports only
+`dsd2pcm_*`). To put `libdsd2pcm.a` into a shared library of your own (a Python extension
+module, a plug-in) without exporting them, and without clashing with another Rust library
+in the same process, hide its symbols:
+
+- GNU ld, lld and MinGW-w64: `-Wl,--exclude-libs,libdsd2pcm.a`, for example
+  `cc -shared -fPIC -o myext.so myext.c libdsd2pcm-0.1.1-x86_64-linux/lib/libdsd2pcm.a -Wl,--exclude-libs,libdsd2pcm.a -lpthread -ldl -lm`
+  (or a version script that lists your own exports);
+- macOS: list your own exports, one per line with a leading underscore (`_PyInit_myext`), in
+  a file and link with `-Wl,-exported_symbols_list,exports.txt`.
+
+The release workflow does this for every archive: it links `examples/minimal.c` and the
+static library into a shared library with these flags, checks that only the program's own
+function is exported, and runs it.
+
+### Intel CET
+
+On x86_64 Linux, every object in `libdsd2pcm.a` (glibc and musl) and the glibc
+`libdsd2pcm.so.1` carry the CET shadow-stack property (`readelf -n` shows `x86 feature:
+SHSTK`), so a program or extension built with `-fcf-protection` keeps its SHSTK mark when
+it links the library, and glibc with shadow stacks enabled loads it. Stable rustc cannot
+emit the mark: the release adds it to each object afterwards
+(`.github/scripts/clib-shstk.py`, from scarletbook-rs), and links the glibc shared library
+again from those objects with `-z shstk` (`.github/scripts/relink-shstk.sh`; the only
+unmarked inputs of that link are glibc 2.17's `stat64` and `fstat64` wrappers from
+`libc_nonshared.a`, a tail call each). The libraries are not marked for indirect branch
+tracking (IBT): Rust's precompiled standard library has no `ENDBR64` instructions, so a
+program that links the static library loses its IBT mark. Do not force it with
+`-Wl,-z,ibt`. The musl shared library is not marked (musl has no shadow-stack support), nor
+are the 32-bit x86 libraries.
 
 ## Checks
 
