@@ -2,7 +2,8 @@
 
 ## 0.1.2 (2026-11-23)
 
-This release contains security fixes; upgrading is recommended. Earlier versions were yanked.
+This release contains security fixes; upgrading is recommended. Versions 0.1.0 and 0.1.1 are
+yanked from crates.io.
 
 - x86_64 without AVX2 (e.g. Celeron and Pentium J and N series of NAS units): the `sse2`
   level now runs there too, at 1.09x to 1.34x the speed of scarletbook-pcm 0.7.0's path for
@@ -20,6 +21,16 @@ This release contains security fixes; upgrading is recommended. Earlier versions
   a security policy (`SECURITY.md`); the design decisions with their reasons
   ([design](docs/design.md)); speed on GitHub-hosted aarch64 Linux and macOS runners; CI
   checks for links, the README Quick start and version drift.
+
+### Changed
+
+- Output files (`convert_file`, `convert_file_with`, `dsd2pcm_convert_file` and the tool):
+  the output is written to a temporary file in its directory and renamed into place, so
+  that directory must be writable. A symbolic link at the output path is replaced, not
+  followed; other hard links to an existing output keep its old content. The new file gets
+  the permission bits of the file it replaces (not its owner, ACLs or extended
+  attributes). Outputs that are not regular files (devices, FIFOs, directories) are
+  refused. The tool cancels cleanly on SIGINT and SIGTERM, removing its temporary file.
 
 ### Fixed
 
@@ -45,7 +56,7 @@ This release contains security fixes; upgrading is recommended. Earlier versions
 - 32-bit targets: an output count past 2^32 samples per channel no longer panics in
   `dsd64_to_pcm_with`.
 
-## 0.1.1
+## 0.1.1 (2026-11-23)
 
 Faster, same output: every output byte is unchanged from 0.1.0 at every SIMD level.
 
@@ -61,7 +72,7 @@ Faster, same output: every output byte is unchanged from 0.1.0 at every SIMD lev
   notarized. Windows builds are still not code-signed.
 - Docs: README in the DSD Toolbox layout; usage and development notes in `docs/`.
 
-## 0.1.0
+## 0.1.0 (2026-11-23)
 
 First release.
 

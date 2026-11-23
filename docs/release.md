@@ -3,7 +3,7 @@
 A release is one annotated tag, `v` plus the workspace version (for example `v0.1.2`), on a
 commit on `main`. Pushing the tag runs `.github/workflows/release.yml`, which builds, tests,
 publishes to crates.io and creates the GitHub release. Everything else on this page is done by
-a person (the Orchestrator, who holds the tag, crates.io and repository-admin rights).
+the maintainer, who holds the tag, crates.io and repository-admin rights.
 
 ## What a release publishes
 
@@ -88,10 +88,10 @@ Permissions: every workflow reads only (`contents: read`). Only `sign and notari
 `id-token: write` and `attestations: write` (the attestation). Every action is pinned by
 commit SHA; checkouts keep no credentials.
 
-## One-time setup on GitHub (Orchestrator)
+## One-time setup on GitHub (maintainer)
 
 1. **Environment `release`** (Settings, Environments, New environment, `release`):
-   - Required reviewers: the Orchestrator (and the owner if wanted). Leave "Prevent
+   - Required reviewers: the maintainer (and other reviewers if wanted). Leave "Prevent
      self-review" off if one person both pushes tags and approves.
    - Deployment branches and tags: "Selected branches and tags", add the tag rule `v*`.
    - Secrets for macOS signing and notarisation (crates.io's trusted publishing needs none):
@@ -113,7 +113,7 @@ commit SHA; checkouts keep no credentials.
      the Apple team ID of the Developer ID certificate (the 10 characters in brackets in
      `MACOS_SIGN_IDENTITY`). The signature checks accept only that team. It is not secret.
 2. **Tag ruleset** (Settings, Rules, Rulesets, New tag ruleset): target `v*`; restrict
-   creations to the Orchestrator (bypass list), restrict updates, restrict deletions.
+   creations to the maintainer (bypass list), restrict updates, restrict deletions.
    Release tags are not signed: this ruleset and the build provenance attestations are what
    make a tag trustworthy.
 3. **Branch ruleset for `main`**: pull requests required, branches up to date, with these required
@@ -125,7 +125,7 @@ commit SHA; checkouts keep no credentials.
    repositories); "Allow GitHub Actions to create and approve pull requests" off.
 5. **Code scanning** (CodeQL, Scorecard) needs the repository to be public.
 
-## First publish to crates.io (Orchestrator, launch morning)
+## First publish to crates.io (maintainer, first release)
 
 crates.io can configure trusted publishing only for a crate that already exists ("Your crate
 must already be published to crates.io (initial publish requires an API token)",
@@ -163,7 +163,7 @@ no token when there is nothing to publish).
 A later new crate (for example `dsd2pcm-capi` when it becomes publishable) needs the same
 steps 1 to 5 for that crate alone.
 
-## Each release (Orchestrator)
+## Each release (maintainer)
 
 1. On `main`, through a pull request: set `version` under `[workspace.package]` and the
    `version` of `dsd2pcm` under `[workspace.dependencies]` in `Cargo.toml` to the new
@@ -173,7 +173,7 @@ steps 1 to 5 for that crate alone.
    `versions` check of `docs.yml` lists every place). CI must be green on that commit; the
    Quick start check skips with a notice until the tag is released.
 2. Optional: a dry run of the release workflow on `main` (Actions, release, Run workflow).
-3. Tag the release commit, the `main` commit that CI and the Security Auditor approved, and
+3. Tag the release commit, the `main` commit that CI and a security review approved, and
    push the tag:
 
    ```
@@ -194,6 +194,32 @@ steps 1 to 5 for that crate alone.
    gh release download v0.1.2 -R aclater/dsd2pcm-rs -p dsd2pcm-0.1.2-x86_64-linux.tar.gz
    gh attestation verify dsd2pcm-0.1.2-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs --signer-workflow aclater/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.2 --deny-self-hosted-runners
    ```
+6. Release notes: the workflow writes the same notes for every release. Put the version's
+   CHANGELOG section on top of them, from a clone of the release commit:
+
+   ```
+   awk '/^## 0\.1\.2 /{f=1; next} /^## /{f=0} f' CHANGELOG.md > notes.md
+   gh release view v0.1.2 -R aclater/dsd2pcm-rs --json body -q .body >> notes.md
+   gh release edit v0.1.2 -R aclater/dsd2pcm-rs --notes-file notes.md
+   ```
+
+7. Yank: when the release fixes security issues, yank the affected earlier versions of both
+   crates on crates.io, after the checks in step 5 passed. For 0.1.2, which fixes 0.1.0 and
+   0.1.1, with a crates.io token that has the `yank` scope for both crates (Account
+   Settings, API Tokens; revoke it afterwards):
+
+   ```
+   cargo login
+   cargo yank --version 0.1.0 dsd2pcm
+   cargo yank --version 0.1.1 dsd2pcm
+   cargo yank --version 0.1.0 dsd2pcm-cli
+   cargo yank --version 0.1.1 dsd2pcm-cli
+   cargo logout
+   ```
+
+   A yanked version stays downloadable for lock files that already name it; new
+   dependency resolution skips it. The CHANGELOG section of the release says which versions
+   are yanked.
 
 If a run fails after the crates job, re-run the failed jobs: published crates are skipped.
 A tag is never moved or re-created (the ruleset forbids it); a broken release gets a new
