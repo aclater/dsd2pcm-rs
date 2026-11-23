@@ -159,11 +159,13 @@ const PASS_BYTES: usize = 32 << 10;
 /// paired S1 tables and the channel's [`Carry`] where the plan has them.
 const LANES_MIN: usize = 128 * PAD;
 
-/// [`LANES_MIN`] at the `sse2` level, where the ordered kernels pay more against the lanes
-/// (unaligned 128-bit loads; on 32-bit x86 also 8 vector registers and no paired tables or
-/// carry): one frame at 88.2 kHz runs faster in lanes there; the wide filter, whose 80 kHz
-/// stage has the longest margins, from 2048 outputs (one frame at 176.4 kHz).
-const LANES_MIN_SSE2: [usize; 2] = [32 * PAD, 64 * PAD];
+/// [`LANES_MIN`] at the `sse2` and `neon` levels, where the ordered kernels pay more
+/// against the lanes (128-bit vectors, unaligned loads; on 32-bit x86 also 8 vector
+/// registers and no paired tables or carry): one frame at 88.2 kHz runs faster in lanes
+/// there (at `neon` 1.25x faster on a GitHub-hosted Neoverse N2 runner); the wide filter,
+/// whose 80 kHz stage has the longest margins, from 2048 outputs (one frame at 176.4 kHz;
+/// 1.45x faster at `neon`).
+const LANES_MIN_SHORT: [usize; 2] = [32 * PAD, 64 * PAD];
 
 /// Most stages after S1 in any plan.
 const MAX_OPS: usize = 3;
@@ -386,7 +388,7 @@ impl Plan {
             win: (0, 0),
             lanes,
             lanes_min: if dispatch::short_lanes(isa) {
-                LANES_MIN_SSE2[usize::from(cutoff == Cutoff::Wide)]
+                LANES_MIN_SHORT[usize::from(cutoff == Cutoff::Wide)]
             } else {
                 LANES_MIN
             },
@@ -1119,6 +1121,11 @@ mod tests {
             let sse2 = std::arch::is_x86_feature_detected!("sse2");
             assert_eq!(levels.contains(&SimdLevel::Sse2), sse2);
         }
+        // aarch64 always has NEON and FMA: the `neon` level.
+        assert_eq!(
+            levels.contains(&SimdLevel::Neon),
+            cfg!(target_arch = "aarch64")
+        );
         for &level in &levels {
             let plan = with_simd_level(level, || Plan::new(PcmRate::Hz88200, Cutoff::Standard))
                 .unwrap()

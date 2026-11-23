@@ -57,6 +57,26 @@ What a caller that converts one frame at a time, with its neighbours, sees.
 
 scarletbook-pcm converts on one thread; dsd2pcm uses all cores unless told otherwise.
 
+## aarch64, `neon` level (GitHub-hosted runners, indicative)
+
+The `neon` level (picked on every aarch64 CPU), one thread, against scarletbook-pcm 0.7.0:
+median ratio over 5 rounds with the crate order alternating, on generated 60 s 2- and
+6-channel test files (not SACD rips; `.github/workflows/bench.yml`). Linux:
+`ubuntu-24.04-arm` (Neoverse N2), every round within 0.1 of the median. macOS: `macos-15`
+(Apple M1, virtual; shared and noisy, lowest round 1.27x). At the generic level, before
+`neon`, the same Linux runner read 0.97x to 1.04x.
+
+| Rate | Cutoff | Linux `run 1` 2 ch / 6 ch | Linux `run 4` 2 ch / 6 ch | Linux whole file 2 ch / 6 ch | macOS `run 1` 2 ch / 6 ch | macOS `run 4` 2 ch / 6 ch | macOS whole file 2 ch / 6 ch |
+|---|---|---|---|---|---|---|---|
+| 88.2 kHz | Low | 1.83x / 1.82x | 2.06x / 2.03x | 2.08x / 2.03x | 1.60x / 1.46x | 1.59x / 1.71x | 1.61x / 1.63x |
+| 88.2 kHz | Standard | 1.79x / 1.77x | 2.00x / 1.98x | 2.00x / 1.97x | 1.50x / 1.50x | 1.62x / 1.61x | 1.76x / 1.68x |
+| 176.4 kHz | Low | 2.17x / 2.16x | 2.29x / 2.27x | 2.17x / 2.21x | 1.75x / 1.92x | 1.83x / 1.77x | 1.89x / 1.99x |
+| 176.4 kHz | Standard | 2.10x / 2.10x | 2.20x / 2.18x | 2.08x / 2.12x | 1.92x / 1.77x | 1.83x / 1.78x | 1.90x / 2.02x |
+| 176.4 kHz | Wide | 2.09x / 2.07x | 2.15x / 2.14x | 2.07x / 2.11x | 1.74x / 1.79x | 1.88x / 1.92x | 1.83x / 1.80x |
+| 352.8 kHz | Low | 2.11x / 2.11x | 2.23x / 2.22x | 2.13x / 2.15x | 1.91x / 1.88x | 1.95x / 1.79x | 1.89x / 1.88x |
+| 352.8 kHz | Standard | 2.06x / 2.05x | 2.16x / 2.15x | 2.04x / 2.04x | 1.83x / 1.78x | 1.86x / 1.90x | 1.88x / 1.73x |
+| 352.8 kHz | Wide | 2.27x / 2.26x | 2.29x / 2.27x | 2.16x / 2.16x | 1.90x / 1.96x | 1.97x / 1.94x | 2.03x / 1.70x |
+
 ## 32-bit x86 (i686), one thread
 
 Built for `i686-unknown-linux-gnu` and run on the Intel Core i9-13900H above (P-core: CPU 0;

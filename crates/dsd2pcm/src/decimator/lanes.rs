@@ -12,12 +12,11 @@
 //! multiply-add latency; fewer where the CPU has fewer vector registers). S1 uses paired
 //! tables ([`S1Pair`]) where the level has them: one set of lookups for two outputs.
 //!
-//! Used on x86-64 with AVX2 and FMA, and at the `sse2` level of x86 and x86-64
-//! (`super::dispatch`);
-//! elsewhere the ordered kernels run.
+//! Used on x86-64 with AVX2 and FMA, at the `sse2` level of x86 and x86-64 and at the
+//! `neon` level of aarch64 (`super::dispatch`); elsewhere the ordered kernels run.
 
 #![cfg_attr(
-    not(any(target_arch = "x86", target_arch = "x86_64")),
+    not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")),
     allow(dead_code)
 )]
 

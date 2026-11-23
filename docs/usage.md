@@ -27,8 +27,9 @@ The output samples are identical to those of scarletbook-pcm 0.7.0 for the same 
 cutoff and gain; the tests compare the two on synthetic and real input. Every sample is an
 exact integer computation, so the output is the same on every CPU and build profile.
 The DSD idle pattern (0x69) converts to exact zeros. On x86 the filters use AVX2 and FMA
-when the CPU has them, chosen at run time, with the same output; the environment variable
-`DSD2PCM_SIMD` (`generic`, `sse2` on x86 and x86_64, `avx2` or `avx2fma`) caps the level.
+when the CPU has them, chosen at run time, and on aarch64 NEON and FMA, with the same
+output; the environment variable `DSD2PCM_SIMD` (`generic`, `neon` on aarch64, `sse2` on x86
+and x86_64, `avx2` or `avx2fma`) caps the level.
 
 Options: `--gain DB` (-120 to +24, default 0), `--single-thread`, `--filter pysacd`.
 

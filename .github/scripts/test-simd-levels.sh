@@ -8,7 +8,8 @@
 # On x86 and x86_64 (from `rustc -vV`, or the --target in the arguments) the levels are
 # generic, sse2, avx2 and avx2fma. On Linux a level the CPU lacks fails the job instead of being
 # skipped: DSD2PCM_SIMD only lowers the level, so a missing feature would run a lower one and
-# pass without testing it. Elsewhere (aarch64) there is one level, generic.
+# pass without testing it. On aarch64 the levels are generic and neon (every aarch64 CPU has
+# NEON and FMA); elsewhere there is one level, generic.
 set -euo pipefail
 
 target=$(rustc -vV | sed -n 's/^host: //p')
@@ -21,10 +22,11 @@ done
 
 case "$target" in
     x86_64-* | i686-* | i586-*) levels=(generic sse2 avx2 avx2fma) ;;
+    aarch64-*) levels=(generic neon) ;;
     *) levels=(generic) ;;
 esac
 
-if [[ ${#levels[@]} -gt 1 && -r /proc/cpuinfo ]]; then
+if [[ "${levels[1]:-}" == sse2 && -r /proc/cpuinfo ]]; then
     for f in sse2 avx2 fma; do
         grep -qw "$f" /proc/cpuinfo || { echo "::error::this CPU has no $f: cannot test every SIMD level"; exit 1; }
     done
