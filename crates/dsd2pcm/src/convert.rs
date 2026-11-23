@@ -1,10 +1,12 @@
-//! DSD64 to 24-bit PCM (WAV), sample-identical to scarletbook-pcm 0.7.0.
+//! DSD64 to 24-bit PCM (WAV), sample-identical to scarletbook-pcm 0.7.0 by default, or with
+//! pysacd's filter ([`Filter::Pysacd`]).
 //!
 
 use crate::decimator::{self, Cutoff, PcmRate, Plan, Scratch};
 use crate::dff::DffReader;
 use crate::dsf::DsfReader;
 use crate::error::{Error, Result};
+use crate::filters::{pysacd, Filter};
 use crate::io::{DsdRead, PcmRead};
 use crate::wav::{WavFormat, WavReader, WavWriter};
 use std::fs::File;
@@ -24,6 +26,8 @@ pub struct PcmOptions {
     pub gain_db: f64,
     /// Convert channels on separate threads.
     pub threads: bool,
+    /// The filter and quantiser; [`Filter::Default`] is scarletbook-pcm's.
+    pub filter: Filter,
 }
 
 impl PcmOptions {
@@ -34,6 +38,7 @@ impl PcmOptions {
             cutoff: Cutoff::Standard,
             gain_db: 0.0,
             threads: true,
+            filter: Filter::Default,
         }
     }
 }
@@ -114,7 +119,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Checks the gain range and the rate/cutoff combination.
+/// Checks the gain range and the rate, cutoff and filter combination.
 pub fn check_options(opts: &PcmOptions) -> Result<()> {
     if !opts.gain_db.is_finite() || !(-120.0..=24.0).contains(&opts.gain_db) {
         return Err(Error::InvalidArgument(format!(
@@ -122,11 +127,14 @@ pub fn check_options(opts: &PcmOptions) -> Result<()> {
             opts.gain_db
         )));
     }
-    Plan::new(opts.rate, opts.cutoff).map(|_| ())
+    match opts.filter {
+        Filter::Pysacd => pysacd::Pysacd::new(opts.rate, opts.cutoff).map(|_| ()),
+        _ => Plan::new(opts.rate, opts.cutoff).map(|_| ()),
+    }
 }
 
-/// Converts DSD64 to 24-bit PCM, sample-identical to scarletbook-pcm 0.7.0, into `w`.
-/// `w` is not finished.
+/// Converts DSD64 to 24-bit PCM, sample-identical to scarletbook-pcm 0.7.0 (or with
+/// [`Filter::Pysacd`], to pysacd's reference), into `w`. `w` is not finished.
 ///
 /// Every output sample depends only on a fixed window of input bytes, so each block of
 /// input is cut into pieces (per channel and per range of outputs) that run on all cores;
@@ -137,6 +145,9 @@ pub fn dsd64_to_pcm<W: Write + Seek>(
     opts: &PcmOptions,
 ) -> Result<Report> {
     check_options(opts)?;
+    if opts.filter == Filter::Pysacd {
+        return pysacd::dsd64_to_pcm(r, w, opts);
+    }
     let gain = decimator::db_to_linear(opts.gain_db);
     let rate = opts.rate;
     let info = r.info();
@@ -248,10 +259,10 @@ fn plan_k(rate: PcmRate) -> i64 {
 
 /// Runs `f` on every item, on up to `scratch.len()` threads (one scratch each), and
 /// returns the results in item order.
-fn run_pieces<T: Sync, R: Send>(
+pub(crate) fn run_pieces<T: Sync, R: Send, S: Send>(
     items: &[T],
-    scratch: &mut [Scratch],
-    f: impl Fn(&T, &mut Scratch) -> R + Sync,
+    scratch: &mut [S],
+    f: impl Fn(&T, &mut S) -> R + Sync,
 ) -> Vec<R> {
     let workers = scratch.len().min(items.len());
     if workers <= 1 {

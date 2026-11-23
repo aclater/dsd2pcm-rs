@@ -1,15 +1,17 @@
-//! `dsd2pcm IN.dsf|IN.dff OUT.wav [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB]`
+//! `dsd2pcm IN.dsf|IN.dff OUT.wav [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd]`
 
-use dsd2pcm::{convert_file, Cutoff, PcmOptions, PcmRate};
+use dsd2pcm::{convert_file, Cutoff, Filter, PcmOptions, PcmRate};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
 
-const USAGE: &str = "usage: dsd2pcm IN.dsf|IN.dff OUT.wav [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--single-thread]
+const USAGE: &str = "usage: dsd2pcm IN.dsf|IN.dff OUT.wav [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread]
 
 Converts DSD64 to 24-bit PCM WAV. Defaults: --rate 176400 --cutoff 40 --gain 0.
 Cutoffs: 30 (pass 30 kHz, stop 36 kHz), 40 (pass 40 kHz, stop 48 kHz),
-wide (pass 80 kHz; 176.4 and 352.8 kHz only).";
+wide (pass 80 kHz; 176.4 and 352.8 kHz only).
+Filters: default (scarletbook-pcm 0.7.0's), pysacd (pysacd's filter and dithered
+quantiser, bit-exact with its reference; 88200 and 176400 only, fixed response).";
 
 fn parse(args: &[String]) -> Result<(PathBuf, PathBuf, PcmOptions), String> {
     let mut pos = Vec::new();
@@ -39,6 +41,13 @@ fn parse(args: &[String]) -> Result<(PathBuf, PathBuf, PcmOptions), String> {
             "--gain" => {
                 let v = val("--gain")?;
                 opts.gain_db = v.parse().map_err(|_| format!("bad gain {v}"))?;
+            }
+            "--filter" => {
+                opts.filter = match val("--filter")?.as_str() {
+                    "default" => Filter::Default,
+                    "pysacd" => Filter::Pysacd,
+                    v => return Err(format!("filter {v}: default or pysacd")),
+                }
             }
             "--single-thread" => opts.threads = false,
             "-h" | "--help" => return Err(String::new()),

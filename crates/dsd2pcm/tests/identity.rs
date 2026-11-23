@@ -104,6 +104,7 @@ fn identical_to_scarletbook_pcm() {
                     cutoff,
                     gain_db,
                     threads: true,
+                    filter: dsd2pcm::Filter::Default,
                 };
                 let (a, ca) = ours(&chans, &opts);
                 let (b, cb) = theirs(&chans, rate, cutoff, gain_db);
@@ -128,6 +129,7 @@ fn identical_mono_and_six_channels() {
             cutoff: Cutoff::Standard,
             gain_db: 0.0,
             threads: ch > 1,
+            filter: dsd2pcm::Filter::Default,
         };
         let (a, _) = ours(&chans, &opts);
         let (b, _) = theirs(&chans, PcmRate::Hz176400, Cutoff::Standard, 0.0);
@@ -165,6 +167,7 @@ fn digest(rate: PcmRate, cutoff: Cutoff) -> String {
                     gain_db,
                     // Both the threaded and the single-thread driver.
                     threads: gain_db != -3.0,
+                    filter: dsd2pcm::Filter::Default,
                 };
                 let (bytes, clipped) = ours(chans, &opts);
                 // The hashed output is scarletbook-pcm's.
@@ -245,6 +248,7 @@ fn identical_on_real_file() {
                 cutoff,
                 gain_db: 0.0,
                 threads: true,
+                filter: dsd2pcm::Filter::Default,
             };
             let (a, _) = ours(&chans, &opts);
             let (b, _) = theirs(&chans, rate, cutoff, 0.0);

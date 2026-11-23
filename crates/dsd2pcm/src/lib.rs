@@ -4,6 +4,8 @@
 //!   and return [`Error`] on bad input; nothing panics.
 //! - [`decimator`]: streaming DSD64 to 24-bit PCM at 88.2, 176.4 or 352.8 kHz, with the
 //!   filters of scarletbook-pcm 0.7.0 and identical output samples.
+//! - [`Filter`]: the filter choice: scarletbook-pcm's (default) or pysacd's
+//!   ([`Filter::Pysacd`], 88.2 and 176.4 kHz, dithered).
 //! - [`convert`]: whole-file conversion.
 //! - [`frames`]: Super Audio CD frame runs (with neighbour frames) to PCM, with the
 //!   interface of scarletbook-pcm 0.7.0's `Converter`, single-threaded per call.
@@ -18,6 +20,7 @@ pub mod decimator;
 pub mod dff;
 pub mod dsf;
 pub mod error;
+pub mod filters;
 pub mod frames;
 pub mod io;
 pub mod wav;
@@ -25,3 +28,4 @@ pub mod wav;
 pub use convert::{convert_file, open_input, Input, PcmOptions, Report};
 pub use decimator::{Cutoff, PcmRate};
 pub use error::{Error, Result};
+pub use filters::Filter;

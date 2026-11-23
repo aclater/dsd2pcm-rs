@@ -37,12 +37,17 @@
 //! # Ok::<(), dsd2pcm::Error>(())
 //! ```
 //!
+//! With [`crate::Filter::Pysacd`] in [`PcmConfig`], the samples are those of pysacd's
+//! filter instead, which also depend on the run's position in the area: give it with
+//! [`Run::at_frame`]. A run with no frame before it starts the area.
+//!
 //! A [`Converter`] converts one call at a time on the calling thread (`&mut self`); use one
 //! per worker thread. Its buffers hold a few frames of every channel, grow on the first
 //! call and are reused: later calls allocate nothing.
 
 use crate::decimator::{self, Cutoff, PcmRate, Plan, Scratch, IDLE};
 use crate::error::{Error, Result};
+use crate::filters::{pysacd, Filter};
 
 /// Bytes of one channel in one frame: 37 632 one-bit samples.
 pub const FRAME_BYTES_PER_CHANNEL: usize = 4704;
@@ -114,6 +119,10 @@ pub struct PcmConfig {
     pub channels: u8,
     /// The gain; [`Gain::UNITY`] by default.
     pub gain: Gain,
+    /// The filter and quantiser; [`Filter::Default`] (scarletbook-pcm's) by default. With
+    /// [`Filter::Pysacd`] the output also depends on each run's position in the area
+    /// ([`Run::at_frame`]).
+    pub filter: Filter,
 }
 
 impl PcmConfig {
@@ -124,12 +133,18 @@ impl PcmConfig {
             cutoff,
             channels,
             gain: Gain::UNITY,
+            filter: Filter::Default,
         }
     }
 
     /// The same configuration with gain `gain`.
     pub fn with_gain(self, gain: Gain) -> PcmConfig {
         PcmConfig { gain, ..self }
+    }
+
+    /// The same configuration with filter `filter`.
+    pub fn with_filter(self, filter: Filter) -> PcmConfig {
+        PcmConfig { filter, ..self }
     }
 }
 
@@ -210,16 +225,28 @@ pub struct Run<'a> {
     pub frames: Frames<'a>,
     /// The frame after the run, or `None` if the run ends the area.
     pub after: Option<&'a [u8]>,
+    /// The index in the area of the run's first frame (0 = the area's first frame). Only
+    /// [`Filter::Pysacd`] uses it: its dither is seeded per frame from this index.
+    pub first_frame: u64,
 }
 
 impl<'a> Run<'a> {
     /// The run `frames` (`&[u8]` or `&[&[u8]]`), with no frame before or after it: a whole
-    /// area.
+    /// area, starting at frame 0.
     pub fn new(frames: impl Into<Frames<'a>>) -> Run<'a> {
         Run {
             before: None,
             frames: frames.into(),
             after: None,
+            first_frame: 0,
+        }
+    }
+
+    /// The same run with its first frame at index `frame` of the area.
+    pub fn at_frame(self, frame: u64) -> Run<'a> {
+        Run {
+            first_frame: frame,
+            ..self
         }
     }
 
@@ -248,6 +275,7 @@ impl<'a> From<FrameRun<'a>> for Run<'a> {
             before: run.before,
             frames: Frames::Contiguous(run.frames),
             after: run.after,
+            first_frame: 0,
         }
     }
 }
@@ -273,6 +301,8 @@ pub struct Converter {
     bytes: Vec<u8>,
     /// One block's samples per channel, `BLOCK_FRAMES x samples_per_frame` each.
     q: Vec<i32>,
+    /// The state of [`Filter::Pysacd`].
+    pysacd: Option<Box<pysacd::FrameState>>,
 }
 
 impl Converter {
@@ -293,6 +323,14 @@ impl Converter {
                 config.gain.db
             )));
         }
+        let pysacd = match config.filter {
+            Filter::Pysacd => Some(Box::new(pysacd::FrameState::new(
+                config.rate,
+                config.cutoff,
+                config.gain.db,
+            )?)),
+            _ => None,
+        };
         let plan = Plan::new(config.rate, config.cutoff)?;
         Ok(Converter {
             config,
@@ -300,6 +338,7 @@ impl Converter {
             sc: Scratch::default(),
             bytes: Vec::new(),
             q: Vec::new(),
+            pysacd,
         })
     }
 
@@ -316,6 +355,9 @@ impl Converter {
     /// Bytes per channel of each neighbour frame that the output depends on (those nearest
     /// the run); less than one frame.
     pub fn context_bytes(&self) -> usize {
+        if let Some(p) = &self.pysacd {
+            return p.context_bytes();
+        }
         let (w0, wlen) = self.plan.window();
         let before = -w0;
         let after = w0 + wlen as i64 - 2 * self.plan.bytes_per_output();
@@ -404,6 +446,9 @@ impl Converter {
             }
             fc.fill(0);
         }
+        if let Some(p) = &mut self.pysacd {
+            return Ok(p.convert(&run, frames, ch, out, frame_clipped));
+        }
         let mut stats = ConvertStats::default();
         let gain = self.config.gain.linear;
         let block_out = BLOCK_FRAMES * spf;
@@ -471,7 +516,14 @@ fn interleave(q: &[&[i32]], out: &mut [i32]) {
 /// Fills `bytes` (`ch` blocks of `span`) with each channel's bytes `lo .. lo + span` of the
 /// run's timeline: byte 0 is the first byte of the run's first frame; the neighbours lie
 /// one frame before and after the run, and everything beyond them is the idle pattern.
-fn fill(run: &Run<'_>, frames: usize, ch: usize, lo: i64, span: usize, bytes: &mut [u8]) {
+pub(crate) fn fill(
+    run: &Run<'_>,
+    frames: usize,
+    ch: usize,
+    lo: i64,
+    span: usize,
+    bytes: &mut [u8],
+) {
     let fpc = FRAME_BYTES_PER_CHANNEL as i64;
     let frame = FRAME_BYTES_PER_CHANNEL * ch;
     let end = lo + span as i64;

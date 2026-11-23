@@ -68,6 +68,7 @@ fn main() {
                     cutoff,
                     gain_db: 0.0,
                     threads,
+                    filter: dsd2pcm::Filter::Default,
                 };
                 let r = DsfReader::new(Cursor::new(dsf.clone())).unwrap();
                 // Sized up front, as scarletbook-pcm's output buffer is.

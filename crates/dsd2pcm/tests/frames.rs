@@ -262,6 +262,7 @@ fn whole_file(area: &[u8], ch: usize, rate: PcmRate, cutoff: Cutoff, gain_db: f6
         cutoff,
         gain_db,
         threads: false,
+        filter: dsd2pcm::Filter::Default,
     };
     dsd64_to_pcm(Box::new(r), &mut wav, &opts).unwrap();
     wav.finish().unwrap();

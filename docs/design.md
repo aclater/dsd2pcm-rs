@@ -26,6 +26,46 @@ history; it starts 4096 idle bytes before the input and flushes with idle bytes,
 output sample is the same function of the input as in scarletbook-pcm's whole-area
 conversion. Output length: `ceil(samples / d)` per channel.
 
+## pysacd's filter (`Filter::Pysacd`)
+
+`filters/pysacd.rs` ports pysacd's filter (`csrc/dsp.c`, MIT OR Apache-2.0) and the
+quantiser of its `process_batch()`; see PROVENANCE.md. The reference is pysacd's `dsp.c`
+compiled with `-O2 -ffp-contract=off`, no SIMD dispatch (pysacd's `ref` build of
+`tools/pcm_vectors`): our bytes equal it, not pysacd's wheels (which use `-ffast-math`, FMA
+contraction and per-CPU clones; up to 7 LSB apart on its test vectors).
+
+- Stages, all `f32`: S1 (2.8224 MHz to 352.8 kHz) sums 12 byte tables in order (the
+  technique of Sebastian Gesemann's dsd2pcm); S2 (95 taps, /2) and, at 88.2 kHz, S3 (161
+  taps, /2). Each output is `((0 + h0 x0) + h1 x1) + ...` with every product rounded
+  before it is added, as the C loop. The kernels compute 32 independent outputs at a time
+  (one per vector lane, through even and odd halves of the input) and never reassociate a
+  sum or fuse a multiply-add, so the generic, AVX2 and AVX2+FMA levels give the same bits.
+- Taps: `pysacd_taps.rs` holds the `double` S1 taps and the `float` S2 and S3 taps as bit
+  patterns, generated from the C code by `tests/pysacd-ref/gen.sh`; the byte tables are
+  built from the S1 taps in `f64` in the C order (a test checks their hash).
+- Stream: each area (each file) is one stream of the C filter started at its first byte:
+  S1 sees DSD silence (0x69) before the start, S2 and S3 see zeros before their first
+  input, and DSD silence follows the end. The first `delay` outputs (52 at 88.2 kHz, 26 at
+  176.4 kHz) are dropped and the length is the default path's (`ceil(samples / d)`), so
+  output `n` is a function of its position and the bytes around it: pieces of work and
+  frame runs can be cut anywhere. A frame run with `before: None` starts the area.
+- Quantiser: `scale = 8388607 x 10^(gain/20)` in `f32` (the factor from `db_to_linear`,
+  equal to pysacd's `(float)pow(...)` at every 0.01 dB step from -120 to +24 dB, checked);
+  `v = round_half_even(x scale + (a - b) 2^-32)` with `a` and `b` two xorshift32 draws as
+  `f32` (`a` drawn first), clamped to 24 bits. Draws go sample by sample, channel by channel
+  within a sample. The generator is seeded at the start of each frame of 4704 bytes per
+  channel from the frame's index `tc` in the area: `0x9E3779B9 ^ (tc x 2654435761)`, 32-bit
+  wrapping. Files count frames from their start; frame runs from `Run::at_frame` (default
+  0). Seeding per frame (pysacd seeds per batch of frames) makes the bytes independent of
+  how the area is split.
+- Whole-file conversion cuts the output into pieces of 2 frames, all channels each, on all
+  cores; frame runs convert blocks of 4 frames on the calling thread.
+- Tests (`tests/pysacd.rs`, unit tests in `filters/pysacd.rs`): SHA-256 of the C
+  reference's output (`tests/pysacd-ref/sha256.txt`, from `gen.sh`) for silence, all-ones,
+  synthetic music and random input, 2 and 6 channels, both rates, 0, -3 and +6 dB, and
+  frame indices 1000 and 2^32 - 3; the `f32` outputs before quantising too. Each at every
+  SIMD level, through the file path (one and many threads), whole runs and split runs.
+
 ## Frame runs (`frames`)
 
 `frames::Converter::convert` takes a run of Super Audio CD frames (one buffer, or one

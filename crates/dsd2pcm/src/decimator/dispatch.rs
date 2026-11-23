@@ -285,3 +285,82 @@ mod avx2fma {
         kernel::interp2_odd::<L, Fused>(s, w, out)
     }
 }
+
+// pysacd's filter (`crate::filters::pysacd`): the same safe kernels, built with AVX2. No
+// level fuses: its sums are not exact, so every product is rounded before it is added.
+use crate::filters::pysacd::{self as pk, Lut};
+
+impl Isa {
+    /// [`pk::s1_kernel`].
+    pub(crate) fn pysacd_s1(self, lut: &Lut, bytes: &[u8], out: &mut [f32]) {
+        match self.0 {
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            // SAFETY: the level guarantees AVX2 (see above).
+            SimdLevel::Avx2 | SimdLevel::Avx2Fma => unsafe { pysacd_avx2::s1(lut, bytes, out) },
+            _ => pk::s1_kernel(lut, bytes, out),
+        }
+    }
+
+    /// [`pk::dec2_kernel`].
+    pub(crate) fn pysacd_dec2(self, h: &[f32], xe: &[f32], xo: &[f32], out: &mut [f32]) {
+        match self.0 {
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            // SAFETY: the level guarantees AVX2 (see above).
+            SimdLevel::Avx2 | SimdLevel::Avx2Fma => unsafe { pysacd_avx2::dec2(h, xe, xo, out) },
+            _ => pk::dec2_kernel(h, xe, xo, out),
+        }
+    }
+
+    /// [`pk::quantise_kernel`].
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn pysacd_quantise(
+        self,
+        chans: &[&[f32]],
+        n0: u64,
+        tc0: u64,
+        per_frame: usize,
+        scale: f32,
+        out: &mut [i32],
+        clips: &mut [u64],
+    ) {
+        match self.0 {
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            // SAFETY: the level guarantees AVX2 (see above).
+            SimdLevel::Avx2 | SimdLevel::Avx2Fma => unsafe {
+                pysacd_avx2::quantise(chans, n0, tc0, per_frame, scale, out, clips)
+            },
+            _ => pk::quantise_kernel(chans, n0, tc0, per_frame, scale, out, clips),
+        }
+    }
+}
+
+/// pysacd's kernels built with AVX2 (never FMA); callers must have checked that the CPU has
+/// AVX2.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+mod pysacd_avx2 {
+    use crate::filters::pysacd::{self as pk, Lut};
+
+    #[target_feature(enable = "avx2")]
+    pub(super) unsafe fn s1(lut: &Lut, bytes: &[u8], out: &mut [f32]) {
+        pk::s1_kernel(lut, bytes, out)
+    }
+
+    #[target_feature(enable = "avx2")]
+    pub(super) unsafe fn dec2(h: &[f32], xe: &[f32], xo: &[f32], out: &mut [f32]) {
+        pk::dec2_kernel(h, xe, xo, out)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[target_feature(enable = "avx2")]
+    pub(super) unsafe fn quantise(
+        chans: &[&[f32]],
+        n0: u64,
+        tc0: u64,
+        per_frame: usize,
+        scale: f32,
+        out: &mut [i32],
+        clips: &mut [u64],
+    ) {
+        pk::quantise_kernel(chans, n0, tc0, per_frame, scale, out, clips)
+    }
+}

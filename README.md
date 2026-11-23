@@ -38,7 +38,13 @@ The DSD idle pattern (0x69) converts to exact zeros. On x86 the filters use AVX2
 when the CPU has them, chosen at run time, with the same output; the environment variable
 `DSD2PCM_SIMD` (`generic`, `avx2` or `avx2fma`) caps the level.
 
-Options: `--gain DB` (-120 to +24, default 0), `--single-thread`.
+Options: `--gain DB` (-120 to +24, default 0), `--single-thread`, `--filter pysacd`.
+
+`--filter pysacd` (`Filter::Pysacd` in `PcmOptions` and `frames::PcmConfig`) uses pysacd's
+filter instead: three Kaiser-windowed FIR stages in `f32` and a TPDF-dithered quantiser,
+bit-exact with pysacd's reference build on every CPU and SIMD level; 88.2 and 176.4 kHz
+only, with a fixed response (leave `--cutoff` at the default). The default filter and its
+output are unchanged.
 
 As a library, `dsd2pcm::frames::Converter` converts Super Audio CD frames (channels
 interleaved byte by byte, 4704 bytes per channel per frame) a run at a time, with the frames
