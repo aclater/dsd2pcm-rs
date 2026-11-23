@@ -1,0 +1,27 @@
+# cargo-deny for the fuzz harness only: a copy of the root deny.toml plus NCSA, the licence
+# of libFuzzer (libfuzzer-sys). The harness is a development tool and is not shipped.
+
+# cargo-deny: licences, advisories, bans and sources of every dependency.
+# Locally: cargo deny check advisories bans licenses sources
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# Permissive only: no GPL or LGPL (see AGENTS.md).
+allow = ["MIT", "Apache-2.0", "Unicode-3.0", "Zlib", "BSD-2-Clause", "BSD-3-Clause", "ISC", "NCSA"]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

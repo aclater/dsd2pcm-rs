@@ -10,6 +10,13 @@ It is a separate crate, outside the main workspace, and needs a nightly toolchai
 | `wav_read` | arbitrary bytes as WAV | as `dsf_read`, in frames; every sample is finite |
 | `round_trip` | arbitrary audio, channel counts, rates, write sizes and DSF metadata | the DSF, DFF and WAV writers' output reads back unchanged |
 
+Its dependencies are checked with their own cargo-deny config, `fuzz/deny.toml`, which
+also allows libFuzzer's NCSA licence; from the repository root:
+
+```
+cargo deny --manifest-path fuzz/Cargo.toml check
+```
+
 ## Setup
 
 ```
