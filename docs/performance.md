@@ -11,6 +11,13 @@ of three runs over 60 s of audio, measured in memory.
 - Tools: `cargo run --release --example bench -- FILE.dsf 60` (whole file, DSF to WAV) and
   `cargo run --release --example sacdfs_path -- FILE.dsf 60 all` (runs of SACD frames, as a
   SACD file system reads them).
+- Other platforms: `.github/workflows/bench.yml`, run by hand, runs both examples on
+  GitHub-hosted runners (Linux aarch64, macOS on Apple silicon, Linux x86_64) on generated
+  2- and 6-channel test files, in rounds with the crate order alternating, and writes the
+  median ratios to the job summary. Shared runners: those numbers are indicative. Locally:
+  `cargo build --release --locked -p dsd2pcm --examples`, then
+  `.github/scripts/bench-rounds.sh target/bench/logs` and
+  `python3 -I .github/scripts/bench-summary.py target/bench/logs local`.
 
 ## Frame runs of four frames, one thread (`sacdfs_path`, mode `run 4`)
 
