@@ -142,10 +142,14 @@ const PAD: usize = kernel::MAX_L;
 const PASS_BYTES: usize = 32 << 10;
 
 /// The fewest outputs a pass runs in lanes: each run needs its own filter margins, which
-/// for short passes (one Super Audio CD frame: 1176 outputs at 88.2 kHz, 2352 at 176.4
-/// kHz) cost more than the lanes gain. Shorter passes use the ordered kernels, with the
-/// paired S1 tables where the plan has them.
-const LANES_MIN: usize = 128 * PAD;
+/// for short passes (one Super Audio CD frame: 1176 outputs at 88.2 kHz) cost more than
+/// the lanes gain. Shorter passes use the ordered kernels, with the paired S1 tables
+/// where the plan has them.
+const LANES_MIN: usize = 64 * PAD;
+
+/// [`LANES_MIN`] for the wide filter, whose 80 kHz stage has the longest margins: one frame
+/// at 176.4 kHz (2352 outputs) runs faster ordered on P-cores, in lanes on E-cores.
+const LANES_MIN_WIDE: usize = 128 * PAD;
 
 /// Most stages after S1 in any plan.
 const MAX_OPS: usize = 3;
@@ -190,7 +194,7 @@ pub(crate) struct Scratch {
     even: Vec<f64>,
     odd: Vec<f64>,
     lanes: lanes::Bufs,
-    /// Whether the ordered buffers have been sized for every pass below `LANES_MIN`.
+    /// Whether the ordered buffers have been sized for every pass below the lane threshold.
     ordered_sized: bool,
 }
 
@@ -211,6 +215,8 @@ pub(crate) struct Plan {
     /// Whether passes run in lanes (`lanes`): every stage proven exact and taken, on a
     /// level that runs them; with S1's paired tables.
     lanes: Option<&'static lanes::S1Pair>,
+    /// The fewest outputs a pass runs in lanes.
+    lanes_min: usize,
 }
 
 impl Plan {
@@ -276,6 +282,11 @@ impl Plan {
             pass,
             win: (0, 0),
             lanes,
+            lanes_min: if cutoff == Cutoff::Wide {
+                LANES_MIN_WIDE
+            } else {
+                LANES_MIN
+            },
         };
         plan.win = plan.byte_range((0, 2), false);
         Ok(plan)
@@ -424,14 +435,14 @@ impl Plan {
 
     /// One pass: outputs `o0 .. o0 + n` into `sc.a[..n]`.
     fn pass_run(&self, src: &[u8], src0: i64, o0: i64, n: usize, sc: &mut Scratch) {
-        if let Some(pair) = self.lanes.filter(|_| n >= LANES_MIN) {
+        if let Some(pair) = self.lanes.filter(|_| n >= self.lanes_min) {
             if !sc.ordered_sized {
                 // Size the ordered buffers too, for every shorter pass, so that a caller
                 // that warmed up with a long pass allocates nothing later: one ordered pass
                 // of the longest length that stays ordered (on idle bytes; `sc.a` is
                 // overwritten below).
                 sc.ordered_sized = true;
-                self.pass_ordered(&[], 0, 0, LANES_MIN - 2, sc);
+                self.pass_ordered(&[], 0, 0, self.lanes_min - 2, sc);
             }
             return self.pass_lanes(pair, src, src0, o0, n, sc);
         }
