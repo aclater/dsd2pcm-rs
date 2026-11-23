@@ -142,14 +142,10 @@ const PAD: usize = kernel::MAX_L;
 const PASS_BYTES: usize = 32 << 10;
 
 /// The fewest outputs a pass runs in lanes: each run needs its own filter margins, which
-/// for short passes (one Super Audio CD frame: 1176 outputs at 88.2 kHz) cost more than
-/// the lanes gain. Shorter passes use the ordered kernels, with the paired S1 tables
-/// where the plan has them.
-const LANES_MIN: usize = 64 * PAD;
-
-/// [`LANES_MIN`] for the wide filter, whose 80 kHz stage has the longest margins: one frame
-/// at 176.4 kHz (2352 outputs) runs faster ordered on P-cores, in lanes on E-cores.
-const LANES_MIN_WIDE: usize = 128 * PAD;
+/// for short passes (one Super Audio CD frame: 1176 outputs at 88.2 kHz, 2352 at 176.4
+/// kHz) cost more than the lanes gain. Shorter passes use the ordered kernels, with the
+/// paired S1 tables and the channel's [`Carry`] where the plan has them.
+const LANES_MIN: usize = 128 * PAD;
 
 /// Most stages after S1 in any plan.
 const MAX_OPS: usize = 3;
@@ -185,6 +181,95 @@ impl Op {
     }
 }
 
+/// The S1 values of one channel's previous ordered pass with paired tables, for the next
+/// pass to reuse where it continues it (frame runs converted a frame at a time). A value is
+/// reused only if every byte of its window is the same in both passes (compared, not
+/// assumed): S1 is a function of those bytes alone, so the output cannot change.
+#[derive(Debug, Default)]
+pub(crate) struct Carry {
+    /// The previous pass's bytes, the first at byte `b0` of its timeline.
+    bytes: Vec<u8>,
+    b0: i64,
+    /// Its S1 values: split (`ev[i]` over the window from byte `b0 + 2 i`, `od[i]` from
+    /// `b0 + 2 i + 1`) or not (`ev[i]` from `b0 + i`).
+    ev: Vec<f64>,
+    od: Vec<f64>,
+    split: bool,
+    valid: bool,
+    reserved: bool,
+    /// Byte `x` of the next pass is byte `x + shift` of the previous pass's timeline; set
+    /// by the caller before each call.
+    pub(crate) shift: i64,
+}
+
+impl Carry {
+    /// Copies the reusable S1 values of a pass over `bytes` (the first at byte `p0`, windows
+    /// of `win` bytes) into the starts of `ev` (and `od` if `split`) and returns how many
+    /// (pairs if split; an even number if not).
+    fn reuse(
+        &self,
+        bytes: &[u8],
+        p0: i64,
+        win: usize,
+        split: bool,
+        ev: &mut [f64],
+        od: &mut [f64],
+    ) -> usize {
+        let start = self.b0 - self.shift;
+        if !self.valid || self.split != split || start > p0 {
+            return 0;
+        }
+        let off = (p0 - start) as usize;
+        let Some(prev) = self.bytes.get(off..) else {
+            return 0;
+        };
+        // The bytes both passes share, from `p0` on.
+        let n = prev.len().min(bytes.len());
+        let eq = if prev[..n] == bytes[..n] {
+            n
+        } else {
+            prev.iter().zip(bytes).take_while(|(x, y)| x == y).count()
+        };
+        if split {
+            // Pair `i` covers windows from bytes `2 i` and `2 i + 1`.
+            if off % 2 != 0 || eq < win + 1 {
+                return 0;
+            }
+            let u = ((eq - win - 1) / 2 + 1)
+                .min(self.ev.len().saturating_sub(off / 2))
+                .min(ev.len());
+            ev[..u].copy_from_slice(&self.ev[off / 2..][..u]);
+            od[..u].copy_from_slice(&self.od[off / 2..][..u]);
+            u
+        } else {
+            if eq < win {
+                return 0;
+            }
+            let u = (eq - win + 1)
+                .min(self.ev.len().saturating_sub(off))
+                .min(ev.len())
+                / 2
+                * 2;
+            ev[..u].copy_from_slice(&self.ev[off..][..u]);
+            u
+        }
+    }
+
+    /// Keeps a pass's bytes (the first at byte `p0`) and its S1 values, swapping the
+    /// buffers.
+    fn keep(&mut self, bytes: &[u8], p0: i64, split: bool, ev: &mut Vec<f64>, od: &mut Vec<f64>) {
+        self.bytes.clear();
+        self.bytes.extend_from_slice(bytes);
+        self.b0 = p0;
+        self.split = split;
+        std::mem::swap(&mut self.ev, ev);
+        if split {
+            std::mem::swap(&mut self.od, od);
+        }
+        self.valid = true;
+    }
+}
+
 /// Scratch buffers of one worker, reused across calls.
 #[derive(Debug, Default)]
 pub(crate) struct Scratch {
@@ -215,8 +300,6 @@ pub(crate) struct Plan {
     /// Whether passes run in lanes (`lanes`): every stage proven exact and taken, on a
     /// level that runs them; with S1's paired tables.
     lanes: Option<&'static lanes::S1Pair>,
-    /// The fewest outputs a pass runs in lanes.
-    lanes_min: usize,
 }
 
 impl Plan {
@@ -282,11 +365,6 @@ impl Plan {
             pass,
             win: (0, 0),
             lanes,
-            lanes_min: if cutoff == Cutoff::Wide {
-                LANES_MIN_WIDE
-            } else {
-                LANES_MIN
-            },
         };
         plan.win = plan.byte_range((0, 2), false);
         Ok(plan)
@@ -385,13 +463,35 @@ impl Plan {
         sc: &mut Scratch,
         q: &mut [i32],
         seg: usize,
+        clip: impl FnMut(usize, u64),
+    ) {
+        self.run_quantised_carry(src, src0, o0, gain, sc, q, seg, clip, None)
+    }
+
+    /// As [`run_quantised_segs`](Self::run_quantised_segs), reusing S1 values of the
+    /// channel's previous pass (`carry`) where it can.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn run_quantised_carry(
+        &self,
+        src: &[u8],
+        src0: i64,
+        o0: i64,
+        gain: f64,
+        sc: &mut Scratch,
+        q: &mut [i32],
+        seg: usize,
         mut clip: impl FnMut(usize, u64),
+        mut carry: Option<&mut Carry>,
     ) {
         debug_assert!(o0 % 2 == 0 && seg > 0);
         for (i, q) in q.chunks_mut(self.pass).enumerate() {
             let m = q.len().next_multiple_of(2);
             let at = i * self.pass;
-            self.pass_run(src, src0, o0 + at as i64, m, sc);
+            self.pass_carry(src, src0, o0 + at as i64, m, sc, carry.as_deref_mut());
+            if let Some(c) = carry.as_deref_mut() {
+                // Later passes continue on the same timeline.
+                c.shift = 0;
+            }
             let mut done = 0;
             while done < q.len() {
                 let s = (at + done) / seg;
@@ -435,22 +535,66 @@ impl Plan {
 
     /// One pass: outputs `o0 .. o0 + n` into `sc.a[..n]`.
     fn pass_run(&self, src: &[u8], src0: i64, o0: i64, n: usize, sc: &mut Scratch) {
-        if let Some(pair) = self.lanes.filter(|_| n >= self.lanes_min) {
+        self.pass_carry(src, src0, o0, n, sc, None)
+    }
+
+    /// Sizes `c` for every pass that can use it, so that later passes allocate nothing.
+    pub(crate) fn reserve(&self, c: &mut Carry) {
+        if self.lanes.is_none() || c.reserved {
+            return;
+        }
+        c.reserved = true;
+        let n = LANES_MIN - 2;
+        let (_, plen) = self.byte_range((0, n), true);
+        let s1 = self.levels((0, n), true)[0].1.div_ceil(PAD) * PAD;
+        c.bytes.reserve(plen);
+        c.ev.reserve(s1);
+        c.od.reserve(s1);
+    }
+
+    /// [`pass_run`](Self::pass_run) with the channel's [`Carry`].
+    fn pass_carry(
+        &self,
+        src: &[u8],
+        src0: i64,
+        o0: i64,
+        n: usize,
+        sc: &mut Scratch,
+        carry: Option<&mut Carry>,
+    ) {
+        if let Some(pair) = self.lanes.filter(|_| n >= LANES_MIN) {
+            if let Some(c) = carry {
+                c.valid = false;
+            }
             if !sc.ordered_sized {
                 // Size the ordered buffers too, for every shorter pass, so that a caller
                 // that warmed up with a long pass allocates nothing later: one ordered pass
                 // of the longest length that stays ordered (on idle bytes; `sc.a` is
                 // overwritten below).
                 sc.ordered_sized = true;
-                self.pass_ordered(&[], 0, 0, self.lanes_min - 2, sc);
+                self.pass_ordered(&[], 0, 0, LANES_MIN - 2, sc, None);
             }
             return self.pass_lanes(pair, src, src0, o0, n, sc);
         }
-        self.pass_ordered(src, src0, o0, n, sc);
+        self.pass_ordered(src, src0, o0, n, sc, carry);
     }
 
     /// [`pass_run`](Self::pass_run) with the ordered kernels.
-    fn pass_ordered(&self, src: &[u8], src0: i64, o0: i64, n: usize, sc: &mut Scratch) {
+    fn pass_ordered(
+        &self,
+        src: &[u8],
+        src0: i64,
+        o0: i64,
+        n: usize,
+        sc: &mut Scratch,
+        mut carry: Option<&mut Carry>,
+    ) {
+        // The carry holds S1 values of the paired tables only.
+        if self.lanes.is_none() {
+            if let Some(c) = carry.take() {
+                c.valid = false;
+            }
+        }
         let Scratch {
             bytes: buf,
             a,
@@ -467,7 +611,12 @@ impl Plan {
             let n1 = levels[0].1.div_ceil(PAD) * PAD;
             a.resize(n1, 0.0);
             match self.lanes {
-                Some(pair) => pair.run(self.lut, bytes, &mut lanes::Flat(a)),
+                Some(pair) => {
+                    let from = carry
+                        .as_deref()
+                        .map_or(0, |c| c.reuse(bytes, p0, self.lut.bytes, false, a, &mut []));
+                    pair.run(self.lut, &bytes[from..], &mut lanes::Flat(&mut a[from..]));
+                }
                 None => dispatch::s1(self.isa, self.lut, bytes, 0, 1, a),
             }
         }
@@ -477,6 +626,9 @@ impl Plan {
                 Op::Fir1(s) => {
                     b.resize(n_out.div_ceil(PAD) * PAD, 0.0);
                     dispatch::fir1(self.isa, s, a, b);
+                    if let (0, Some(c)) = (k, carry.as_deref_mut()) {
+                        c.keep(bytes, p0, false, a, &mut Vec::new());
+                    }
                 }
                 Op::Dec2(s) => {
                     let m = s.half_len();
@@ -490,9 +642,19 @@ impl Plan {
                         let half = levels[0].1.div_ceil(PAD) * PAD / 2;
                         even.resize(half, 0.0);
                         odd.resize(half, 0.0);
-                        pair.run(self.lut, bytes, &mut lanes::Split(even, odd));
+                        let from = carry
+                            .as_deref()
+                            .map_or(0, |c| c.reuse(bytes, p0, self.lut.bytes, true, even, odd));
+                        pair.run(
+                            self.lut,
+                            &bytes[2 * from..],
+                            &mut lanes::Split(&mut even[from..], &mut odd[from..]),
+                        );
                         let (xe, xo) = lanes::split(even, odd, de, dodd);
                         dispatch::dec2(self.isa, s, xe, xo, b);
+                        if let Some(c) = carry.as_deref_mut() {
+                            c.keep(bytes, p0, true, even, odd);
+                        }
                     } else {
                         even.resize(np + 2 * e, 0.0);
                         odd.resize(np + 2 * o, 0.0);

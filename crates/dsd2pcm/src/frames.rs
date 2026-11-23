@@ -45,7 +45,7 @@
 //! per worker thread. Its buffers hold a few frames of every channel, grow on the first
 //! call and are reused: later calls allocate nothing.
 
-use crate::decimator::{self, Cutoff, PcmRate, Plan, Scratch, IDLE};
+use crate::decimator::{self, Carry, Cutoff, PcmRate, Plan, Scratch, IDLE};
 use crate::error::{Error, Result};
 use crate::filters::{pysacd, Filter};
 
@@ -303,6 +303,12 @@ pub struct Converter {
     q: Vec<i32>,
     /// The state of [`Filter::Pysacd`].
     pysacd: Option<Box<pysacd::FrameState>>,
+    /// Per channel, the S1 values of the last short pass, which the next call reuses where
+    /// its bytes are the same (a run of frames converted a call at a time).
+    carry: [Carry; MAX_CHANNELS as usize],
+    /// Bytes per channel of the last call: byte `x` of the next call's timeline is byte
+    /// `x + next_shift` of the last one's if the next run starts where the last ended.
+    next_shift: i64,
 }
 
 impl Converter {
@@ -339,6 +345,8 @@ impl Converter {
             bytes: Vec::new(),
             q: Vec::new(),
             pysacd,
+            carry: Default::default(),
+            next_shift: 0,
         })
     }
 
@@ -454,8 +462,17 @@ impl Converter {
         let block_out = BLOCK_FRAMES * spf;
         let isa = self.plan.isa();
         let Converter {
-            plan, sc, bytes, q, ..
+            plan,
+            sc,
+            bytes,
+            q,
+            carry,
+            next_shift,
+            ..
         } = self;
+        // The first block continues the last call's timeline shifted by its length, the
+        // others the previous block's (whether they share bytes is checked, not assumed).
+        let mut shift = std::mem::replace(next_shift, (frames * FRAME_BYTES_PER_CHANNEL) as i64);
         let mut f0 = 0;
         while f0 < frames {
             let nf = BLOCK_FRAMES.min(frames - f0);
@@ -472,13 +489,27 @@ impl Converter {
             {
                 let clipped = &mut stats.clipped[c];
                 let fc = &mut frame_clipped;
-                plan.run_quantised_segs(src, lo, o0, gain, sc, &mut qc[..n], spf, |s, k| {
-                    *clipped += k;
-                    if let Some(fc) = fc {
-                        fc[f0 + s] += k;
-                    }
-                });
+                let cy = &mut carry[c];
+                plan.reserve(cy);
+                cy.shift = shift;
+                plan.run_quantised_carry(
+                    src,
+                    lo,
+                    o0,
+                    gain,
+                    sc,
+                    &mut qc[..n],
+                    spf,
+                    |s, k| {
+                        *clipped += k;
+                        if let Some(fc) = fc {
+                            fc[f0 + s] += k;
+                        }
+                    },
+                    Some(cy),
+                );
             }
+            shift = 0;
             let at = f0 * spf * ch;
             let per: [&[i32]; MAX_CHANNELS as usize] = std::array::from_fn(|c| {
                 if c < ch {

@@ -144,27 +144,34 @@ run property the bytes equal one call.
 - The FIR kernels compute blocks of independent outputs (16 generic, 32 with AVX2), so
   the compiler puts them in vector lanes; each output keeps its own sum in tap order.
 - Lanes (`decimator/lanes.rs`; x86-64 with AVX2 and FMA, plans whose every stage is proven
-  exact, passes of at least 2048 outputs, 4096 with the wide filter: below that, each run's
-  own filter margins cost more than the lanes gain, e.g. one frame at 88.2 kHz (176.4 kHz
-  wide); such passes use the ordered kernels with the paired S1 tables, a first Dec2 reading
-  its even and odd inputs from two S1 streams written by one set of lookups per pair). The
-  ordered kernels load unaligned input vectors, many of them across cache lines. A pass in
-  lanes splits its outputs into 4 runs of consecutive outputs (each a whole number of
-  blocks; the last runs move back to end with the padded pass, so runs may overlap) and
-  computes each run as the ordered pass would, with run `w` in lane `w` of every vector: the
-  same operations per output in the same order, but every load aligned, decimation and
-  interpolation as index arithmetic, and no copies between stages. Blocks of 8 output
-  vectors keep 8 independent sums. S1 runs at every byte with paired tables: the windows of
-  two neighbouring outputs are read as one window one byte longer, cut into 11-bit chunks,
-  and each entry holds both contributions, biased to be non-negative, in the two 32-bit
-  halves of a `u64` (no half of a sum reaches 2^32, so they never carry into each other:
-  `sums_are_exact`); one set of lookups (7, or 10 for the wide filter) gives two outputs.
-  Tables: 112 KiB, wide 160 KiB. `lanes_match_ordered` compares lanes and ordered passes at
-  every level, and the golden hashes run at every level. 32-bit x86 and the generic level
-  keep the ordered kernels. Reusing loaded vectors across taps (groups of taps and outputs,
-  partial sums) was faster on P-cores and Zen 5 but slower than scarletbook-pcm on Gracemont
-  E-cores, whose 128-bit units make the extra additions and register pressure cost more; a
-  hybrid CPU can move a thread between core types, so one layout serves both.
+  exact, passes of at least 4096 outputs: below that, each run's own filter margins cost
+  more than the lanes gain, e.g. one frame at 88.2 or 176.4 kHz). The ordered kernels load
+  unaligned input vectors, many of them across cache lines. A pass in lanes splits its
+  outputs into 4 runs of consecutive outputs (each a whole number of blocks; the last runs
+  move back to end with the padded pass, so runs may overlap) and computes each run as the
+  ordered pass would, with run `w` in lane `w` of every vector: the same operations per
+  output in the same order, but every load aligned, decimation and interpolation as index
+  arithmetic, and no copies between stages. Blocks of 8 output vectors keep 8 independent
+  sums. `lanes_match_ordered` compares lanes and ordered passes at every level, and the
+  golden hashes run at every level. 32-bit x86 and the generic level keep the ordered
+  kernels. Reusing loaded vectors across taps (groups of taps and outputs, partial sums) was
+  faster on P-cores and Zen 5 but slower than scarletbook-pcm on Gracemont E-cores, whose
+  128-bit units make the extra additions and register pressure cost more; a hybrid CPU can
+  move a thread between core types, so one layout serves both.
+- Paired S1 tables (where lanes run, in lanes and in the ordered passes): the windows of two
+  neighbouring outputs are read as one window one byte longer, one table per byte, and each
+  entry holds both contributions, biased to be non-negative, in the two 32-bit halves of a
+  `u64` (no half of a sum reaches 2^32, so they never carry into each other:
+  `sums_are_exact`); one set of 9 lookups (13 for the wide filter) gives two outputs.
+  Tables: 18 KiB, wide 26 KiB, which stay in the L1 cache (wider chunks needed fewer lookups
+  but sat in L2, slower on Zen 2 and E-cores). A first Dec2 in an ordered pass reads its
+  even and odd inputs from two S1 streams written by one set of lookups per pair.
+- Frame runs converted a frame at a time (`frames`): each channel keeps the S1 values of its
+  last ordered pass (`decimator::Carry`), and the next call reuses those whose window bytes
+  are the same in both calls: compared byte for byte, never assumed, so a run that jumps,
+  repeats or has another neighbour gets fresh values
+  (`calls_out_of_order_or_with_other_neighbours`). It saves recomputing the filter margins
+  that the previous call already computed (about 5 % at 88.2 kHz).
 - Run-time dispatch (`decimator/dispatch.rs`, the crate's only `unsafe`): generic, AVX2,
   and AVX2 with FMA. FMA is used only in stages that `decimator/exact.rs` proves exact from
   the tables and stage plan (every product and partial sum an integer below 2^53); the
