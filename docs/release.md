@@ -1,0 +1,148 @@
+# Releasing
+
+A release is one annotated tag, `v` plus the workspace version (for example `v0.1.0`), on a
+commit on `main`. Pushing the tag runs `.github/workflows/release.yml`, which builds, tests,
+publishes to crates.io and creates the GitHub release. Everything else on this page is done by
+a person (the Orchestrator, who holds the tag, crates.io and repository-admin rights).
+
+## What a release publishes
+
+crates.io, in this order (each crate after the one it depends on):
+
+1. `dsd2pcm`, the library.
+2. `dsd2pcm-capi`, the C library, only when its `Cargo.toml` allows publishing. For 0.1.0 it
+   has `publish = false`: the C library ships as source in the repository, not on crates.io.
+3. `dsd2pcm-cli`, the command-line tool (`cargo install dsd2pcm-cli` installs `dsd2pcm`).
+
+`.github/scripts/publish-crates.sh` holds this order. A crate that can be published but is not
+in the list stops the release, so a new crate is never published by accident. A crate whose
+version is already on crates.io is skipped, so a failed run can be re-run.
+
+The GitHub release, with these assets:
+
+| Asset | Platform |
+|---|---|
+| `dsd2pcm-0.1.0-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
+| `dsd2pcm-0.1.0-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
+| `dsd2pcm-0.1.0-i686-linux.tar.gz` | Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later |
+| `dsd2pcm-0.1.0-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon; not signed or notarised |
+| `dsd2pcm-0.1.0-x86_64-windows.zip` | Windows 10 and 11, x86_64; C runtime linked in; not code-signed |
+
+Each archive holds `dsd2pcm` (or `dsd2pcm.exe`), `README.md`, `LICENSE-MIT` and
+`LICENSE-APACHE`, and has a `.sha256` file and a build provenance attestation
+(`.intoto.jsonl`, also stored with GitHub). `SHA256SUMS` lists every archive.
+
+## How the workflow runs
+
+1. **version and tag**: every crate has the workspace version (in `Cargo.toml` and
+   `Cargo.lock`), crates that use `dsd2pcm` pin it exactly (`=0.1.0`, through
+   `dsd2pcm.workspace = true`), the tag is `v` plus that version, it is an annotated tag on
+   the run's commit, and that commit is on `main` (`git merge-base --is-ancestor` against a
+   fresh fetch of `main`). Then `cargo publish --dry-run` packages and verifies every crate.
+2. **binary (five platforms)**: build and test on each platform's own runner (Linux with
+   cargo-zigbuild against glibc 2.17's symbols), pack, and convert a generated test file
+   with the packed binary.
+3. **same output everywhere**: every archive matches its `.sha256`, and all five binaries
+   made byte-identical output from the test file.
+4. **publish to crates.io** (tag only): in the GitHub environment `release`, so it waits for
+   a required reviewer's approval. Trusted publishing: the job's OIDC token is exchanged for
+   a crates.io token valid for 30 minutes and revoked when the job ends. No crates.io token
+   is stored in the repository.
+5. **GitHub release** (tag only, after the crates): checksums, attestation, release.
+
+A pull request that changes the release files, or a manual run (Actions, release, "Run
+workflow"), is a dry run: steps 1 to 3, nothing published.
+
+Permissions: every workflow reads only (`contents: read`). The crates job adds
+`id-token: write` (for crates.io). The release job adds `contents: write` (the release),
+`id-token: write` and `attestations: write` (the attestation). Every action is pinned by
+commit SHA; checkouts keep no credentials.
+
+## One-time setup on GitHub (Orchestrator)
+
+1. **Environment `release`** (Settings, Environments, New environment, `release`):
+   - Required reviewers: the Orchestrator (and the owner if wanted). Leave "Prevent
+     self-review" off if one person both pushes tags and approves.
+   - Deployment branches and tags: "Selected branches and tags", add the tag rule `v*`.
+   - No secrets: trusted publishing needs none.
+2. **Tag ruleset** (Settings, Rules, Rulesets, New tag ruleset): target `v*`; restrict
+   creations to the Orchestrator (bypass list), restrict updates, restrict deletions.
+   Release tags are not signed: this ruleset and the build provenance attestations are what
+   make a tag trustworthy.
+3. **Branch ruleset for `main`** once public: pull requests required, with these required
+   checks: `fmt + clippy + docs`, `tests (x86_64-linux)`, `tests (aarch64-linux)`,
+   `tests (i686-linux)`, `tests (aarch64-macos)`, `tests (x86_64-windows)`, `C library`,
+   `msrv`, `cargo-deny`, `zizmor`, `analyze (rust)`, `analyze (actions)`. `fuzz` is not
+   required (a fuzzer can find an old bug in any run).
+4. **Actions settings**: workflow permissions "Read repository contents" (the default for new
+   repositories); "Allow GitHub Actions to create and approve pull requests" off.
+5. **Code scanning** (CodeQL, Scorecard) works once the repository is public.
+
+## First publish to crates.io (Orchestrator, launch morning)
+
+crates.io can configure trusted publishing only for a crate that already exists ("Your crate
+must already be published to crates.io (initial publish requires an API token)",
+crates.io/docs/trusted-publishing). So version 0.1.0 is published by hand with a token, and
+the tag's workflow then finds both crates on crates.io and skips them (it asks crates.io for
+no token when there is nothing to publish).
+
+1. On crates.io, Account Settings, API Tokens: a new token with the scopes `publish-new` and
+   `publish-update`, for the crates `dsd2pcm` and `dsd2pcm-cli`, expiring in one day.
+2. From a clean clone of the release commit:
+
+   ```
+   git clone https://github.com/aclater/dsd2pcm-rs.git
+   cd dsd2pcm-rs
+   cargo publish --dry-run --locked -p dsd2pcm -p dsd2pcm-cli
+   cargo login
+   cargo publish --locked -p dsd2pcm
+   cargo publish --locked -p dsd2pcm-cli
+   cargo logout
+   ```
+
+   `cargo login` reads the token from the terminal. Publish `dsd2pcm` first: `dsd2pcm-cli`
+   depends on it.
+3. For each of `dsd2pcm` and `dsd2pcm-cli`, on crates.io, the crate's Settings, Trusted
+   Publishing, Add, GitHub:
+   - Repository owner: `aclater`
+   - Repository name: `dsd2pcm-rs`
+   - Workflow filename: `release.yml`
+   - Environment: `release`
+4. On the same page, tick "Require trusted publishing for all new versions" for both crates.
+5. Revoke the token (Account Settings, API Tokens).
+6. Tag the same commit (next section). The workflow builds and creates the GitHub release;
+   its crates.io job reports both crates as already published.
+
+A later new crate (for example `dsd2pcm-capi` when it becomes publishable) needs the same
+steps 1 to 5 for that crate alone.
+
+## Each release (Orchestrator)
+
+1. On `main`, through a pull request: set `version` under `[workspace.package]` and the
+   `version` of `dsd2pcm` under `[workspace.dependencies]` in `Cargo.toml` to the new
+   version (`"0.1.0"` and `"=0.1.0"` for 0.1.0), run `cargo update --workspace`, and update
+   README and docs. CI must be green on that commit.
+2. Optional: a dry run of the release workflow on `main` (Actions, release, Run workflow).
+3. Tag the release commit, the `main` commit that CI and the Security Auditor approved, and
+   push the tag:
+
+   ```
+   git fetch origin
+   git tag -a v0.1.0 -m "dsd2pcm 0.1.0" origin/main
+   git push origin v0.1.0
+   ```
+
+   Check first that `git log -1 origin/main` is the approved commit.
+4. Approve the `release` environment when the crates.io job waits (Actions, the run, Review
+   deployments).
+5. Check: the crates on crates.io, the GitHub release with its sixteen files (five
+   archives, their `.sha256` and `.intoto.jsonl` files, and `SHA256SUMS`), and an asset:
+
+   ```
+   gh release download v0.1.0 -R aclater/dsd2pcm-rs -p dsd2pcm-0.1.0-x86_64-linux.tar.gz
+   gh attestation verify dsd2pcm-0.1.0-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs
+   ```
+
+If a run fails after the crates job, re-run the failed jobs: published crates are skipped.
+A tag is never moved or re-created (the ruleset forbids it); a broken release gets a new
+patch version.

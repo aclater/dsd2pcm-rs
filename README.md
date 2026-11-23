@@ -1,5 +1,9 @@
 # dsd2pcm-rs
 
+[![ci](https://github.com/aclater/dsd2pcm-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/aclater/dsd2pcm-rs/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/dsd2pcm.svg)](https://crates.io/crates/dsd2pcm)
+[![docs.rs](https://docs.rs/dsd2pcm/badge.svg)](https://docs.rs/dsd2pcm)
+
 DSD to PCM conversion in Rust, with DSF, DFF and WAV reading and writing.
 It ships as a Rust crate (`dsd2pcm`), a C library and a command-line tool.
 
@@ -87,6 +91,24 @@ ln -sf libdsd2pcm.so target/release/libdsd2pcm.so.1
 cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c -L target/release -ldsd2pcm -o minimal
 LD_LIBRARY_PATH=target/release ./minimal
 ```
+
+## Development and releases
+
+CI (`.github/workflows`) runs fmt, clippy, the docs build and the tests on Linux (x86_64,
+aarch64, i686), macOS (arm64) and Windows (x86_64), the tests once per SIMD level the CPU
+has, plus the minimum Rust version, cargo-deny, a fuzz smoke test, CodeQL and zizmor. The
+tests need Rust 1.85 or later (a test-only dependency uses edition 2024); the crates
+themselves build with 1.83. Locally:
+
+```
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+CARGO_PROFILE_DEV_OPT_LEVEL=2 .github/scripts/test-simd-levels.sh
+```
+
+Releases are built, tested and published by `.github/workflows/release.yml` from an
+annotated `v*` tag; [docs/release.md](docs/release.md) lists what is published and the
+manual steps.
 
 ## Licence
 

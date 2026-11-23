@@ -349,9 +349,16 @@ jobs:
         run: |
           rustup toolchain install "$RUST_STABLE" --profile minimal
           rustup default "$RUST_STABLE"
+      # A version published by hand (the first release: docs/release.md) or by an earlier
+      # attempt of this run is skipped; with nothing left, no token is requested.
+      - name: The crates crates.io lacks at this version
+        id: pending
+        run: .github/scripts/publish-crates.sh --pending
       - uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9  # v1.0.6
+        if: steps.pending.outputs.pending == 'true'
         id: auth
       - name: Publish, in dependency order (.github/scripts/publish-crates.sh)
+        if: steps.pending.outputs.pending == 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: .github/scripts/publish-crates.sh
