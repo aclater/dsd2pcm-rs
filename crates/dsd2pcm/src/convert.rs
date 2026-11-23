@@ -1,7 +1,7 @@
 //! DSD64 to 24-bit PCM (WAV), sample-identical to scarletbook-pcm 0.7.0.
 //!
 
-use crate::decimator::{self, Cutoff, PcmRate, IDLE};
+use crate::decimator::{self, Cutoff, PcmRate, Plan, Scratch};
 use crate::dff::DffReader;
 use crate::dsf::DsfReader;
 use crate::error::{Error, Result};
@@ -10,6 +10,7 @@ use crate::wav::{WavFormat, WavReader, WavWriter};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// DSD to PCM settings.
 #[derive(Clone, Copy, Debug)]
@@ -120,11 +121,15 @@ pub fn check_options(opts: &PcmOptions) -> Result<()> {
             opts.gain_db
         )));
     }
-    decimator::Decimator::new(opts.rate, opts.cutoff).map(|_| ())
+    Plan::new(opts.rate, opts.cutoff).map(|_| ())
 }
 
 /// Converts DSD64 to 24-bit PCM, sample-identical to scarletbook-pcm 0.7.0, into `w`.
 /// `w` is not finished.
+///
+/// Every output sample depends only on a fixed window of input bytes, so each block of
+/// input is cut into pieces (per channel and per range of outputs) that run on all cores;
+/// the output does not depend on how the work is split.
 pub fn dsd64_to_pcm<W: Write + Seek>(
     mut r: Box<dyn DsdRead + Send>,
     w: &mut WavWriter<W>,
@@ -140,55 +145,80 @@ pub fn dsd64_to_pcm<W: Write + Seek>(
             info.sample_rate
         )));
     }
+    let plan = Plan::new(rate, opts.cutoff)?;
     let ch = usize::from(info.channels);
     let n_out = decimator::output_len(info.samples, rate);
-    let mut decs = (0..ch)
-        .map(|_| decimator::Decimator::new(rate, opts.cutoff))
-        .collect::<Result<Vec<_>>>()?;
+    let workers = if opts.threads {
+        std::thread::available_parallelism().map_or(1, |n| n.get())
+    } else {
+        1
+    };
+    let mut scratch: Vec<Scratch> = (0..workers).map(|_| Scratch::default()).collect();
     let mut clipped = vec![0u64; ch];
+    // Each channel's bytes from `byte_start` on.
+    let mut bufs = vec![Vec::new(); ch];
+    let mut byte_start = 0i64;
     let mut done = 0u64;
-    let mut inbuf = vec![Vec::new(); ch];
     let mut eof = false;
+    let mut bytes = Vec::new();
     while done < n_out {
-        for b in &mut inbuf {
-            b.clear();
-        }
         let got = if eof {
             0
         } else {
-            r.read_bytes(1 << 16, &mut inbuf)?
+            r.read_bytes(CHUNK, &mut bufs)?
         };
-        if got == 0 {
-            eof = true;
-            for b in &mut inbuf {
-                b.resize(4096, IDLE);
-            }
-        }
-        let want = (n_out - done) as usize;
-        let mut outs: Vec<(Vec<i32>, u64)> = vec![(Vec::new(), 0); ch];
-        let work = |(d, (inp, o)): ChannelWork<'_>| {
-            let mut v = Vec::new();
-            d.push(inp, &mut v);
-            v.truncate(want);
-            o.1 = decimator::quantise(&v, gain, &mut o.0);
+        eof |= got == 0;
+        let end = byte_start + bufs[0].len() as i64;
+        let o0 = done as i64;
+        // At the end of the input, the rest is idle: every remaining output is ready.
+        let ready = if eof {
+            ((n_out - done) as usize).next_multiple_of(2)
+        } else {
+            plan.ready(o0, end)
         };
-        run_channels(
-            opts.threads && ch > 1,
-            decs.iter_mut().zip(inbuf.iter().zip(outs.iter_mut())),
-            work,
-        );
-        let n = outs[0].0.len();
-        let mut bytes = Vec::with_capacity(n * ch * 3);
-        for i in 0..n {
-            for o in &outs {
-                bytes.extend_from_slice(&o.0[i].to_le_bytes()[..3]);
-            }
+        if ready == 0 {
+            continue;
         }
-        for (c, o) in outs.iter().enumerate() {
-            clipped[c] += o.1;
+        let keep = ((n_out - done) as usize).min(ready);
+        // Pieces: an even number of outputs each, about PIECE bytes of input.
+        let piece = ((PIECE / plan_k(rate)) as usize).max(2);
+        let pieces: Vec<(usize, i64, usize)> = (0..ch)
+            .flat_map(|c| {
+                (0..ready)
+                    .step_by(piece)
+                    .map(move |a| (c, o0 + a as i64, piece.min(ready - a)))
+            })
+            .collect();
+        let results = run_pieces(&pieces, &mut scratch, |&(c, a, n), sc| {
+            let mut v = Vec::with_capacity(n);
+            plan.run(&bufs[c], byte_start, a, n, sc, &mut v);
+            let n = n.min(keep.saturating_sub((a - o0) as usize));
+            let mut q = Vec::with_capacity(n);
+            let clip = decimator::quantise(&v[..n], gain, &mut q);
+            (q, clip)
+        });
+        // Channel by channel, in order.
+        let mut per_ch: Vec<Vec<i32>> = vec![Vec::with_capacity(keep); ch];
+        for (&(c, _, _), (q, clip)) in pieces.iter().zip(results) {
+            per_ch[c].extend_from_slice(&q);
+            clipped[c] += clip;
+        }
+        bytes.clear();
+        bytes.reserve(keep * ch * 3);
+        for i in 0..keep {
+            for q in &per_ch {
+                bytes.extend_from_slice(&q[i].to_le_bytes()[..3]);
+            }
         }
         w.write_raw(&bytes)?;
-        done += n as u64;
+        done += keep as u64;
+        // Drop the bytes no later output needs.
+        let first = plan.first_byte(done as i64);
+        let drop = ((first - byte_start).max(0) as usize).min(bufs[0].len());
+        for b in &mut bufs {
+            b.drain(..drop);
+        }
+        byte_start += drop as i64;
     }
     Ok(Report {
         in_rate: info.sample_rate,
@@ -199,26 +229,53 @@ pub fn dsd64_to_pcm<W: Write + Seek>(
     })
 }
 
-type ChannelWork<'a> = (
-    &'a mut decimator::Decimator,
-    (&'a Vec<u8>, &'a mut (Vec<i32>, u64)),
-);
+/// Input bytes per channel read at a time.
+const CHUNK: usize = 1 << 20;
+/// Input bytes per piece of work.
+const PIECE: i64 = 64 << 10;
 
-/// Runs `f` on every item, on scoped threads if `par`.
-fn run_channels<I, T, F>(par: bool, items: I, f: F)
-where
-    I: Iterator<Item = T>,
-    T: Send,
-    F: Fn(T) + Sync,
-{
-    if par {
-        std::thread::scope(|s| {
-            for it in items {
-                let f = &f;
-                s.spawn(move || f(it));
-            }
-        });
-    } else {
-        items.for_each(f);
+fn plan_k(rate: PcmRate) -> i64 {
+    (rate.decimation() / 8) as i64
+}
+
+/// Runs `f` on every item, on up to `scratch.len()` threads (one scratch each), and
+/// returns the results in item order.
+fn run_pieces<T: Sync, R: Send>(
+    items: &[T],
+    scratch: &mut [Scratch],
+    f: impl Fn(&T, &mut Scratch) -> R + Sync,
+) -> Vec<R> {
+    let workers = scratch.len().min(items.len());
+    if workers <= 1 {
+        return items.iter().map(|it| f(it, &mut scratch[0])).collect();
     }
+    let next = AtomicUsize::new(0);
+    let mut out: Vec<Option<R>> = (0..items.len()).map(|_| None).collect();
+    let parts: Vec<Vec<(usize, R)>> = std::thread::scope(|s| {
+        let handles: Vec<_> = scratch[..workers]
+            .iter_mut()
+            .map(|sc| {
+                let (next, f) = (&next, &f);
+                s.spawn(move || {
+                    let mut mine = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(it) = items.get(i) else { break };
+                        mine.push((i, f(it, sc)));
+                    }
+                    mine
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("worker panicked"))
+            .collect()
+    });
+    for (i, r) in parts.into_iter().flatten() {
+        out[i] = Some(r);
+    }
+    out.into_iter()
+        .map(|r| r.expect("every item ran"))
+        .collect()
 }
