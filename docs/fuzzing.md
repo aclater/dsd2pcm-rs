@@ -45,5 +45,9 @@ replays it. Every fixed finding also gets a regression test in `crates/dsd2pcm/t
 ## Coverage
 
 ```
+rustup component add llvm-tools-preview --toolchain nightly
 cargo +nightly fuzz coverage dsf_read
 ```
+
+This replays the corpus and writes `fuzz/coverage/dsf_read/coverage.profdata` for
+`llvm-cov`.

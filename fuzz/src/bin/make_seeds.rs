@@ -100,6 +100,18 @@ fn wav_extensible() -> Vec<u8> {
     out
 }
 
+/// `wav` with the `data` and RIFF sizes set to `size`, as streaming writers and some
+/// encoders past 4 GiB leave them, optionally followed by a `LIST` chunk.
+fn wav_size(size: u32, list_after: bool) -> Vec<u8> {
+    let mut b = wav(WavFormat::I16, 2, 44_100, if list_after { 0 } else { 11 });
+    b[4..8].copy_from_slice(&size.to_le_bytes());
+    b[40..44].copy_from_slice(&size.to_le_bytes());
+    if list_after {
+        b.extend_from_slice(b"LIST\x05\0\0\0INFOx\0");
+    }
+    b
+}
+
 fn put(dir: &str, name: &str, bytes: &[u8]) {
     let d = Path::new("corpus").join(dir);
     fs::create_dir_all(&d).unwrap();
@@ -135,5 +147,8 @@ fn main() {
     );
     put("wav_read", "f64-6ch", &wav(WavFormat::F64, 6, 96_000, 3));
     put("wav_read", "extensible-list", &wav_extensible());
+    put("wav_read", "data-size-0", &wav_size(0, false));
+    put("wav_read", "data-size-ffffffff", &wav_size(u32::MAX, false));
+    put("wav_read", "data-size-0-then-list", &wav_size(0, true));
     println!("seed corpora written under corpus/");
 }
