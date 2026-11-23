@@ -111,12 +111,33 @@ fn convert_file_matches_rust_and_reports() {
     let d = TempDir::new("file");
     let (inp, ours, theirs) = (d.path("in.dsf"), d.path("c.wav"), d.path("rust.wav"));
     write_dsf(&inp, 2, 40);
-    for (rate, cutoff, gain, threads) in [
-        (176_400, DSD2PCM_CUTOFF_STANDARD, 6.0, 0),
-        (88_200, DSD2PCM_CUTOFF_LOW, -3.0, 1),
-        (352_800, DSD2PCM_CUTOFF_WIDE, 0.0, 0),
+    for (rate, cutoff, gain, threads, filter) in [
+        (
+            176_400,
+            DSD2PCM_CUTOFF_STANDARD,
+            6.0,
+            0,
+            DSD2PCM_FILTER_DEFAULT,
+        ),
+        (88_200, DSD2PCM_CUTOFF_LOW, -3.0, 1, DSD2PCM_FILTER_DEFAULT),
+        (352_800, DSD2PCM_CUTOFF_WIDE, 0.0, 0, DSD2PCM_FILTER_DEFAULT),
+        (
+            176_400,
+            DSD2PCM_CUTOFF_STANDARD,
+            6.0,
+            0,
+            DSD2PCM_FILTER_PYSACD,
+        ),
+        (
+            88_200,
+            DSD2PCM_CUTOFF_STANDARD,
+            -3.0,
+            1,
+            DSD2PCM_FILTER_PYSACD,
+        ),
     ] {
         let mut o = file_opts(rate);
+        o.filter = filter;
         o.cutoff = cutoff;
         o.gain_db = gain;
         o.threads = threads;
@@ -182,9 +203,21 @@ fn convert_file_rejects_nulls_and_bad_values() {
     assert_eq!(mutate(&|x| x.rate_hz = 0), DSD2PCM_E_INVALID_ARGUMENT);
     assert_eq!(mutate(&|x| x.cutoff = 3), DSD2PCM_E_INVALID_ARGUMENT);
     assert_eq!(mutate(&|x| x.filter = 2), DSD2PCM_E_INVALID_ARGUMENT);
-    assert_eq!(
-        mutate(&|x| x.filter = DSD2PCM_FILTER_PYSACD),
-        DSD2PCM_E_UNSUPPORTED
+    // pysacd's filter: 88.2 and 176.4 kHz, standard cutoff only.
+    assert_eq!(mutate(&|x| x.filter = DSD2PCM_FILTER_PYSACD), DSD2PCM_OK);
+    assert_ne!(
+        mutate(&|x| {
+            x.filter = DSD2PCM_FILTER_PYSACD;
+            x.rate_hz = 352_800
+        }),
+        DSD2PCM_OK
+    );
+    assert_ne!(
+        mutate(&|x| {
+            x.filter = DSD2PCM_FILTER_PYSACD;
+            x.cutoff = DSD2PCM_CUTOFF_LOW
+        }),
+        DSD2PCM_OK
     );
     assert_eq!(mutate(&|x| x.threads = 2), DSD2PCM_E_INVALID_ARGUMENT);
     assert_eq!(mutate(&|x| x.gain_db = 25.0), DSD2PCM_E_INVALID_ARGUMENT);
@@ -349,9 +382,9 @@ fn frames_new_rejects_bad_configs() {
         (
             dsd2pcm_frames_config {
                 filter: 1,
-                ..frames_cfg(176_400, 2)
+                ..frames_cfg(352_800, 2)
             },
-            DSD2PCM_E_UNSUPPORTED,
+            DSD2PCM_E_INVALID_ARGUMENT,
         ),
         (
             dsd2pcm_frames_config {
@@ -400,51 +433,73 @@ fn frames_queries() {
 }
 
 /// The C converter gives the Rust converter's bytes, per-frame and per-channel clip counts,
-/// for contiguous and per-frame buffers (over several groups), in both formats.
+/// for contiguous and per-frame buffers (over several groups), in both formats, with both
+/// filters, at the start of an area and inside it (pysacd's dither depends on the position).
 #[test]
 fn frames_convert_matches_rust() {
-    for (rate, ch, gain) in [(176_400, 2u32, 6.0), (88_200, 1, 0.0), (352_800, 6, 3.0)] {
+    let cases = [
+        (176_400, 2u32, 6.0, DSD2PCM_FILTER_DEFAULT, 0u64, true),
+        (88_200, 1, 0.0, DSD2PCM_FILTER_DEFAULT, 5, false),
+        (352_800, 6, 3.0, DSD2PCM_FILTER_DEFAULT, 0, true),
+        (176_400, 2, 6.0, DSD2PCM_FILTER_PYSACD, 1234, true),
+        (88_200, 6, 0.0, DSD2PCM_FILTER_PYSACD, 0, false),
+        (176_400, 1, -1.5, DSD2PCM_FILTER_PYSACD, u64::MAX - 40, true),
+    ];
+    for (rate, ch, gain, filter, first, has_before) in cases {
         let cfg = dsd2pcm_frames_config {
             gain_db: gain,
+            filter,
             ..frames_cfg(rate, ch)
         };
         let ch = ch as usize;
         let n = 70; // 2 groups of 32 and one of 6
-        let a = area(ch, n + 2, rate as u64);
+        let a = area(ch, n + 2, rate as u64 ^ first);
         let fb = FPC * ch;
-        let (before, run, after) = (&a[..fb], &a[fb..(n + 1) * fb], &a[(n + 1) * fb..]);
+        let before = has_before.then(|| &a[..fb]);
+        let (run, after) = (&a[fb..(n + 1) * fb], &a[(n + 1) * fb..]);
+        let rust_run = || {
+            Run::new(run)
+                .with_before(before)
+                .with_after(Some(after))
+                .at_frame(first)
+        };
         let mut rust = Converter::new(frames_config(&cfg).ok().unwrap()).unwrap();
         let spf = rust.samples_per_frame();
         let mut want = vec![0u8; n * spf * ch * 3];
         let mut want_fc = vec![0u64; n];
         let want_st = rust
-            .convert(
-                Run::new(run)
-                    .with_before(Some(before))
-                    .with_after(Some(after)),
-                PcmOut::S24le(&mut want),
-                Some(&mut want_fc),
-            )
+            .convert(rust_run(), PcmOut::S24le(&mut want), Some(&mut want_fc))
             .unwrap();
         let mut want_i32 = vec![0i32; n * spf * ch];
-        rust.convert(
-            Run::new(run)
-                .with_before(Some(before))
-                .with_after(Some(after)),
-            PcmOut::I32(&mut want_i32),
-            None,
-        )
-        .unwrap();
+        rust.convert(rust_run(), PcmOut::I32(&mut want_i32), None)
+            .unwrap();
         if gain > 0.0 {
             assert!(want_st.clipped_total() > 0);
+        }
+        if filter == DSD2PCM_FILTER_PYSACD {
+            // The position matters: another first frame gives other bytes.
+            let mut other = vec![0u8; want.len()];
+            rust.convert(
+                rust_run().at_frame(first.wrapping_add(1)),
+                PcmOut::S24le(&mut other),
+                None,
+            )
+            .unwrap();
+            assert!(
+                other != want,
+                "pysacd output does not depend on first_frame"
+            );
         }
 
         let h = new_handle(&cfg);
         let ptrs: Vec<*const u8> = run.chunks_exact(fb).map(<[u8]>::as_ptr).collect();
-        let mut separate = contiguous(Some(before), &[], Some(after));
+        let mut cont = contiguous(before, run, Some(after));
+        cont.first_frame = first;
+        let mut separate = contiguous(before, &[], Some(after));
         separate.frame_ptrs = ptrs.as_ptr();
         separate.frame_count = n;
-        for r in [contiguous(Some(before), run, Some(after)), separate] {
+        separate.first_frame = first;
+        for r in [cont, separate] {
             let mut got = vec![0u8; want.len()];
             let mut fc = vec![u64::MAX; n];
             let mut st = dsd2pcm_stats::default();
@@ -462,7 +517,7 @@ fn frames_convert_matches_rust() {
                 )
             };
             assert_eq!(rc, DSD2PCM_OK, "{}", last_error());
-            assert!(got == want, "S24LE bytes differ");
+            assert!(got == want, "S24LE bytes differ, filter {filter}");
             assert_eq!(fc, want_fc);
             assert_eq!(st.clipped, want_st.clipped);
             assert_eq!(st.clipped_total, want_st.clipped_total());
@@ -482,7 +537,7 @@ fn frames_convert_matches_rust() {
                 )
             };
             assert_eq!(rc, DSD2PCM_OK, "{}", last_error());
-            assert!(got == want_i32, "I32 samples differ");
+            assert!(got == want_i32, "I32 samples differ, filter {filter}");
         }
         // SAFETY (test): live handle, freed once.
         unsafe { dsd2pcm_frames_free(h) };
@@ -871,7 +926,16 @@ static COUNTING: Counting = Counting;
 /// layout and format.
 #[test]
 fn frames_convert_allocates_nothing_after_warm_up() {
-    let h = new_handle(&frames_cfg(176_400, 6));
+    for filter in [DSD2PCM_FILTER_DEFAULT, DSD2PCM_FILTER_PYSACD] {
+        alloc_case(filter);
+    }
+}
+
+fn alloc_case(filter: u32) {
+    let h = new_handle(&dsd2pcm_frames_config {
+        filter,
+        ..frames_cfg(176_400, 6)
+    });
     let fb = 6 * FPC;
     let n = 40;
     let a = area(6, n + 2, 11);
@@ -909,7 +973,7 @@ fn frames_convert_allocates_nothing_after_warm_up() {
     for (r, fmt) in [(&cont, 0), (&sep, 0), (&cont, 1), (&sep, 1)] {
         assert_eq!(go(r, fmt), DSD2PCM_OK);
     }
-    assert_eq!(ALLOCS.with(|a| a.get()), before_count);
+    assert_eq!(ALLOCS.with(|a| a.get()), before_count, "filter {filter}");
     // SAFETY (test): live handle.
     unsafe { dsd2pcm_frames_free(h) };
 }

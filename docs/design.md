@@ -87,8 +87,9 @@ the run length; after the first call nothing is allocated (`tests/frames_alloc.r
 
 `dsd64_to_pcm_with` calls its hook on the calling thread before the first block and after
 each block is written (never from the worker threads), with the output samples per channel
-done and the total; `Break` returns `Error::Cancelled` at once. Whole-file conversion
-passes the hook through. The frame-run API needs none: each call is one run.
+done and the total; `Break` returns `Error::Cancelled` at once. Both file drivers (the
+default filter's and pysacd's) call it through `convert::report` at their block
+boundaries. Whole-file conversion passes the hook through. The frame-run API needs none: each call is one run.
 
 ## C interface (`crates/dsd2pcm-capi`)
 
@@ -99,7 +100,7 @@ buffer, before it makes any Rust reference; the body runs inside `catch_unwind`.
 converter handle is a `Mutex<Converter>`: a second thread calling it at the same time gets
 `DSD2PCM_E_BUSY`, and a handle whose call panicked reports `DSD2PCM_E_INTERNAL` from then
 on. Runs given as one buffer per frame are converted in groups of 32 frames, each with its
-real neighbours, so the frame references live on the stack and nothing is allocated; by the
+real neighbours and its position (`at_frame(first_frame + g)`, for pysacd's dither), so the frame references live on the stack and nothing is allocated; by the
 run property the bytes equal one call.
 
 ## Speed

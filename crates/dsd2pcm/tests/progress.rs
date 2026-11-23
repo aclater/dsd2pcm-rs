@@ -6,7 +6,7 @@ use dsd2pcm::convert::{dsd64_to_pcm, dsd64_to_pcm_with};
 use dsd2pcm::dsf::{DsfReader, DsfWriter};
 use dsd2pcm::io::DsdWrite;
 use dsd2pcm::wav::{WavFormat, WavWriter};
-use dsd2pcm::{convert_file, convert_file_with, Error, PcmOptions, PcmRate, Progress};
+use dsd2pcm::{convert_file, convert_file_with, Error, Filter, PcmOptions, PcmRate, Progress};
 use std::io::Cursor;
 use std::ops::ControlFlow;
 
@@ -49,9 +49,15 @@ fn run(
 #[test]
 fn progress_is_reported_and_output_unchanged() {
     let file = dsf(300_000);
-    for threads in [false, true] {
+    for (threads, filter) in [
+        (false, Filter::Default),
+        (true, Filter::Default),
+        (false, Filter::Pysacd),
+        (true, Filter::Pysacd),
+    ] {
         let mut opts = PcmOptions::new(PcmRate::Hz176400);
         opts.threads = threads;
+        opts.filter = filter;
         let plain = run(&file, &opts, None).unwrap();
         let mut seen = Vec::new();
         let mut hook = |p: Progress| {
@@ -63,7 +69,7 @@ fn progress_is_reported_and_output_unchanged() {
         let total = 300_000 * 8 / 16;
         assert_eq!(seen[0], (0, total));
         assert_eq!(*seen.last().unwrap(), (total, total));
-        assert!(seen.len() >= 3, "{seen:?}");
+        assert!(seen.len() >= 3, "{filter:?} {seen:?}");
         assert!(seen.windows(2).all(|w| w[0].0 < w[1].0 && w[1].1 == total));
     }
 }
@@ -71,8 +77,14 @@ fn progress_is_reported_and_output_unchanged() {
 #[test]
 fn break_cancels() {
     let file = dsf(300_000);
-    let opts = PcmOptions::new(PcmRate::Hz88200);
-    for stop in [0usize, 1] {
+    for (filter, stop) in [
+        (Filter::Default, 0usize),
+        (Filter::Default, 1),
+        (Filter::Pysacd, 0),
+        (Filter::Pysacd, 1),
+    ] {
+        let mut opts = PcmOptions::new(PcmRate::Hz88200);
+        opts.filter = filter;
         let mut calls = 0;
         let mut hook = |_: Progress| {
             calls += 1;

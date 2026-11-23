@@ -27,9 +27,11 @@
   cutoff `DSD2PCM_CUTOFF_STANDARD`, filter `DSD2PCM_FILTER_DEFAULT`, 0 dB, all cores, no
   callback. Integer selectors (cutoff, filter, format, threads) are checked, never trusted.
 - `filter` selects the filter and quantiser: 0 is the default (scarletbook-pcm 0.7.0's
-  samples). `DSD2PCM_FILTER_PYSACD` (1) is reserved for the pysacd preset and returns
-  `DSD2PCM_E_UNSUPPORTED` in this version. `dsd2pcm_run.first_frame`, the run's frame index
-  in its area, is the preset's dither seed; the default filter ignores it.
+  samples). `DSD2PCM_FILTER_PYSACD` (1) is pysacd's filter with its dithered quantiser
+  (`Filter::Pysacd`): 88200 and 176400 Hz, standard cutoff only. Its dither is seeded per
+  frame from the frame's index in the area: whole files count from their first frame, frame
+  runs from `dsd2pcm_run.first_frame` (the index of the run's first frame; a run with no
+  frame before it starts the area). The default filter ignores `first_frame`.
 
 ## Whole files
 

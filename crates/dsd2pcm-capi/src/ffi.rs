@@ -419,7 +419,10 @@ pub unsafe extern "C" fn dsd2pcm_frames_convert(
             }
         };
         if ptrs.is_none() {
-            let run = Run::new(contiguous).with_before(before).with_after(after);
+            let run = Run::new(contiguous)
+                .with_before(before)
+                .with_after(after)
+                .at_frame(r.first_frame);
             let o = if format == DSD2PCM_FORMAT_I32 {
                 PcmOut::I32(out_i32)
             } else {
@@ -427,9 +430,10 @@ pub unsafe extern "C" fn dsd2pcm_frames_convert(
             };
             add(conv.convert(run, o, fc)?);
         } else {
-            // In groups of GROUP frames, each with its real neighbours: the output of a run
-            // with its neighbours is that of the whole area, so the groups give the same
-            // bytes as one call.
+            // In groups of GROUP frames, each with its real neighbours and its position in
+            // the area: the output of a run with its neighbours and position is that of the
+            // whole area, so the groups give the same bytes as one call (tested for both
+            // filters).
             let mut refs: [&[u8]; GROUP] = [&[]; GROUP];
             let mut g = 0;
             while g < frames {
@@ -447,9 +451,12 @@ pub unsafe extern "C" fn dsd2pcm_frames_convert(
                 } else {
                     Some(frame_at(g + n))
                 };
+                // The group's first frame is frame `first_frame + g` of the area (wrapping,
+                // as the dither seed does).
                 let run = Run::new(Frames::Separate(&refs[..n]))
                     .with_before(b)
-                    .with_after(a);
+                    .with_after(a)
+                    .at_frame(r.first_frame.wrapping_add(g as u64));
                 let (s, e) = (g * per_frame, (g + n) * per_frame);
                 let o = if format == DSD2PCM_FORMAT_I32 {
                     PcmOut::I32(&mut out_i32[s..e])

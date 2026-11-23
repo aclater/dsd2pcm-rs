@@ -32,7 +32,7 @@
 //! `tc` in the area: `0x9E3779B9 ^ (tc x 2654435761)` (wrapping, 32 bits).
 
 use super::pysacd_taps as taps;
-use crate::convert::{run_pieces, PcmOptions, Report};
+use crate::convert::{report, run_pieces, PcmOptions, ProgressHook, Report};
 use crate::decimator::{self, Cutoff, Isa, PcmRate, IDLE};
 use crate::error::{Error, Result};
 use crate::frames::{self, ConvertStats, PcmOut, Run, FRAME_BYTES_PER_CHANNEL};
@@ -416,6 +416,7 @@ pub(crate) fn dsd64_to_pcm<W: Write + Seek>(
     mut r: Box<dyn DsdRead + Send>,
     w: &mut WavWriter<W>,
     opts: &PcmOptions,
+    progress: ProgressHook<'_>,
 ) -> Result<Report> {
     let eng = Pysacd::new(opts.rate, opts.cutoff)?;
     let scale = scale(opts.gain_db);
@@ -439,6 +440,7 @@ pub(crate) fn dsd64_to_pcm<W: Write + Seek>(
     let mut bytes = Vec::new();
     // Pieces of work: whole frames of output, all channels.
     let piece = PIECE_FRAMES * eng.per_frame() as u64;
+    report(progress, 0, n_out)?;
     while done < n_out {
         let got = if eof {
             0
@@ -501,6 +503,7 @@ pub(crate) fn dsd64_to_pcm<W: Write + Seek>(
         drop(items);
         w.write_raw(&bytes)?;
         done = stop;
+        report(progress, done, n_out)?;
         let first = eng.first_byte(done as i64);
         let drop = ((first - byte_start).max(0) as usize).min(bufs[0].len());
         for b in &mut bufs {

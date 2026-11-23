@@ -55,8 +55,10 @@
 // Filter and quantiser: scarletbook-pcm 0.7.0's (the default).
 #define DSD2PCM_FILTER_DEFAULT 0
 
-// Filter and quantiser: the pysacd preset. Reserved: this version returns
-// `DSD2PCM_E_UNSUPPORTED`.
+// Filter and quantiser: pysacd's filter with its TPDF-dithered quantiser, at 88200 and
+// 176400 Hz with the standard cutoff. The dither is seeded per Super Audio CD frame from
+// its index in the area: files count from their start, frame runs from
+// `dsd2pcm_run.first_frame`.
 #define DSD2PCM_FILTER_PYSACD 1
 
 // Bytes of one channel in one Super Audio CD frame.
@@ -152,8 +154,9 @@ typedef struct dsd2pcm_run {
   const uint8_t *after;
   // `after`'s length in bytes: one frame, or 0 with NULL.
   size_t after_len;
-  // Index of the run's first frame in its area. The default filter ignores it; the
-  // pysacd preset will seed its dither from it.
+  // Index of the run's first frame in its area. `DSD2PCM_FILTER_PYSACD` seeds its
+  // dither from it (frame `first_frame + i` for the run's frame `i`); the default filter
+  // ignores it.
   uint64_t first_frame;
 } dsd2pcm_run;
 

@@ -192,7 +192,7 @@ pub fn dsd64_to_pcm_with<W: Write + Seek>(
         )));
     }
     if opts.filter == Filter::Pysacd {
-        return pysacd::dsd64_to_pcm(r, w, opts);
+        return pysacd::dsd64_to_pcm(r, w, opts, progress);
     }
     let gain = decimator::db_to_linear(opts.gain_db);
     let rate = opts.rate;
@@ -215,11 +215,7 @@ pub fn dsd64_to_pcm_with<W: Write + Seek>(
     // The 24-bit samples of a block, channel by channel, and interleaved as bytes; reused.
     let mut q: Vec<i32> = Vec::new();
     let mut bytes = Vec::new();
-    let mut report = |done: u64| match progress(Progress { done, total: n_out }) {
-        ControlFlow::Continue(()) => Ok(()),
-        ControlFlow::Break(()) => Err(Error::Cancelled),
-    };
-    report(0)?;
+    report(progress, 0, n_out)?;
     while done < n_out {
         let got = if eof {
             0
@@ -273,7 +269,7 @@ pub fn dsd64_to_pcm_with<W: Write + Seek>(
         decimator::pack24(plan.isa(), &per_ch, &mut bytes);
         w.write_raw(&bytes)?;
         done += keep as u64;
-        report(done)?;
+        report(progress, done, n_out)?;
         // Drop the bytes no later output needs.
         let first = plan.first_byte(done as i64);
         let drop = ((first - byte_start).max(0) as usize).min(bufs[0].len());
@@ -289,6 +285,15 @@ pub fn dsd64_to_pcm_with<W: Write + Seek>(
         out_samples: n_out,
         clipped,
     })
+}
+
+/// Calls the hook at a block boundary of a conversion driver: [`Error::Cancelled`] on
+/// `Break`.
+pub(crate) fn report(progress: ProgressHook<'_>, done: u64, total: u64) -> Result<()> {
+    match progress(Progress { done, total }) {
+        ControlFlow::Continue(()) => Ok(()),
+        ControlFlow::Break(()) => Err(Error::Cancelled),
+    }
 }
 
 /// Input bytes per channel read at a time.

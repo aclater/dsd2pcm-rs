@@ -6,7 +6,8 @@
  * It makes a stereo area of pseudo-random frames, writes it as a DSF file, and checks:
  * whole-file conversion with progress and cancel; the frame-run converter on the whole area
  * (no neighbours) gives the WAV file's samples; contiguous and per-frame buffers and runs
- * with neighbours give the same bytes; error codes and messages for bad arguments.
+ * with neighbours give the same bytes; the same with pysacd's filter, whose dither
+ * depends on first_frame; error codes and messages for bad arguments.
  *
  * Usage: smoke DIR (a writable directory for the test files).
  */
@@ -213,6 +214,44 @@ int main(int argc, char **argv) {
     }
     CHECK(same);
 
+    /* pysacd's filter: the file equals the whole area as one run, and frames 3..14 with
+     * neighbours and first_frame = 3, in separate buffers, give the same bytes. */
+    {
+        dsd2pcm_file_options popts = {.rate_hz = 88200, .filter = DSD2PCM_FILTER_PYSACD,
+                                      .gain_db = 3.0};
+        dsd2pcm_file_report prep;
+        CHECK(dsd2pcm_convert_file(dsf, wav, &popts, &prep) == DSD2PCM_OK);
+        size_t plen = 0;
+        unsigned char *pwav = read_wav_data(wav, &plen);
+        dsd2pcm_frames_config pcfg = {.rate_hz = 88200, .channels = CH, .gain_db = 3.0,
+                                      .filter = DSD2PCM_FILTER_PYSACD};
+        dsd2pcm_frames *pconv = NULL;
+        CHECK(dsd2pcm_frames_new(&pcfg, &pconv) == DSD2PCM_OK);
+        size_t n = dsd2pcm_frames_output_bytes(pconv, FRAMES, DSD2PCM_FORMAT_S24LE);
+        CHECK(pwav != NULL && n == plen);
+        unsigned char *ppcm = malloc(n);
+        dsd2pcm_stats pst;
+        CHECK(dsd2pcm_frames_convert(pconv, &run, DSD2PCM_FORMAT_S24LE, ppcm, n, NULL, 0,
+                                     &pst) == DSD2PCM_OK);
+        CHECK(pwav && memcmp(ppcm, pwav, n) == 0);
+        CHECK(pst.clipped_total == prep.clipped_total);
+        size_t pn = dsd2pcm_frames_output_bytes(pconv, 12, DSD2PCM_FORMAT_S24LE);
+        unsigned char *ppart = malloc(pn);
+        CHECK(dsd2pcm_frames_convert(pconv, &part, DSD2PCM_FORMAT_S24LE, ppart, pn, NULL, 0,
+                                     NULL) == DSD2PCM_OK);
+        size_t off = (size_t)3 * dsd2pcm_frames_samples_per_frame(pconv) * CH * 3;
+        CHECK(memcmp(ppart, ppcm + off, pn) == 0);
+        part.first_frame = 4; /* the wrong position: other dither */
+        CHECK(dsd2pcm_frames_convert(pconv, &part, DSD2PCM_FORMAT_S24LE, ppart, pn, NULL, 0,
+                                     NULL) == DSD2PCM_OK);
+        CHECK(memcmp(ppart, ppcm + off, pn) != 0);
+        part.first_frame = 3;
+        dsd2pcm_frames_free(pconv);
+        free(ppart);
+        free(ppcm);
+        free(pwav);
+    }
+
     /* Errors: NULLs, bad lengths, overlap; nothing written on an error. */
     CHECK(dsd2pcm_frames_convert(NULL, &run, 0, pcm, out_len, NULL, 0, NULL) == DSD2PCM_E_NULL);
     CHECK(strcmp(dsd2pcm_last_error(), "conv is NULL") == 0);
@@ -237,9 +276,9 @@ int main(int argc, char **argv) {
     CHECK(strcmp(dsd2pcm_last_error(), "input_path is NULL") == 0);
     dsd2pcm_file_options bad = {.rate_hz = 44100};
     CHECK(dsd2pcm_convert_file(dsf, wav, &bad, NULL) == DSD2PCM_E_INVALID_ARGUMENT);
-    bad.rate_hz = 176400;
-    bad.filter = DSD2PCM_FILTER_PYSACD;
-    CHECK(dsd2pcm_convert_file(dsf, wav, &bad, NULL) == DSD2PCM_E_UNSUPPORTED);
+    bad.rate_hz = 352800;
+    bad.filter = DSD2PCM_FILTER_PYSACD; /* pysacd: 88.2 and 176.4 kHz only */
+    CHECK(dsd2pcm_convert_file(dsf, wav, &bad, NULL) == DSD2PCM_E_INVALID_ARGUMENT);
     dsd2pcm_frames *none = conv;
     cfg.channels = 7;
     CHECK(dsd2pcm_frames_new(&cfg, &none) == DSD2PCM_E_INVALID_ARGUMENT && none == NULL);

@@ -13,7 +13,7 @@
 #![allow(non_camel_case_types)]
 
 use dsd::frames::MAX_CHANNELS;
-use dsd::{Cutoff, Error, PcmRate};
+use dsd::{Cutoff, Error, Filter, PcmRate};
 use std::any::Any;
 use std::cell::RefCell;
 use std::ffi::{c_char, c_int, c_void, CString};
@@ -61,8 +61,10 @@ pub const DSD2PCM_CUTOFF_WIDE: u32 = 2;
 
 /// Filter and quantiser: scarletbook-pcm 0.7.0's (the default).
 pub const DSD2PCM_FILTER_DEFAULT: u32 = 0;
-/// Filter and quantiser: the pysacd preset. Reserved: this version returns
-/// `DSD2PCM_E_UNSUPPORTED`.
+/// Filter and quantiser: pysacd's filter with its TPDF-dithered quantiser, at 88200 and
+/// 176400 Hz with the standard cutoff. The dither is seeded per Super Audio CD frame from
+/// its index in the area: files count from their start, frame runs from
+/// `dsd2pcm_run.first_frame`.
 pub const DSD2PCM_FILTER_PYSACD: u32 = 1;
 
 /// Bytes of one channel in one Super Audio CD frame.
@@ -164,8 +166,9 @@ pub struct dsd2pcm_run {
     pub after: *const u8,
     /// `after`'s length in bytes: one frame, or 0 with NULL.
     pub after_len: usize,
-    /// Index of the run's first frame in its area. The default filter ignores it; the
-    /// pysacd preset will seed its dither from it.
+    /// Index of the run's first frame in its area. `DSD2PCM_FILTER_PYSACD` seeds its
+    /// dither from it (frame `first_frame + i` for the run's frame `i`); the default filter
+    /// ignores it.
     pub first_frame: u64,
 }
 
@@ -301,13 +304,10 @@ pub(crate) fn cutoff(c: u32) -> Result<Cutoff, Fail> {
     }
 }
 
-pub(crate) fn filter(f: u32) -> Result<(), Fail> {
+pub(crate) fn filter(f: u32) -> Result<Filter, Fail> {
     match f {
-        DSD2PCM_FILTER_DEFAULT => Ok(()),
-        DSD2PCM_FILTER_PYSACD => Err(Fail(
-            DSD2PCM_E_UNSUPPORTED,
-            "the pysacd filter is not available in this version".into(),
-        )),
+        DSD2PCM_FILTER_DEFAULT => Ok(Filter::Default),
+        DSD2PCM_FILTER_PYSACD => Ok(Filter::Pysacd),
         _ => Err(invalid(format!("filter {f}: 0 or 1"))),
     }
 }
@@ -315,7 +315,7 @@ pub(crate) fn filter(f: u32) -> Result<(), Fail> {
 pub(crate) fn file_options(o: &dsd2pcm_file_options) -> Result<dsd::PcmOptions, Fail> {
     let mut opts = dsd::PcmOptions::new(rate(o.rate_hz)?);
     opts.cutoff = cutoff(o.cutoff)?;
-    filter(o.filter)?;
+    opts.filter = filter(o.filter)?;
     opts.threads = match o.threads {
         0 => true,
         1 => false,
@@ -327,14 +327,15 @@ pub(crate) fn file_options(o: &dsd2pcm_file_options) -> Result<dsd::PcmOptions, 
 }
 
 pub(crate) fn frames_config(c: &dsd2pcm_frames_config) -> Result<dsd::frames::PcmConfig, Fail> {
-    let (rate, cutoff) = (rate(c.rate_hz)?, cutoff(c.cutoff)?);
-    filter(c.filter)?;
+    let (rate, cutoff, filter) = (rate(c.rate_hz)?, cutoff(c.cutoff)?, filter(c.filter)?);
     let channels = u8::try_from(c.channels)
         .ok()
         .filter(|ch| (1..=MAX_CHANNELS).contains(ch))
         .ok_or_else(|| invalid(format!("{} channels: 1 to 6 are supported", c.channels)))?;
     let gain = dsd::frames::Gain::from_db(c.gain_db)?;
-    Ok(dsd::frames::PcmConfig::new(rate, cutoff, channels).with_gain(gain))
+    Ok(dsd::frames::PcmConfig::new(rate, cutoff, channels)
+        .with_gain(gain)
+        .with_filter(filter))
 }
 
 pub(crate) fn file_report(r: &dsd::Report) -> dsd2pcm_file_report {
