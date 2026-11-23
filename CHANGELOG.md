@@ -5,6 +5,9 @@
 - x86_64 without AVX2 (e.g. Celeron and Pentium J and N series of NAS units): the `sse2`
   level now runs there too, where the generic level ran at 0.6x to 0.9x the speed of
   scarletbook-pcm 0.7.0 ([performance](docs/performance.md)). Output bytes unchanged.
+- `frames::Converter`: the first-stage values kept between calls cost next to nothing
+  when consecutive calls are not adjacent runs (pooled converters): only the bytes the next
+  run could share are kept. Output bytes unchanged.
 
 ## 0.1.1
 
