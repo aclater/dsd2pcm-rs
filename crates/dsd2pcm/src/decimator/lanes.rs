@@ -58,7 +58,7 @@ pub(super) struct Pass<'a> {
 }
 
 /// Index bits of the paired S1 tables.
-pub(super) const P_BITS: usize = 11;
+pub(super) const P_BITS: usize = 8;
 
 /// One paired S1 table: two partial sums per chunk value, biased to be non-negative, in the
 /// low and high 32 bits.

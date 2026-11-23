@@ -416,3 +416,61 @@ fn errors_write_nothing() {
         .unwrap();
     assert_eq!(st.clipped_total(), 0);
 }
+
+/// A converter reuses work from its previous call only where the bytes are the same: runs
+/// that jump, repeat, go back, or whose neighbour differs from the frame converted before
+/// give the samples of a fresh converter.
+#[test]
+fn calls_out_of_order_or_with_other_neighbours() {
+    for ch in [1usize, 2] {
+        let frames = 14;
+        let a = area(ch, frames, 0x5151 ^ ch as u64);
+        let frame = |t: usize| a[t * FRAME * ch..][..FRAME * ch].to_vec();
+        // A copy of frame 4 with one byte changed near its end, and one near its start.
+        let mut late = frame(4);
+        let at = late.len() - 3;
+        late[at] ^= 0x10;
+        let mut early = frame(4);
+        early[ch] ^= 0x01;
+        for (rate, cutoff) in ALL {
+            let mut c = our_conv(rate, cutoff, ch, 0.0);
+            let fb = c.samples_per_frame() * ch * 3;
+            // (first frame, frames, replaced `before`)
+            let calls: &[(usize, usize, Option<&Vec<u8>>)] = &[
+                (3, 1, None),
+                (4, 1, None),
+                (5, 1, Some(&late)),
+                (6, 1, None),
+                (9, 1, None),
+                (10, 2, None),
+                (12, 1, None),
+                (4, 1, None),
+                (5, 1, Some(&early)),
+                (5, 1, None),
+                (6, 1, None),
+                (6, 1, None),
+                (0, 1, None),
+                (1, 1, None),
+            ];
+            for &(t, n, before) in calls {
+                let list: Vec<Vec<u8>> = (t..t + n).map(frame).collect();
+                let list: Vec<&[u8]> = list.iter().map(|f| &f[..]).collect();
+                let prev = t.checked_sub(1).map(frame);
+                let next = (t + n < frames).then(|| frame(t + n));
+                let before = before.map(|b| &b[..]).or(prev.as_deref());
+                let run = || {
+                    Run::new(&list[..])
+                        .with_before(before)
+                        .with_after(next.as_deref())
+                };
+                let mut got = vec![0u8; n * fb];
+                c.convert(run(), PcmOut::S24le(&mut got), None).unwrap();
+                let mut want = vec![0u8; n * fb];
+                our_conv(rate, cutoff, ch, 0.0)
+                    .convert(run(), PcmOut::S24le(&mut want), None)
+                    .unwrap();
+                assert!(got == want, "{ch} ch {rate:?} {cutoff:?} frame {t}");
+            }
+        }
+    }
+}
