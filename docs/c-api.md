@@ -56,7 +56,8 @@ int dsd2pcm_convert_file(const char *input_path, const char *output_path,
 
 Converts a DSF or DFF file (DSD64) to a 24-bit WAV file. `options` holds the rate (88200,
 176400, 352800), cutoff, filter, gain (-120 to +24 dB), `threads` (0: all cores, 1: the
-calling thread only) and an optional progress callback:
+calling thread only), `no_clobber` (0: replace an existing output, 1: refuse it; since
+0.1.3) and an optional progress callback:
 
 ```c
 typedef int (*dsd2pcm_progress_fn)(uint64_t done, uint64_t total, void *user_data);
@@ -81,6 +82,17 @@ left as it was, so a partial WAV never appears under `output_path`. A symbolic l
 attributes of a replaced file are not kept. If the process is killed (SIGKILL, power loss),
 a `.dsd2pcm-PID-N.tmp` file may remain; it is safe to delete. The library installs no
 signal handlers.
+
+With `no_clobber` 1, anything at `output_path` (a file, a symbolic link, even a dangling
+one) is refused with `DSD2PCM_E_EXISTS` before converting, and the result is put in place
+without ever replacing a file that appeared during the conversion: it is hard-linked to
+`output_path`, which fails if anything is there by then, and the temporary name is
+removed. On a file system without hard links (FAT, exFAT, some network and FUSE file
+systems) `output_path` is first created empty and exclusively, which fails the same way,
+and the result is renamed over that empty file. That fallback is best effort: a crash at
+that moment can leave an empty output, and a file another process puts there in that
+moment is replaced. Either way a refused output is left as it was and the temporary file is
+removed. Values other than 0 and 1 give `DSD2PCM_E_INVALID_ARGUMENT`.
 
 `crates/dsd2pcm-capi/examples/convert.c` is a complete program:
 
@@ -171,6 +183,10 @@ Both run without arguments.
 
   A struct from a caller built against an older header is read for its `struct_size` bytes
   and the fields it lacks are taken as 0.
+- Appended since 0.1.0: `dsd2pcm_file_options.no_clobber` (`uint32_t`, 0.1.3), which makes
+  the struct 56 bytes on 64-bit targets, 40 on i686 Linux and 48 on other 32-bit targets.
+  The status code `DSD2PCM_E_EXISTS` (9) is new in 0.1.3; the library returns it only
+  when `no_clobber` is set.
 
 ## Building from source
 

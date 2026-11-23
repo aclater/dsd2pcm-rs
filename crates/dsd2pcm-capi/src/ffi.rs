@@ -208,7 +208,7 @@ pub unsafe extern "C" fn dsd2pcm_convert_file(
         // SAFETY: NULL or a struct starting with its `struct_size` (contract). Checked
         // before the conversion, so a bad size fails at once.
         let report_bytes = unsafe { out_struct(report, "report") }?;
-        let opts = file_options(&o)?;
+        let (opts, out_opts) = file_options(&o)?;
         let (cb, user_data) = (o.progress, o.user_data);
         let mut hook = |p: dsd::Progress| match cb {
             // SAFETY: a C function pointer supplied by the caller, called with the
@@ -216,7 +216,15 @@ pub unsafe extern "C" fn dsd2pcm_convert_file(
             Some(f) if unsafe { f(p.done, p.total, user_data) } != 0 => ControlFlow::Break(()),
             _ => ControlFlow::Continue(()),
         };
-        let rep = dsd::convert_file_with(input, output, &opts, &mut hook)?;
+        let rep = match dsd::convert_file_to(input, output, &opts, &out_opts, &mut hook) {
+            Ok(rep) => rep,
+            Err(dsd::Error::Io(e))
+                if out_opts.no_clobber && e.kind() == std::io::ErrorKind::AlreadyExists =>
+            {
+                return Err(Fail(DSD2PCM_E_EXISTS, dsd::Error::Io(e).to_string()));
+            }
+            Err(e) => return Err(e.into()),
+        };
         if let Some(n) = report_bytes {
             // SAFETY: not NULL; writable for `struct_size >= n` bytes (contract).
             unsafe { write_struct(report, file_report(&rep), n) };

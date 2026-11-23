@@ -28,6 +28,13 @@
 - Command line: `--` ends the options, so a file whose name starts with `-` can be given
   (`dsd2pcm -- -take1.dsf out.wav`). An unknown argument that starts with `-` is now a usage
   error; before, one that did not start with `--` was taken as a file name.
+- No-clobber output: the tool's `-n` / `--no-clobber`, the library's `convert_file_to` with
+  `OutputOptions { no_clobber, .. }`, and the C interface's
+  `dsd2pcm_file_options.no_clobber` (appended; callers built against the 0.1.0 header keep
+  working) with the new status `DSD2PCM_E_EXISTS`. An existing output is refused and left
+  as it was, and the result is put in place without ever replacing a file that appeared
+  during the conversion: a hard link, or on file systems without hard links an exclusive
+  create then a rename ([design](docs/design.md#output-files)).
 
 ## 0.1.2 (2026-11-23)
 

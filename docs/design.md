@@ -441,6 +441,24 @@ file the user had, nor leave a partial WAV that a reader would take as complete.
   signal number; a second signal ends it at once. Only SIGKILL, a crash or a power loss can
   leave a `.dsd2pcm-PID-N.tmp` behind, which is safe to delete. The library installs no
   signal handlers: that is the application's choice.
+- No-clobber (`OutputOptions::no_clobber`, `-n`, `dsd2pcm_file_options.no_clobber`): an
+  existing output is refused before converting, and the result is put in place with
+  "create, never replace" semantics, because a file can appear at the output path during a
+  long conversion (another conversion of the same name, a copy) and checking first then
+  renaming would replace it. The temporary file is hard-linked to the output path, which
+  fails if anything is there, atomically, on every platform with hard links (Linux, macOS,
+  the BSDs, Windows on NTFS), and the temporary name is then removed. That needs no `unsafe`
+  or platform calls, unlike Linux's `renameat2(RENAME_NOREPLACE)` or macOS's
+  `renamex_np(RENAME_EXCL)`, which also fail on some file systems. Where linking fails for
+  another reason (no hard links: FAT, exFAT, some SMB, NFS and FUSE mounts), the output path
+  is created empty with an exclusive create (`O_EXCL`; `CREATE_NEW` on Windows), which
+  fails the same way, and the result is renamed over it. That path is best effort: a crash
+  in the moment between the two leaves the empty file, and a process with write access to
+  the directory that replaces the empty file in that moment has its file replaced by the
+  rename. With hard links there is no such moment.
+  Not exposed through `PcmOptions`, because adding a field to that struct would break
+  every caller that builds it with a struct literal; `OutputOptions` is
+  `#[non_exhaustive]`, so later output settings can be added to it.
 
 ## Known gaps
 

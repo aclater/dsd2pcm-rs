@@ -56,6 +56,10 @@ template <typename T> static inline T dsd2pcm_init_() {
 // An internal error (a caught panic, or a handle unusable after one). Please report it.
 #define DSD2PCM_E_INTERNAL 8
 
+// The output file exists and `dsd2pcm_file_options.no_clobber` is set: it is left as it
+// was. (Since 0.1.3.)
+#define DSD2PCM_E_EXISTS 9
+
 // Output layout: packed 3-byte little-endian samples (24-bit WAV and FLAC).
 #define DSD2PCM_FORMAT_S24LE 0
 
@@ -103,7 +107,7 @@ typedef int (*dsd2pcm_progress_fn)(uint64_t done, uint64_t total, void *user_dat
 
 // Settings for `dsd2pcm_convert_file`. Start from `DSD2PCM_FILE_OPTIONS_INIT` (all zeros
 // but `struct_size`) and set `rate_hz`; the other zeros are the defaults: standard cutoff,
-// default filter, 0 dB, all cores, no callback.
+// default filter, 0 dB, all cores, no callback, an existing output replaced.
 typedef struct dsd2pcm_file_options {
   // Size of this struct as the caller compiled it: `sizeof(...)` (the `*_INIT` macro sets
   // it). Must be at least the 0.1.0 size; the library reads or writes only the fields it
@@ -123,6 +127,11 @@ typedef struct dsd2pcm_file_options {
   dsd2pcm_progress_fn progress;
   // Passed to `progress` unchanged.
   void *user_data;
+  // 0: replace an existing output file. 1: refuse it with `DSD2PCM_E_EXISTS` and leave
+  // it as it was; the result is put in place without ever replacing a file that appears
+  // during the conversion. Other values are reserved. Appended in 0.1.3: a caller built
+  // against an older header passes the 0.1.0 size, and this reads as 0.
+  uint32_t no_clobber;
 } dsd2pcm_file_options;
 
 // What `dsd2pcm_convert_file` did; written on success only. Start from

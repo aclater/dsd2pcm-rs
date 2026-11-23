@@ -50,6 +50,9 @@ pub const DSD2PCM_E_CANCELLED: c_int = 6;
 pub const DSD2PCM_E_BUSY: c_int = 7;
 /// An internal error (a caught panic, or a handle unusable after one). Please report it.
 pub const DSD2PCM_E_INTERNAL: c_int = 8;
+/// The output file exists and `dsd2pcm_file_options.no_clobber` is set: it is left as it
+/// was. (Since 0.1.3.)
+pub const DSD2PCM_E_EXISTS: c_int = 9;
 
 /// Output layout: packed 3-byte little-endian samples (24-bit WAV and FLAC).
 pub const DSD2PCM_FORMAT_S24LE: u32 = 0;
@@ -92,7 +95,7 @@ pub type dsd2pcm_progress_fn =
 
 /// Settings for `dsd2pcm_convert_file`. Start from `DSD2PCM_FILE_OPTIONS_INIT` (all zeros
 /// but `struct_size`) and set `rate_hz`; the other zeros are the defaults: standard cutoff,
-/// default filter, 0 dB, all cores, no callback.
+/// default filter, 0 dB, all cores, no callback, an existing output replaced.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct dsd2pcm_file_options {
@@ -114,6 +117,11 @@ pub struct dsd2pcm_file_options {
     pub progress: dsd2pcm_progress_fn,
     /// Passed to `progress` unchanged.
     pub user_data: *mut c_void,
+    /// 0: replace an existing output file. 1: refuse it with `DSD2PCM_E_EXISTS` and leave
+    /// it as it was; the result is put in place without ever replacing a file that appears
+    /// during the conversion. Other values are reserved. Appended in 0.1.3: a caller built
+    /// against an older header passes the 0.1.0 size, and this reads as 0.
+    pub no_clobber: u32,
 }
 
 /// What `dsd2pcm_convert_file` did; written on success only. Start from
@@ -290,18 +298,29 @@ macro_rules! versioned {
                 self.struct_size = size;
             }
         }
-        // The 0.1.0 layout is a contract: fields are only appended. While none has been,
-        // the struct is exactly its 0.1.0 size.
+        // The 0.1.0 layout is a contract: fields are only appended, so the struct is at
+        // least its 0.1.0 size.
+        const _: () = assert!(std::mem::size_of::<$t>() >= <$t as Versioned>::V1_SIZE);
+    };
+    // A struct that has not grown since 0.1.0: exactly its 0.1.0 size.
+    ($t:ident, $v1_64:expr, $v1_32a4:expr, $v1_32a8:expr, unchanged) => {
+        versioned!($t, $v1_64, $v1_32a4, $v1_32a8);
         const _: () = assert!(std::mem::size_of::<$t>() == <$t as Versioned>::V1_SIZE);
     };
 }
 
 // 0.1.0 sizes: 64-bit, 32-bit (i686 Linux), 32-bit with 8-byte aligned 64-bit fields.
 versioned!(dsd2pcm_file_options, 48, 36, 40);
-versioned!(dsd2pcm_file_report, 88, 88, 88);
-versioned!(dsd2pcm_frames_config, 32, 28, 32);
-versioned!(dsd2pcm_run, 80, 44, 48);
-versioned!(dsd2pcm_stats, 64, 64, 64);
+versioned!(dsd2pcm_file_report, 88, 88, 88, unchanged);
+versioned!(dsd2pcm_frames_config, 32, 28, 32, unchanged);
+versioned!(dsd2pcm_run, 80, 44, 48, unchanged);
+versioned!(dsd2pcm_stats, 64, 64, 64, unchanged);
+// Fields appended to dsd2pcm_file_options: `no_clobber` (0.1.3) starts where the 0.1.0
+// layout ended.
+const _: () = assert!(
+    std::mem::offset_of!(dsd2pcm_file_options, no_clobber)
+        == <dsd2pcm_file_options as Versioned>::V1_SIZE
+);
 
 /// Checks a caller's `struct_size`.
 pub(crate) fn check_struct_size<T: Versioned>(size: u32, what: &str) -> Result<(), Fail> {
@@ -405,7 +424,9 @@ pub(crate) fn filter(f: u32) -> Result<Filter, Fail> {
     }
 }
 
-pub(crate) fn file_options(o: &dsd2pcm_file_options) -> Result<dsd::PcmOptions, Fail> {
+pub(crate) fn file_options(
+    o: &dsd2pcm_file_options,
+) -> Result<(dsd::PcmOptions, dsd::OutputOptions), Fail> {
     let mut opts = dsd::PcmOptions::new(rate(o.rate_hz)?);
     opts.cutoff = cutoff(o.cutoff)?;
     opts.filter = filter(o.filter)?;
@@ -416,7 +437,12 @@ pub(crate) fn file_options(o: &dsd2pcm_file_options) -> Result<dsd::PcmOptions, 
     };
     opts.gain_db = o.gain_db;
     dsd::convert::check_options(&opts)?;
-    Ok(opts)
+    let out = dsd::OutputOptions::default().with_no_clobber(match o.no_clobber {
+        0 => false,
+        1 => true,
+        n => return Err(invalid(format!("no_clobber {n}: 0 or 1"))),
+    });
+    Ok((opts, out))
 }
 
 pub(crate) fn frames_config(c: &dsd2pcm_frames_config) -> Result<dsd::frames::PcmConfig, Fail> {
@@ -460,6 +486,7 @@ pub(crate) fn status_str(status: c_int) -> &'static [u8] {
         DSD2PCM_E_CANCELLED => b"cancelled\0",
         DSD2PCM_E_BUSY => b"converter busy\0",
         DSD2PCM_E_INTERNAL => b"internal error\0",
+        DSD2PCM_E_EXISTS => b"output exists\0",
         _ => b"unknown status\0",
     }
 }
