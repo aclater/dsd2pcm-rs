@@ -48,7 +48,7 @@ Other platforms and options: [docs/usage.md](docs/usage.md).
 - [Performance](docs/performance.md): speed against scarletbook-pcm 0.7.0, including the gaps
 - [Design](docs/design.md): how the conversion works and why its output is exact
 - [Changelog](CHANGELOG.md) · [Plan](docs/plan.md)
-- [Development](docs/development.md) · [Fuzzing](docs/fuzzing.md) · [Releases](docs/release.md)
+- [Development](docs/development.md) · [Fuzzing](docs/fuzzing.md) · [Testing for long-lived processes](docs/testing.md) · [Releases](docs/release.md)
 - [Provenance](PROVENANCE.md) · [Rules for contributors](AGENTS.md)
 - [Security policy](SECURITY.md): supported versions and how to report a vulnerability
 
