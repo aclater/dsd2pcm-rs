@@ -7,6 +7,8 @@
 //!
 //! - `run 1`: frame by frame, each frame in its own buffer with its neighbours;
 //! - `run 4`: runs of four frames, each in its own buffer, with the neighbours;
+//! - `pool`: as `run 4`, each run on one of 4 converters picked at random, as a reader with
+//!   pooled per-thread converters converts (one converter rarely sees adjacent runs);
 //! - `area`: the whole area as one contiguous run without neighbours.
 //!
 //! Every mode must give the same bytes in both crates and in every mode. Prints the speed as
@@ -74,23 +76,41 @@ fn main() {
     } else {
         &[(PcmRate::Hz176400, Cutoff::Standard)]
     };
+    // `pool`: runs of 4 frames on POOL converters picked at random, as a file system with
+    // pooled per-thread converters reads, so that one converter rarely sees adjacent runs.
+    const POOL: usize = 4;
+    const POOLED: usize = usize::MAX;
     for &(rate, cutoff) in configs {
-        let mut ours = Converter::new(PcmConfig::new(rate, cutoff, ch as u8)).unwrap();
+        let mut ours: Vec<Converter> = (0..POOL)
+            .map(|_| Converter::new(PcmConfig::new(rate, cutoff, ch as u8)).unwrap())
+            .collect();
         let sr = sb::PcmRate::from_hz(rate.hz()).unwrap();
         let sc = match cutoff {
             Cutoff::Standard => sb::Cutoff::Standard,
             Cutoff::Low => sb::Cutoff::Low,
             Cutoff::Wide => sb::Cutoff::Wide,
         };
-        let mut theirs = sb::Converter::new(sb::PcmConfig::new(sr, sc, ch as u8)).unwrap();
-        let fb = ours.samples_per_frame() * ch * 3;
+        let mut theirs: Vec<sb::Converter> = (0..POOL)
+            .map(|_| sb::Converter::new(sb::PcmConfig::new(sr, sc, ch as u8)).unwrap())
+            .collect();
+        let fb = ours[0].samples_per_frame() * ch * 3;
+        // The converter of each run in `pool` mode: a fixed pseudo-random sequence.
+        let pick = |run: usize| -> usize {
+            let mut x = (run as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            x ^= x >> 29;
+            (x % POOL as u64) as usize
+        };
         let mut reference: Option<Vec<u8>> = None;
-        for mode in [1usize, 4, 0] {
+        for mode in [1usize, 4, POOLED, 0] {
             let mut a = vec![0u8; frames * fb];
             let mut b = vec![0u8; frames * fb];
             let mut fa = vec![0u64; frames];
             let mut fbc = vec![0u64; frames];
-            let step = if mode == 0 { frames } else { mode };
+            let step = match mode {
+                0 => frames,
+                POOLED => 4,
+                m => m,
+            };
             let mut run_sb = || {
                 let mut t = 0;
                 while t < frames {
@@ -102,7 +122,8 @@ fn main() {
                             .with_before(t.checked_sub(1).map(|p| list[p]))
                             .with_after(list.get(u).copied())
                     };
-                    theirs
+                    let k = if mode == POOLED { pick(t / step) } else { 0 };
+                    theirs[k]
                         .convert(
                             run,
                             sb::PcmOut::S24le(&mut b[t * fb..u * fb]),
@@ -123,12 +144,14 @@ fn main() {
                             .with_before(t.checked_sub(1).map(|p| list[p]))
                             .with_after(list.get(u).copied())
                     };
-                    ours.convert(
-                        run,
-                        PcmOut::S24le(&mut a[t * fb..u * fb]),
-                        Some(&mut fa[t..u]),
-                    )
-                    .unwrap();
+                    let k = if mode == POOLED { pick(t / step) } else { 0 };
+                    ours[k]
+                        .convert(
+                            run,
+                            PcmOut::S24le(&mut a[t * fb..u * fb]),
+                            Some(&mut fa[t..u]),
+                        )
+                        .unwrap();
                     t = u;
                 }
             };
@@ -148,10 +171,10 @@ fn main() {
                 "{:<7} {:<9} {:<7} {:>15.1} {:>9.1} {:>8.2}",
                 rate.hz(),
                 format!("{cutoff:?}"),
-                if mode == 0 {
-                    "area".to_string()
-                } else {
-                    format!("run {mode}")
+                match mode {
+                    0 => "area".to_string(),
+                    POOLED => "pool".to_string(),
+                    m => format!("run {m}"),
                 },
                 audio / t_sb,
                 audio / t_ours,
