@@ -825,7 +825,8 @@ jobs:
           n=$(wc -l < hashes)
           [[ "$n" -eq 1 ]] || { echo "::error::the platforms' binaries converted the test file to $n different outputs"; exit 1; }
           [[ $(ls smoke-*.sha256 | wc -l) -eq 9 ]] || { echo "::error::expected nine platforms' outputs"; exit 1; }
-          [[ $(ls ./dsd2pcm-*.tar.gz ./dsd2pcm-*.zip | grep -vc -- '-src\.tar\.gz$') -eq 8 ]] || { echo "::error::expected eight archives of the tool"; exit 1; }
+          tools=$(find . -maxdepth 1 \( -name 'dsd2pcm-*.tar.gz' -o -name 'dsd2pcm-*.zip' \) ! -name '*-src.tar.gz' | wc -l)
+          [[ "$tools" -eq 8 ]] || { echo "::error::expected eight archives of the tool, found $tools"; exit 1; }
           [[ -f "dsd2pcm-${VERSION}-src.tar.gz" ]] || { echo "::error::no source archive"; exit 1; }
           [[ $(ls ./libdsd2pcm-*.tar.gz ./libdsd2pcm-*.zip | wc -l) -eq 9 ]] || { echo "::error::expected nine archives of the C library"; exit 1; }
           echo "all nine binaries: the same output"
