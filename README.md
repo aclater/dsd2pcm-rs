@@ -17,6 +17,8 @@ cargo build --release
 The tool prints the duration, the speed as a multiple of real time and the number of
 samples clamped to 24 bits.
 
+Speed against scarletbook-pcm 0.7.0, including where it is still slower: [docs/performance.md](docs/performance.md).
+
 ## What it does
 
 - Reads DSF and DSDIFF (DFF, uncompressed; DST-compressed files are rejected with a clear
