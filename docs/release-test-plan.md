@@ -1,0 +1,310 @@
+# Release test plan
+
+Every release runs this whole plan on its release candidate: the commit that will be tagged
+(for a batch release, the head of the batch branch). The results go in a copy of the
+[results table](#results-table) with the candidate's SHA. Any FAIL stops the tag until it
+is fixed; after a fix, the items the fix can affect run again on the new head.
+
+Nothing here is timed, so no item needs an idle machine. The local items run from the
+repository root through `.github/scripts/release-test.sh ITEM`, which caps each heavy step's
+memory (`RTP_MEM`, default 8G), runs it at nice 19 with `RTP_JOBS` build jobs (default 8),
+and prints `PASS ITEM` or `FAIL ITEM` as its last line.
+
+| Item | What | Where | Release length |
+|---|---|---|---|
+| 1 | Test suite on every platform and SIMD level | local (x86_64, i686, aarch64 under qemu); macOS and Windows from GitHub CI | full suite |
+| 2 | Golden hashes and identity with scarletbook-pcm 0.7.0 at every level | inside item 1 | full suite |
+| 3 | Fuzzing, every target | local | 30 minutes per target |
+| 4 | Leak soak | local | 1 hour |
+| 5 | Miri, C interface and core crate | local | complete |
+| 6 | Real-file corpus | local | 15 to 20 files |
+| 7 | C interface under ASan, LSan and UBSan | local | 1000 leak-loop iterations |
+| 8 | README Quick start in a fresh container | local, then again after the release | once |
+| 9 | Docs checks and the docs' commands | local | every command |
+| 10 | File-safety regressions | local | once |
+
+## Setup
+
+A Linux x86_64 machine whose CPU has SSE2, AVX2 and FMA, about 16 threads, 32 GB of
+memory, 60 GB of disk, podman (rootless is fine) and a systemd user session
+(`systemd-run --user`). Then:
+
+```
+sudo dnf install gcc clang compiler-rt python3 podman file
+rustup toolchain install stable
+rustup target add i686-unknown-linux-gnu aarch64-unknown-linux-gnu
+rustup toolchain install nightly-2026-11-01 --profile minimal --component miri,rust-src,llvm-tools-preview
+cargo install cargo-fuzz
+cargo install --locked cbindgen --version 0.29.4
+```
+
+lychee 0.24.2 from its GitHub release (the version and SHA-256 pinned in
+`.github/workflows/docs.yml`), on the `PATH` or named by `LYCHEE`. Clone the candidate and
+record its SHA:
+
+```
+git clone https://github.com/aclater/dsd2pcm-rs.git
+cd dsd2pcm-rs
+git checkout BRANCH
+git rev-parse HEAD
+```
+
+The containers (items 1, 8) use `registry.fedoraproject.org/fedora:45` and the host's
+rustup and cargo homes; `FEDORA_IMAGE` names another image.
+
+## 1 and 2. Test suite on every platform; golden hashes and identity
+
+```
+.github/scripts/release-test.sh simd
+.github/scripts/release-test.sh i686
+.github/scripts/release-test.sh aarch64
+```
+
+`simd` runs `cargo test --workspace --locked` four times, with `DSD2PCM_SIMD` set to
+`generic`, `sse2`, `avx2` and `avx2fma` (`.github/scripts/test-simd-levels.sh`, which fails
+if the CPU lacks a level rather than testing a lower one). `i686` does the same for
+`i686-unknown-linux-gnu` in a Fedora container with the 32-bit C libraries, and checks that
+the tool is a 32-bit x86 program. `aarch64` builds for `aarch64-unknown-linux-gnu` in a
+Fedora container with the cross linker and glibc sysroot and runs every test under
+`qemu-aarch64-static`, at its one level, `generic`, built with `--release` plus debug
+assertions and overflow checks (a debug build under emulation takes hours); the tool must
+be an aarch64 program. One test is left out there: the tool's signal test
+(`sigint_and_sigterm_leave_no_partial_output`) starts the tool as a child process, which a
+container without `binfmt_misc` cannot run under qemu-user. In its place the release build
+of the aarch64 tool runs under qemu on a 120-second 5.1 file and is sent SIGINT, then
+SIGTERM: it must exit 130 and 143, leave the existing output as it was and leave no
+temporary file. The native aarch64 CI job runs the test itself.
+
+The suite holds item 2: `tests/identity.rs` compares the output with scarletbook-pcm
+0.7.0 (a dev-dependency, run in the same test) for every rate, cutoff, gain and channel
+count, and `golden_hashes_at_every_simd_level` checks the eight golden SHA-256 hashes at
+every level the CPU has, each forced in turn. `tests/pysacd.rs` checks the `pysacd` filter
+against its reference hashes.
+
+macOS (aarch64) and Windows (x86_64), and native aarch64 Linux: the rows come from the
+GitHub CI run of the batch pull request, jobs `tests (aarch64-macos)`,
+`tests (x86_64-windows)` and `tests (aarch64-linux)`, which run the same
+`test-simd-levels.sh`.
+
+Pass: every run ends `PASS`, no test fails or is skipped other than the `#[ignore]` ones,
+and the three CI jobs are green on the candidate's head.
+
+## 3. Fuzzing
+
+```
+.github/scripts/release-test.sh fuzz 1800
+```
+
+Builds the targets with the pinned nightly, makes the seed corpora
+(`fuzz/src/bin/make_seeds.rs`), and runs every target in `fuzz/fuzz_targets` (`dsf_read`,
+`dff_read`, `wav_read`, `flac`, `open_buffered`, `round_trip`) at the same time, one
+process each (no `-fork`), each from a copy of its seeds, with `-max_len=32768
+-rss_limit_mb=2048 -malloc_limit_mb=2048 -timeout=10`, under a 3 GiB cap per target. Logs:
+`target/rtp-fuzz-logs/TARGET.log`.
+
+Pass: every target runs the full 30 minutes with no crash, leak, timeout or memory-limit
+finding. A finding is a FAIL: its input is in `fuzz/artifacts/TARGET/`.
+
+## 4. Leak soak
+
+```
+.github/scripts/release-test.sh soak 3600
+```
+
+`tests/soak.rs` for an hour ([testing.md](testing.md#soak-test) describes what it does).
+
+Pass: the test passes: the live heap of the second half stays within 64 KiB of the peak of
+20 to 50 % of the run, the resident set within its bound, and the thread count is back to
+its starting value after every threaded conversion. Record the iterations, conversions,
+live-heap and resident-set figures it prints.
+
+## 5. Miri
+
+```
+.github/scripts/release-test.sh miri
+```
+
+`cargo miri test -p dsd2pcm-capi`, then `.github/scripts/miri-core.sh` (the library's unit
+tests and the `containers`, `flac` and `frames` tests), on nightly-2026-11-01 at the
+generic level. The tests left out under Miri are listed in [testing.md](testing.md#miri).
+
+Pass: both finish with no undefined behaviour, no leak and no failed test. Record the
+test counts.
+
+## 6. Real-file corpus
+
+15 to 20 DSD64 files, read-only copies of real disc rips in a work directory, chosen so
+that the set has:
+
+- DSF and DFF, stereo and 5.1, the longest tracks at hand (over 25 minutes), and at least
+  one file over the 4 GiB WAV limit at 352.8 kHz;
+- files that end in a partial 4704-byte frame;
+- 5.1 DFF files (made from 5.1 DSF rips when there are none) and a DSF made from a DFF rip:
+
+  ```
+  python3 -I .github/scripts/dsd-transform.py dsf2dff IN.dsf OUT.dff
+  python3 -I .github/scripts/dsd-transform.py dff2dsf IN.dff OUT.dsf
+  ```
+
+- four DSF copies whose sample count is not a multiple of 8 (none of a typical library's
+  rips has one), stereo and 5.1, with 1, 3, 5 and 7 padding bits set to zero, two of
+  them with a silent end (the last two frames of each channel set to the idle pattern):
+
+  ```
+  python3 -I .github/scripts/dsd-transform.py odd IN.dsf OUT.dsf 3
+  python3 -I .github/scripts/dsd-transform.py odd IN.dsf OUT.dsf 5 9408
+  ```
+
+List the inputs one per line in a file, the container pairs (a rip and the copy made from
+it, `A B` per line) in another, and run:
+
+```
+RTP_PAIRS=pairs.txt .github/scripts/release-test.sh corpus corpus.txt WORKDIR
+```
+
+First a self-test: the checker passes a correct output and fails it after one flipped
+byte. Then, for every file, the release build of the `dsd2pcm` tool converts it at every
+rate and cutoff of the default filter (88.2 kHz with 30 and 40; 176.4 and 352.8 kHz with
+30, 40 and wide), and `crates/dsd2pcm/examples/real_identity.rs` checks each output:
+
+- it reads back as a WAV: one `fmt ` chunk (24-bit, the input's channels and the rate), one
+  `data` chunk of whole sample frames, the RIFF size equal to the file size;
+- every sample of the input's whole frames equals scarletbook-pcm 0.7.0's, which converts
+  the same file read by the example's own parsers (not the library's readers), streamed in
+  runs with their neighbour frames (the last whole frame is left out when a partial frame
+  follows it, whose context scarletbook-pcm cannot take);
+- the output's length is right for the input's sample count;
+- a silent end (the last frame idle in every channel) ends in exact zeros: the last 64
+  samples of every channel.
+
+Then the `pysacd` filter at 88.2 and 176.4 kHz (a WAV, the same bytes threaded and with
+`--single-thread`), the default settings threaded and with `--single-thread` (the same
+bytes), and each container pair (the same WAV, byte for byte).
+
+Pass: every line is `OK` or an expected refusal; the only refusal is a conversion whose
+WAV would pass 4 GiB, with exit status 1, the message "WAV output over 4 GiB" and no
+output file. Every odd-count copy passes with its padding converted as idle, and the
+silent-end copies end in zeros.
+
+## 7. C interface under the sanitizers
+
+```
+.github/scripts/release-test.sh capi
+```
+
+`crates/dsd2pcm-capi/check.sh` (header equal to cbindgen 0.29.4's output, every C test and
+the example under gcc and clang, the C++ check, then `smoke.c` and `leakloop.c` under
+clang's AddressSanitizer, LeakSanitizer and UndefinedBehaviorSanitizer) and
+`.github/scripts/capi-check.sh` with `ASAN_CC=clang` (the CI job's check), both with
+`LEAKLOOP_ITERATIONS=1000`.
+
+Pass: both end with no sanitizer report and "C interface checks passed" and "C tests
+passed under the sanitizers, no leaks".
+
+## 8. README Quick start in a fresh container
+
+```
+.github/scripts/release-test.sh quickstart
+```
+
+Before the tag the release archive does not exist yet. So, in a fresh
+`registry.fedoraproject.org/fedora:45` container, the tool is built from the candidate and
+packed into the archive the release will publish (`dsd2pcm-X.Y.Z-x86_64-linux.tar.gz`,
+with the README and licences), and the README's Quick start block runs literally except
+its `curl` line, on a generated `01 - Track.dsf`. The block must name the candidate's
+version.
+
+Pass: the commands succeed and `01 - Track.wav` is a 176.4 kHz, 24-bit WAV.
+
+After the release, the same check runs with the real download (the `curl` line too):
+
+```
+.github/scripts/readme-quick-start.sh
+```
+
+in a fresh container (`podman run --rm -it -v "$PWD:/src:Z" -w /src
+registry.fedoraproject.org/fedora:45` with `dnf install -y python3 gawk git-core`); it
+must print "Quick start: OK".
+
+## 9. Docs
+
+```
+.github/scripts/release-test.sh docs
+```
+
+`python3 -I .github/scripts/check-doc-versions.py` (one version everywhere),
+`.github/scripts/readme-quick-start.sh` (before the tag it passes with a notice that the
+release does not exist yet; item 8 covers it), and lychee over README, CHANGELOG,
+SECURITY, PROVENANCE, AGENTS and `docs/` offline (relative links and anchors).
+
+Then, by hand, every command in [usage.md](usage.md), [c-api.md](c-api.md) and
+[testing.md](testing.md) runs as written, on the candidate, with the release build of the
+tool on the `PATH` where a command calls `dsd2pcm`. Commands that need a release that does
+not exist yet (downloads, `gh release`, `cargo install` of the new version) are recorded as
+"after release" and run then. Items 4, 5 and 7 already run testing.md's soak, Miri and C
+checks; its ThreadSanitizer and valgrind commands run here.
+
+Pass: each script ends without an error, and every command does what its doc says.
+Record each command and its result.
+
+## 10. File safety
+
+```
+.github/scripts/release-test.sh safety
+```
+
+With the release build of the tool:
+
+- an output that is a hard link to the input, the input's own path, or a symbolic link to
+  it is refused with exit status 1 and the input is unchanged;
+- a bad input, a missing input, a gain out of range and `--cutoff wide` at 88.2 kHz each
+  fail and leave an existing output byte for byte as it was; an unknown option exits 2;
+  no temporary file remains;
+- a conversion interrupted while it runs (the script checks it was running when
+  signalled): SIGINT exits 130 with "interrupted; no output written", SIGTERM exits 143;
+  an existing output stays as it was, no output file is created and no temporary file
+  remains. A second SIGINT ends the process at once (under 2 s), and SIGKILL cannot be
+  caught: then no output file is created, and at most a hidden `.dsd2pcm-PID-N.tmp`
+  remains, as [usage.md](usage.md) documents;
+- refused up front, leaving everything as it was: a directory, a path ending in `/`, a
+  FIFO (without blocking), a device (`/dev/null`), a socket, an existing read-only file,
+  and a file in a directory that cannot be written;
+- replacing an output keeps its permissions (0640 stays 0640); an output name of 255
+  bytes works;
+- a DFF with 4096 chunks up to and including the audio chunk converts and one with 4097
+  is refused; a crafted DFF with 100 000 empty chunks before `PROP` is refused (exit 1)
+  within 2 seconds and leaves an existing output as it was;
+- `cargo test --release -p dsd2pcm --test output --test chunk_walk` and
+  `cargo test --release -p dsd2pcm-cli` (its signal tests) pass.
+
+Pass: every line is `ok`.
+
+## Results table
+
+Copy for each release; one row per item and platform, each with its evidence (the
+`PASS`/`FAIL` line, counts, or the CI job's link).
+
+```
+Release: X.Y.Z    Candidate: BRANCH at SHA    Date:    Tester:
+
+| Item | Platform / part | Result | Evidence |
+|---|---|---|---|
+| 1 | x86_64 Linux: generic, sse2, avx2, avx2fma | | |
+| 1 | i686 Linux: generic, sse2, avx2, avx2fma | | |
+| 1 | aarch64 Linux under qemu: generic | | |
+| 1 | aarch64 Linux, native (batch CI) | | |
+| 1 | aarch64 macOS (batch CI) | | |
+| 1 | x86_64 Windows (batch CI) | | |
+| 2 | golden hashes and scarletbook-pcm identity, every level above | | |
+| 3 | fuzz: dsf_read, dff_read, wav_read, flac, open_buffered, round_trip (30 min each) | | |
+| 4 | soak, 1 h | | |
+| 5 | Miri: dsd2pcm-capi | | |
+| 5 | Miri: core (miri-core.sh) | | |
+| 6 | real-file corpus (N files) | | |
+| 7 | C interface: check.sh, capi-check.sh with ASan/LSan/UBSan | | |
+| 8 | README Quick start, from the tree (before tag) | | |
+| 8 | README Quick start, download (after tag) | | |
+| 9 | check-doc-versions.py, readme-quick-start.sh, lychee offline | | |
+| 9 | usage.md, c-api.md, testing.md commands | | |
+| 10 | file safety | | |
+```
