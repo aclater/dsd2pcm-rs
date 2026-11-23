@@ -3,7 +3,10 @@
 use std::fmt;
 
 /// Errors returned by readers, writers and the converter. No operation panics on bad input.
+///
+/// New variants may be added in minor versions: match with a wildcard arm.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// Underlying I/O failure.
     Io(std::io::Error),
@@ -14,6 +17,8 @@ pub enum Error {
     Unsupported(String),
     /// A caller-supplied option is out of range.
     InvalidArgument(String),
+    /// The caller's progress hook asked to stop the conversion.
+    Cancelled,
 }
 
 /// Result alias used throughout the crate.
@@ -26,6 +31,7 @@ impl fmt::Display for Error {
             Error::Format(m) => write!(f, "invalid file: {m}"),
             Error::Unsupported(m) => write!(f, "unsupported: {m}"),
             Error::InvalidArgument(m) => write!(f, "invalid argument: {m}"),
+            Error::Cancelled => write!(f, "conversion cancelled"),
         }
     }
 }

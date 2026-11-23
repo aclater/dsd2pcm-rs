@@ -25,7 +25,9 @@ pub mod frames;
 pub mod io;
 pub mod wav;
 
-pub use convert::{convert_file, open_input, Input, PcmOptions, Report};
+pub use convert::{
+    convert_file, convert_file_with, open_input, Input, PcmOptions, Progress, ProgressHook, Report,
+};
 pub use decimator::{Cutoff, PcmRate};
 pub use error::{Error, Result};
 pub use filters::Filter;

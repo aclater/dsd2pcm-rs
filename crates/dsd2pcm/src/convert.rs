@@ -11,6 +11,7 @@ use crate::io::{DsdRead, PcmRead};
 use crate::wav::{WavFormat, WavReader, WavWriter};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -58,6 +59,22 @@ pub struct Report {
     pub clipped: Vec<u64>,
 }
 
+/// Progress of a conversion, passed to the hook of [`dsd64_to_pcm_with`] and
+/// [`convert_file_with`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Progress {
+    /// Output samples per channel written so far.
+    pub done: u64,
+    /// Output samples per channel in all.
+    pub total: u64,
+}
+
+/// A progress hook: called on the calling thread at block boundaries (once before the first
+/// block, then after each block written); [`ControlFlow::Break`] stops the conversion with
+/// [`Error::Cancelled`].
+pub type ProgressHook<'a> = &'a mut dyn FnMut(Progress) -> ControlFlow<()>;
+
 /// An opened input file.
 pub enum Input {
     /// DSD input (DSF or DFF).
@@ -91,6 +108,17 @@ pub fn open_input(path: &Path) -> Result<Input> {
 
 /// Converts a DSF or DFF file (DSD64) to a 24-bit WAV file.
 pub fn convert_file(input: &Path, output: &Path, opts: &PcmOptions) -> Result<Report> {
+    convert_file_with(input, output, opts, &mut |_| ControlFlow::Continue(()))
+}
+
+/// [`convert_file`] with a progress hook (see [`ProgressHook`]). On an error, including
+/// [`Error::Cancelled`], the output file may exist but is incomplete.
+pub fn convert_file_with(
+    input: &Path,
+    output: &Path,
+    opts: &PcmOptions,
+    progress: ProgressHook<'_>,
+) -> Result<Report> {
     let Input::Dsd(r) = open_input(input)? else {
         return Err(Error::Unsupported("input is PCM, not DSD".into()));
     };
@@ -107,7 +135,7 @@ pub fn convert_file(input: &Path, output: &Path, opts: &PcmOptions) -> Result<Re
     }
     let out = BufWriter::with_capacity(1 << 20, File::create(output)?);
     let mut w = WavWriter::new(out, WavFormat::I24, r.info().channels, opts.rate.hz())?;
-    let rep = dsd64_to_pcm(r, &mut w, opts)?;
+    let rep = dsd64_to_pcm_with(r, &mut w, opts, progress)?;
     w.finish()?;
     Ok(rep)
 }
@@ -140,9 +168,20 @@ pub fn check_options(opts: &PcmOptions) -> Result<()> {
 /// input is cut into pieces (per channel and per range of outputs) that run on all cores;
 /// the output does not depend on how the work is split.
 pub fn dsd64_to_pcm<W: Write + Seek>(
+    r: Box<dyn DsdRead + Send>,
+    w: &mut WavWriter<W>,
+    opts: &PcmOptions,
+) -> Result<Report> {
+    dsd64_to_pcm_with(r, w, opts, &mut |_| ControlFlow::Continue(()))
+}
+
+/// [`dsd64_to_pcm`] with a progress hook (see [`ProgressHook`]). The output is the same;
+/// after a [`Error::Cancelled`], `w` holds the blocks written so far.
+pub fn dsd64_to_pcm_with<W: Write + Seek>(
     mut r: Box<dyn DsdRead + Send>,
     w: &mut WavWriter<W>,
     opts: &PcmOptions,
+    progress: ProgressHook<'_>,
 ) -> Result<Report> {
     check_options(opts)?;
     let info = r.info();
@@ -176,6 +215,11 @@ pub fn dsd64_to_pcm<W: Write + Seek>(
     // The 24-bit samples of a block, channel by channel, and interleaved as bytes; reused.
     let mut q: Vec<i32> = Vec::new();
     let mut bytes = Vec::new();
+    let mut report = |done: u64| match progress(Progress { done, total: n_out }) {
+        ControlFlow::Continue(()) => Ok(()),
+        ControlFlow::Break(()) => Err(Error::Cancelled),
+    };
+    report(0)?;
     while done < n_out {
         let got = if eof {
             0
@@ -229,6 +273,7 @@ pub fn dsd64_to_pcm<W: Write + Seek>(
         decimator::pack24(plan.isa(), &per_ch, &mut bytes);
         w.write_raw(&bytes)?;
         done += keep as u64;
+        report(done)?;
         // Drop the bytes no later output needs.
         let first = plan.first_byte(done as i64);
         let drop = ((first - byte_start).max(0) as usize).min(bufs[0].len());
