@@ -64,3 +64,10 @@ path = "src/bin/make_seeds.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "open_buffered"
+path = "fuzz_targets/open_buffered.rs"
+test = false
+doc = false
+bench = false

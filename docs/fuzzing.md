@@ -9,6 +9,7 @@ It is a separate crate, outside the main workspace, and needs a nightly toolchai
 | `dff_read` | arbitrary bytes as DSDIFF | as `dsf_read` |
 | `wav_read` | arbitrary bytes as WAV | as `dsf_read`, in frames; every sample is finite |
 | `flac` | arbitrary bytes as FLAC | no panic; reads to the end with the same request sizes; delivers exactly the declared frame count unless a read fails (frames are decoded as they are read, so damaged audio is an error there); samples within full scale; memory bounded by one decoded block and one read's output |
+| `open_buffered` | arbitrary bytes, opened by every reader through a 1 MiB `BufReader` | opening reads the input a bounded number of times over (a reader that seeks once per chunk would refill the buffer for every chunk) |
 | `round_trip` | arbitrary audio, channel counts, rates, write sizes and DSF metadata | the DSF, DFF and WAV writers' output reads back unchanged |
 
 Its dependencies are checked with their own cargo-deny config, `fuzz/deny.toml`, which

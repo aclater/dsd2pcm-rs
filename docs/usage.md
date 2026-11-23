@@ -30,6 +30,22 @@ The DSD idle pattern (0x69) converts to exact zeros. On x86 the filters use AVX2
 when the CPU has them, chosen at run time, with the same output; the environment variable
 `DSD2PCM_SIMD` (`generic`, `sse2` on x86 and x86_64, `avx2` or `avx2fma`) caps the level.
 
+One intended difference: a DSF file whose sample count is not a multiple of 8 ends in a
+byte with padding bits past the last sample, usually zeros. The reader delivers those bits
+as the idle pattern 0x69's bits at the same positions, so the padding converts as silence
+rather than as a step of up to -7 dBFS. The output is identical to scarletbook-pcm 0.7.0
+given the same masked bytes. It differs from a conversion of the raw bytes only for such
+files whose padding is not already 0x69's bits, and only in each channel's last K output
+samples, with K at most `ceil(context_bytes / k) + 1` (`k` input bytes per output sample):
+
+| Filter | Rate | Cutoff | K at most |
+|---|---|---|---|
+| default | 88.2 kHz | 30 / 40 | 46 / 36 |
+| default | 176.4 kHz | 30 / 40 / wide | 91 / 71 / 62 |
+| default | 352.8 kHz | 30 / 40 / wide | 196 / 156 / 67 |
+| pysacd | 88.2 kHz | 40 | 55 |
+| pysacd | 176.4 kHz | 40 | 27 |
+
 Options: `--gain DB` (-120 to +24, default 0), `--single-thread`, `--filter pysacd`.
 
 `--filter pysacd` (`Filter::Pysacd` in `PcmOptions` and `frames::PcmConfig`) uses pysacd's

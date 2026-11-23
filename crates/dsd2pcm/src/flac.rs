@@ -24,7 +24,7 @@
 //! count `read` returns, so a `Read` implementation that over-reports must not reach it.
 
 use crate::error::{format_err, unsupported, Error, Result};
-use crate::io::{read_exact_arr, PcmInfo, PcmRead};
+use crate::io::{read_exact_arr, seek_to, PcmInfo, PcmRead};
 use std::io::{Chain, Cursor, Read, Seek, SeekFrom, Take};
 
 /// Largest number of frames one `read_frames` call returns.
@@ -49,6 +49,13 @@ impl<R: Read> Read for Honest<R> {
 impl<R: Seek> Seek for Honest<R> {
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
         self.0.seek(pos)
+    }
+    // Forwarded so that a buffered inner reader keeps its buffer.
+    fn stream_position(&mut self) -> std::io::Result<u64> {
+        self.0.stream_position()
+    }
+    fn seek_relative(&mut self, offset: i64) -> std::io::Result<()> {
+        self.0.seek_relative(offset)
     }
 }
 
@@ -114,7 +121,7 @@ fn parse_container<R: Read + Seek>(r: &mut R, file_len: u64) -> Result<(u64, [u8
         if pos > file_len {
             return format_err("ID3v2 tag runs past the end of the file");
         }
-        r.seek(SeekFrom::Start(pos))?;
+        seek_to(r, pos)?;
         tags += 1;
     }
     let mut streaminfo = None;
@@ -144,7 +151,7 @@ fn parse_container<R: Read + Seek>(r: &mut R, file_len: u64) -> Result<(u64, [u8
             (_, 0) => return format_err("FLAC file has a second STREAMINFO block"),
             (_, 127) => return format_err("FLAC metadata block type 127 is invalid"),
             _ => {
-                r.seek(SeekFrom::Start(pos + len))?;
+                seek_to(r, pos + len)?;
             }
         }
         pos += len;

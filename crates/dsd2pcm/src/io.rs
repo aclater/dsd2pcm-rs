@@ -5,7 +5,7 @@
 //! This is DSDIFF's native order; the DSF reader and writer reverse bits as needed.
 
 use crate::error::{format_err, Result};
-use std::io::Read;
+use std::io::{Read, Seek};
 
 /// Largest number of bytes per channel one `DsdRead::read_bytes` call returns (larger
 /// requests are reduced), which bounds the reader's buffer.
@@ -40,7 +40,8 @@ pub trait DsdRead {
     /// Appends up to about `max_bytes` bytes per channel (MSB-first) to `out[ch]`.
     /// Returns the number of bytes appended per channel; 0 means end of stream.
     /// Every channel receives the same count. The final byte may hold padding bits
-    /// beyond [`DsdInfo::samples`].
+    /// beyond [`DsdInfo::samples`] (the DSF reader sets them to the idle pattern `0x69`'s
+    /// bits).
     fn read_bytes(&mut self, max_bytes: usize, out: &mut [Vec<u8>]) -> Result<usize>;
     /// Raw metadata block (an ID3v2 tag in DSF) to carry over to the output, if any.
     fn metadata(&self) -> Option<&[u8]> {
@@ -95,6 +96,30 @@ pub(crate) fn skip<R: Read>(r: &mut R, n: u64) -> Result<()> {
     }
     Ok(())
 }
+
+/// Moves forward to byte `target` by reading when it is at most this far ahead.
+const SKIP_BY_READ: u64 = 64 << 10;
+
+/// Moves to byte `target` of a chunk list without discarding a reader's buffer: a short
+/// forward move reads through the bytes, anything else uses [`Seek::seek_relative`], which
+/// `std::io::BufReader` serves from its buffer when the target is inside it. (A plain
+/// `seek` empties the buffer, so walking many small chunks would refill a large buffer
+/// once per chunk.)
+pub(crate) fn seek_to<R: Read + Seek>(r: &mut R, target: u64) -> Result<()> {
+    let cur = r.stream_position()?;
+    if target >= cur && target - cur <= SKIP_BY_READ {
+        // A short read means the end of the file; the caller's next read reports it.
+        std::io::copy(&mut r.by_ref().take(target - cur), &mut std::io::sink())?;
+        return Ok(());
+    }
+    let delta = i64::try_from(i128::from(target) - i128::from(cur))
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    r.seek_relative(delta)?;
+    Ok(())
+}
+
+/// Most chunks a reader walks while looking for the audio data.
+pub(crate) const MAX_CHUNKS: usize = 4096;
 
 /// Checks that a DSD rate is a multiple of 44.1 kHz or 48 kHz between DSD64 and DSD1024.
 pub(crate) fn check_dsd_rate(rate: u32) -> Result<()> {

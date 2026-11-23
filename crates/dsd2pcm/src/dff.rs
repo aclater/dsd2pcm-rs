@@ -7,7 +7,9 @@
 //! chunks are padded to an even length. DST-compressed files are rejected.
 
 use crate::error::{format_err, unsupported, Result};
-use crate::io::{check_dsd_rate, read_exact_arr, skip, DsdInfo, DsdRead, DsdWrite};
+use crate::io::{
+    check_dsd_rate, read_exact_arr, seek_to, skip, DsdInfo, DsdRead, DsdWrite, MAX_CHUNKS,
+};
 use std::io::{Read, Seek, SeekFrom, Write};
 
 fn be_u64(b: &[u8; 12]) -> u64 {
@@ -43,7 +45,12 @@ impl<R: Read + Seek> DffReader<R> {
         let mut rate = None;
         let mut channels = None;
         let mut have_cmpr = false;
+        let mut chunks = 0;
         loop {
+            if chunks == MAX_CHUNKS {
+                return format_err("DSDIFF file has too many chunks");
+            }
+            chunks += 1;
             if pos + 12 > form_end {
                 return format_err("DSDIFF file has no 'DSD ' audio chunk");
             }
@@ -67,12 +74,15 @@ impl<R: Read + Seek> DffReader<R> {
                     }
                     let len = end - body;
                     let per_ch = len / u64::from(ch);
+                    let Some(samples) = per_ch.checked_mul(8) else {
+                        return format_err("DSDIFF 'DSD ' chunk is too large");
+                    };
                     return Ok(DffReader {
                         r,
                         info: DsdInfo {
                             channels: ch,
                             sample_rate: rate,
-                            samples: per_ch * 8,
+                            samples,
                         },
                         remaining: per_ch,
                         buf: Vec::new(),
@@ -88,7 +98,12 @@ impl<R: Read + Seek> DffReader<R> {
                         return format_err("DSDIFF 'PROP' chunk is not of type 'SND '");
                     }
                     let mut p = body + 4;
+                    let mut subs = 0;
                     while p + 12 <= end {
+                        if subs == MAX_CHUNKS {
+                            return format_err("DSDIFF 'PROP' chunk has too many property chunks");
+                        }
+                        subs += 1;
                         let sc: [u8; 12] = read_exact_arr(&mut r)?;
                         let ssize = be_u64(&sc);
                         let sbody = p + 12;
@@ -143,9 +158,9 @@ impl<R: Read + Seek> DffReader<R> {
                             _ => skip(&mut r, ssize)?,
                         }
                         p = (send + (ssize & 1)).min(end);
-                        r.seek(SeekFrom::Start(p))?;
+                        seek_to(&mut r, p)?;
                     }
-                    r.seek(SeekFrom::Start(end))?;
+                    seek_to(&mut r, end)?;
                     pos = end;
                 }
                 b"FVER" => {
@@ -163,12 +178,12 @@ impl<R: Read + Seek> DffReader<R> {
                     let Some(end) = end else {
                         return format_err("DSDIFF chunk runs past the end of the file");
                     };
-                    r.seek(SeekFrom::Start(end))?;
+                    seek_to(&mut r, end)?;
                     pos = end;
                 }
             }
             if pos & 1 == 1 && pos < form_end {
-                r.seek(SeekFrom::Current(1))?;
+                r.seek_relative(1)?;
                 pos += 1;
             }
         }
