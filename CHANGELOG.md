@@ -24,6 +24,11 @@
   ([C interface](docs/c-api.md#checks)).
 - CI: a check that tracked files and commit identities hold no private names or addresses
   ([testing](docs/testing.md#private-names)).
+- Tests: golden SHA-256 hashes of whole output files (header and samples) from
+  `convert_file`, for mono, stereo and six-channel input, DSF channel types 5 to 7 and
+  DSDIFF files with speaker and numbered channel IDs, at every rate and cutoff and with
+  pysacd's filter, pinned to 0.1.2's files; the MSRV workflow also builds the tests with
+  Rust 1.85, which they need ([development](docs/development.md)).
 
 ### Changed
 
