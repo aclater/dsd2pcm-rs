@@ -1,1 +1,6 @@
-numpy==2.5.5
+# NumPy 2.5.5 for x86-64 Linux, CPython 3.12 to 3.15 (pip install --require-hashes).
+numpy==2.5.5 \
+    --hash=sha256:704d819265e5d1064d932968e9ee85fff2103ccc78c05b878c06943ba27b8507 \
+    --hash=sha256:824025655df929268bfe6b47ed91a00d14209a6f760847cf150be446829e1ce4 \
+    --hash=sha256:c48960d420e90cf305cb1fde0d4e6082cc90512cda87a9acf0b6e04e91cf4abe \
+    --hash=sha256:9c3e1ac3cd5d3329f4d38709ff4c21f0621bbe8779c094d6de8ec8347246fcdc

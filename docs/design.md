@@ -66,10 +66,10 @@ wherever ultrasonic content folds into the passband; the default's is about 110 
 with a very quiet source sets an audio-band floor near -128 dBFS
 ([PCM quality](pcm-quality.md#the-precise-filter)).
 
-The taps come from `tools/filters/design_precise.py` (NumPy, pinned in
+The taps come from `tools/filters/design_precise.py` (NumPy, hash-pinned in
 `tools/filters/requirements.txt`), which writes the tables deterministically and checks the
-committed ones (`--report` prints every stage's response and the largest partial sum of every
-plan).
+committed ones (`--check`, run in CI on x86-64; `--report` prints every stage's response
+and the largest partial sum of every plan).
 
 - **Why cascades.** The exactness proof needs every partial sum below 2^53. With samples on
   the 2^26 grid, a stage's taps can carry about 52 - 26 - log2(sum of the gains) bits, about
@@ -105,11 +105,21 @@ plan).
   0.7.0's `design.rs`, see PROVENANCE.md), rounded to integers summing exactly to 2^q, then
   improved by a greedy integer search that moves one tap pair at a time while the largest
   stopband error falls and the passband stays within its ripple. Every stage's passband
-  ripple is at most 1e-4 (linear), so the composite stays within +-0.0012 dB.
-- **Proof and tests.** `exact.rs` proves every plan as for the default (the largest partial
-  sum is 2^52.95, for 352.8 kHz with the 30 kHz filter), so FMA and the lanes stay exact;
+  ripple is at most 1e-4 (linear). The composite's largest deviation from its DC gain to
+  20 kHz is ±0.0019 dB (±0.0022 dB at 352.8 kHz, ±0.0016 dB `wide`); the default's is
+  ±0.0037 to ±0.0040 dB.
+- **Proof and tests.** `exact.rs` proves every plan as for the default, so FMA and the lanes
+  stay exact. The proof's bound is a worst case: every input at its own bound with signs
+  matched to the taps. Its largest partial sums are 2^52.95 (352.8 kHz with the 30 kHz
+  filter, the final P), 2^52.59 (the same at 40 kHz) and 2^52.49 (`wide` at 352.8 kHz, the
+  first F40), under the 2^53 limit by 0.05 to 0.5 bit; a table change that crosses it fails
+  `sums_are_exact`. The sums any bit stream can actually reach, from the composite taps,
+  are about 3 bits lower (2^49.6 at most for the stages up to the sharp filters);
   `plans_match_reference` checks every plan of both filters, at every SIMD level, against a
-  direct computation of its definition in 128-bit integers; `lanes_match_ordered` and the
+  direct computation of its definition in 128-bit integers; `precise_plans_match_the_design`
+  writes the precise plans out as in the table above (taps by table, scale, order), checks
+  the plans against them and runs the literal plans through that computation against the
+  ordered and the lanes paths; `lanes_match_ordered` and the
   S1 table tests cover the new tables; golden hashes pin the output at every level.
 - **Cost.** More taps per output than the default: see [performance](performance.md) and
   [PCM quality](pcm-quality.md#the-precise-filter) for the measured CPU time.

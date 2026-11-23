@@ -5,12 +5,13 @@
 """Designs the taps of the `precise` filter (`Filter::Precise`) and writes
 crates/dsd2pcm/src/decimator/tables_precise.rs.
 
-    python3 tools/filters/design_precise.py            # check the committed tables
+    python3 tools/filters/design_precise.py --check    # check the committed tables (default)
     python3 tools/filters/design_precise.py --write    # rewrite them
     python3 tools/filters/design_precise.py --report   # print every stage's response
 
-Requirements: tools/filters/requirements.txt (NumPy only). The output was generated on
-x86-64 Linux with the pinned NumPy; the check compares the tables exactly.
+Requirements: tools/filters/requirements.txt (NumPy only, hash-pinned). The output was
+generated on x86-64 Linux with the pinned NumPy (CPython 3.15; CI checks it with 3.12); the
+check compares the tables exactly.
 
 Method (see docs/design.md, "The precise filter"):
 
@@ -455,6 +456,7 @@ def tables_rs(t):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--check", action="store_true", help="check the committed tables (the default)")
     ap.add_argument("--write", action="store_true")
     ap.add_argument("--report", action="store_true")
     a = ap.parse_args()

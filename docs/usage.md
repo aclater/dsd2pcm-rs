@@ -55,7 +55,7 @@ Options: `--gain DB` (-120 to +24, default 0), `--single-thread`, `--filter prec
 `--filter precise` (`Filter::Precise`, `DSD2PCM_FILTER_PRECISE` in C) uses the precise
 filter: the same cutoffs, rates, exact integer arithmetic, centring and rounding as the
 default, with at least 150 dB of stopband wherever ultrasonic content would fold into the
-passband (the default: about 110 dB) and half the passband ripple. With very quiet sources
+passband (the default: about 110 dB) and about half the passband ripple. With very quiet sources
 it lowers the audio-band floor from about -128 dBFS to the 24-bit output's own, about
 -150 dBFS. It takes about twice the CPU time of the default and its output bytes differ
 from scarletbook-pcm's ([PCM quality](pcm-quality.md#the-precise-filter)).

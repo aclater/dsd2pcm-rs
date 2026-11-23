@@ -1230,6 +1230,122 @@ mod tests {
         }
     }
 
+    /// The precise plans written out from `docs/design.md`, independently of
+    /// `precise_ops`: S1's taps, and per stage its kind, taps (by table) and the power of two
+    /// it scales by (taps scaled by 2^22, F80 by 2^21; a stage on S1's 2^29 grid scales by 3
+    /// more to return to 2^26).
+    fn precise_literal(rate: PcmRate, cutoff: Cutoff) -> (&'static [i32], Vec<Op>) {
+        use tables_precise as t;
+        let s = |h: &[i32], e: i32| Sym::new(h, pow2(-e));
+        let f = || {
+            if cutoff == Cutoff::Low {
+                &t::F30[..]
+            } else {
+                &t::F40[..]
+            }
+        };
+        match (cutoff, rate) {
+            (Cutoff::Wide, PcmRate::Hz176400) => (
+                &t::S1_WIDE,
+                vec![Op::Fir1(s(&t::F80, 24)), Op::Dec2(s(&t::F80, 21))],
+            ),
+            (Cutoff::Wide, _) => (
+                &t::S1_WIDE,
+                vec![Op::Fir1(s(&t::F40, 25)), Op::Fir1(s(&t::F40, 22))],
+            ),
+            (_, PcmRate::Hz88200) => (
+                &t::S1,
+                vec![
+                    Op::Fir1(s(&t::P, 25)),
+                    Op::Dec2(s(&t::HB, 22)),
+                    Op::Fir1(s(f(), 22)),
+                    Op::Dec2(s(f(), 22)),
+                ],
+            ),
+            (_, PcmRate::Hz176400) => (
+                &t::S1,
+                vec![
+                    Op::Fir1(s(&t::P, 25)),
+                    Op::Dec2(s(&t::HB, 22)),
+                    Op::Fir1(s(f(), 22)),
+                    Op::Fir1(s(f(), 22)),
+                ],
+            ),
+            (_, PcmRate::Hz352800) => (
+                &t::S1,
+                vec![
+                    Op::Fir1(s(&t::P, 25)),
+                    Op::Dec2(s(&t::HB, 22)),
+                    Op::Fir1(s(f(), 22)),
+                    Op::Fir1(s(f(), 22)),
+                    Op::Interp2(s(&t::HB, 22)),
+                    Op::Fir1(s(&t::P, 22)),
+                ],
+            ),
+        }
+    }
+
+    /// The precise plans are the ones `docs/design.md` describes ([`precise_literal`]):
+    /// the same S1, stage kinds, taps and scales; and a plan built from the literal stages
+    /// gives, through the definitions ([`reference`]), the samples of the real plan, in
+    /// ordered passes and in lanes (a pass of `LANES_MIN` outputs and more) at every level.
+    #[test]
+    fn precise_plans_match_the_design() {
+        let mut seed = 0xD1B5_4A32_D192_ED03u64;
+        let src: Vec<u8> = (0..20_000)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                seed as u8
+            })
+            .collect();
+        for (rate, cutoff) in ALL {
+            let (half, ops) = precise_literal(rate, cutoff);
+            let plan = Plan::with_design(rate, cutoff, Design::Precise).unwrap();
+            assert!(S1Kind::of(Design::Precise, cutoff).half() == half);
+            assert_eq!(plan.ops.len(), ops.len(), "{rate:?} {cutoff:?}");
+            for (a, b) in plan.ops.iter().zip(&ops) {
+                assert_eq!(
+                    std::mem::discriminant(a),
+                    std::mem::discriminant(b),
+                    "{rate:?} {cutoff:?}"
+                );
+                let (a, b) = (sym(a), sym(b));
+                assert!(
+                    a.full == b.full && a.scale == b.scale,
+                    "{rate:?} {cutoff:?}"
+                );
+            }
+            let mut literal = plan.clone();
+            literal.ops = ops;
+            let k = plan.bytes_per_output();
+            for level in SimdLevel::available() {
+                let plan =
+                    with_simd_level(level, || Plan::with_design(rate, cutoff, Design::Precise))
+                        .unwrap()
+                        .unwrap();
+                for (o0, n, lanes) in [((-64 / k) & !1, 1000usize, false), (0, LANES_MIN, true)] {
+                    let mut p = plan.clone();
+                    if lanes {
+                        // The lanes path, with and without the paired tables where the
+                        // level has none.
+                        p.lanes = Some(p.lanes.flatten());
+                    } else {
+                        p.lanes = None;
+                    }
+                    let n = n.min(((src.len() as i64 / k) as usize) & !1);
+                    assert!(!lanes || n >= p.lanes_min, "the lanes path is taken");
+                    let mut sc = Scratch::default();
+                    p.pass_run(&src, 0, o0, n, &mut sc);
+                    let want = reference(&literal, half, &src, literal.ops.len(), o0, n);
+                    let got: Vec<i128> = sc.a[..n].iter().map(|&v| v as i128).collect();
+                    assert!(got == want, "{level:?} {rate:?} {cutoff:?} lanes {lanes}");
+                }
+            }
+        }
+    }
+
     /// A stage whose sums could exceed 2^53 is not fused, nor is any stage after it.
     #[test]
     fn unproven_stages_are_not_fused() {
