@@ -25,12 +25,17 @@ yanked from crates.io.
 ### Changed
 
 - Output files (`convert_file`, `convert_file_with`, `dsd2pcm_convert_file` and the tool):
-  the output is written to a temporary file in its directory and renamed into place, so
-  that directory must be writable. A symbolic link at the output path is replaced, not
-  followed; other hard links to an existing output keep its old content. The new file gets
-  the permission bits of the file it replaces (not its owner, ACLs or extended
-  attributes). Outputs that are not regular files (devices, FIFOs, directories) are
-  refused. The tool cancels cleanly on SIGINT and SIGTERM, removing its temporary file.
+  the output is written to `.dsd2pcm-PID-N.tmp` in the output's directory and renamed into
+  place. A SIGKILL or power loss may leave that file behind; it is safe to delete.
+- A symbolic link at the output path is replaced, not followed.
+- A replaced file keeps its permission bits, but not its owner, ACLs or extended
+  attributes.
+- These outputs are now refused: a directory or a path ending in a slash; a device, FIFO or
+  socket (including `/dev/null`); an existing file that is not writable; an output whose
+  directory is not writable; a hard link to the input (Unix).
+- The command-line tool exits with 130 on SIGINT and 143 on SIGTERM and leaves no file.
+- The FLAC reader allows 4096 metadata blocks including STREAMINFO (4097 before).
+- New dependency of the command-line tool: `signal-hook`.
 
 ### Fixed
 
