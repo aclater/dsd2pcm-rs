@@ -72,7 +72,7 @@ fn main() {
                 };
                 let r = DsfReader::new(Cursor::new(dsf.clone())).unwrap();
                 // Sized up front, as scarletbook-pcm's output buffer is.
-                let size = 44 + n * 8 / rate.decimation() as usize * ch * 3;
+                let size = 68 + n * 8 / rate.decimation() as usize * ch * 3;
                 let mut wav = WavWriter::new(
                     Cursor::new(Vec::with_capacity(size)),
                     WavFormat::I24,
@@ -82,7 +82,10 @@ fn main() {
                 .unwrap();
                 dsd64_to_pcm(Box::new(r), &mut wav, &opts).unwrap();
                 wav.finish().unwrap();
-                wav.into_inner().into_inner()
+                let off = wav.data_offset() as usize;
+                let mut v = wav.into_inner().into_inner();
+                v.drain(..off);
+                v
             };
             let theirs = || {
                 let sr = sb::PcmRate::from_hz(rate.hz()).unwrap();
@@ -100,10 +103,7 @@ fn main() {
             let (t0, b) = best(theirs);
             let (t1, a1) = best(|| ours(false));
             let (t2, a2) = best(|| ours(true));
-            assert!(
-                a1[44..] == b && a2[44..] == b,
-                "output differs: {rate:?} {cutoff:?}"
-            );
+            assert!(a1 == b && a2 == b, "output differs: {rate:?} {cutoff:?}");
             println!(
                 "{:<7} {:<9} {:>15.1} {:>14.1} {:>13.1}",
                 rate.hz(),

@@ -55,8 +55,9 @@ fn ours(chans: &[Vec<u8>], opts: &PcmOptions) -> (Vec<u8>, Vec<u64>) {
     .unwrap();
     let rep = dsd64_to_pcm(Box::new(r), &mut wav, opts).unwrap();
     wav.finish().unwrap();
+    let off = wav.data_offset() as usize;
     let bytes = wav.into_inner().into_inner();
-    (bytes[44..].to_vec(), rep.clipped)
+    (bytes[off..].to_vec(), rep.clipped)
 }
 
 fn theirs(chans: &[Vec<u8>], rate: PcmRate, cutoff: Cutoff, gain_db: f64) -> (Vec<u8>, Vec<u64>) {

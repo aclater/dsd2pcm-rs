@@ -32,7 +32,9 @@ Speed against scarletbook-pcm 0.7.0, including where it is still slower: [docs/p
   to the end of the file; if other chunks follow it, the file is rejected. FLAC and WAV of
   the same samples read identically. FLAC reading is the cargo feature `flac` (on by
   default; `--no-default-features` builds without it and its one dependency, `claxon`).
-- Writes DSF, DSDIFF and WAV.
+- Writes DSF, DSDIFF and WAV. WAV files with more than 16 bits, float samples or more than two
+  channels use `WAVE_FORMAT_EXTENSIBLE` with the channel mask of the channel count (SACD
+  order: FL FR FC LFE BL BR).
 - Converts DSD64 to 24-bit PCM at 88.2, 176.4 or 352.8 kHz with one of three linear-phase
   filters:
 

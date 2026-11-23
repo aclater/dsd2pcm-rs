@@ -112,8 +112,9 @@ fn file(area: &[u8], ch: usize, rate: PcmRate, gain: f64, threads: bool) -> (Vec
     opts.filter = Filter::Pysacd;
     let rep = dsd64_to_pcm(Box::new(r), &mut wav, &opts).unwrap();
     wav.finish().unwrap();
+    let off = wav.data_offset() as usize;
     (
-        unpack(&wav.into_inner().into_inner()[44..]),
+        unpack(&wav.into_inner().into_inner()[off..]),
         rep.clipped.iter().sum(),
     )
 }

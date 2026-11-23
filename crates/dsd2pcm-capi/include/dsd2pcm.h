@@ -41,7 +41,7 @@ template <typename T> static inline T dsd2pcm_init_() {
 // An operating-system I/O error.
 #define DSD2PCM_E_IO 3
 
-// The input is not a valid DSF, DFF or WAV file, or is truncated.
+// The input is not a valid DSF, DFF, WAV or FLAC file, or is truncated.
 #define DSD2PCM_E_FORMAT 4
 
 // The input or a setting is valid but not supported by this version.

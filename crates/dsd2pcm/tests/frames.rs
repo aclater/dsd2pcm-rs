@@ -266,7 +266,8 @@ fn whole_file(area: &[u8], ch: usize, rate: PcmRate, cutoff: Cutoff, gain_db: f6
     };
     dsd64_to_pcm(Box::new(r), &mut wav, &opts).unwrap();
     wav.finish().unwrap();
-    wav.into_inner().into_inner()[44..].to_vec()
+    let off = wav.data_offset() as usize;
+    wav.into_inner().into_inner()[off..].to_vec()
 }
 
 /// Frame by frame with neighbours (`None` at the edges), runs of 4 with neighbours, and the

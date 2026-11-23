@@ -306,8 +306,8 @@ fn wav_samples(b: Vec<u8>) -> dsd2pcm::Result<Vec<Vec<f64>>> {
 
 /// Sets the `data` chunk size of a file from [`wav_i24`] (and of RIFF, as such encoders do).
 fn set_data_size(mut b: Vec<u8>, size: u32) -> Vec<u8> {
-    assert_eq!(&b[36..40], b"data");
-    b[40..44].copy_from_slice(&size.to_le_bytes());
+    let at = b.windows(4).position(|w| w == b"data").unwrap();
+    b[at + 4..at + 8].copy_from_slice(&size.to_le_bytes());
     b[4..8].copy_from_slice(&size.to_le_bytes());
     b
 }

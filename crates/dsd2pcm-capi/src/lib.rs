@@ -40,7 +40,7 @@ pub const DSD2PCM_E_NULL: c_int = 1;
 pub const DSD2PCM_E_INVALID_ARGUMENT: c_int = 2;
 /// An operating-system I/O error.
 pub const DSD2PCM_E_IO: c_int = 3;
-/// The input is not a valid DSF, DFF or WAV file, or is truncated.
+/// The input is not a valid DSF, DFF, WAV or FLAC file, or is truncated.
 pub const DSD2PCM_E_FORMAT: c_int = 4;
 /// The input or a setting is valid but not supported by this version.
 pub const DSD2PCM_E_UNSUPPORTED: c_int = 5;

@@ -246,13 +246,39 @@ impl<R: Read + Seek> PcmRead for WavReader<R> {
     }
 }
 
-/// WAV writer for interleaved sample bytes already in the target encoding: a 16-byte
-/// `fmt ` chunk with format tag 1 (integer PCM) or 3 (IEEE float).
+/// WAV writer for interleaved sample bytes already in the target encoding.
+///
+/// Mono and stereo 16-bit files get a 16-byte `fmt ` chunk (format tag 1). Everything else
+/// (more than 16 bits, floats, more than two channels) gets `WAVE_FORMAT_EXTENSIBLE`, as
+/// Microsoft's WAVE rules require, with the PCM or IEEE-float subtype and the channel mask
+/// of the channel count ([`channel_mask`]). Samples start at [`WavWriter::data_offset`].
 #[derive(Debug)]
 pub struct WavWriter<W: Write + Seek> {
     w: W,
     data_len: u64,
+    /// Offset of the data chunk's size field.
+    size_at: u64,
     finished: bool,
+}
+
+/// `KSDATAFORMAT_SUBTYPE_PCM` and `KSDATAFORMAT_SUBTYPE_IEEE_FLOAT` share these 14 bytes
+/// after their 2-byte format code.
+const SUBTYPE_TAIL: [u8; 14] = [
+    0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71,
+];
+
+/// The `WAVE_FORMAT_EXTENSIBLE` channel mask for `channels` channels in SACD order:
+/// mono FC; stereo FL FR; 3 FL FR FC; 4 FL FR BL BR; 5 FL FR FC BL BR; 6 FL FR FC LFE BL BR.
+pub fn channel_mask(channels: u16) -> u32 {
+    match channels {
+        1 => 0x4,
+        2 => 0x3,
+        3 => 0x7,
+        4 => 0x33,
+        5 => 0x37,
+        6 => 0x3F,
+        _ => 0,
+    }
 }
 
 impl<W: Write + Seek> WavWriter<W> {
@@ -267,24 +293,34 @@ impl<W: Write + Seek> WavWriter<W> {
         let byte_rate = rate
             .checked_mul(u32::from(channels) * u32::from(bs))
             .ok_or_else(|| crate::Error::InvalidArgument("WAV writer: rate too high".into()))?;
-        let tag: u16 = if format.is_float() { 3 } else { 1 };
-        let mut h = Vec::with_capacity(44);
+        let code: u16 = if format.is_float() { 3 } else { 1 };
+        let extensible = channels > 2 || bs > 2;
+        let mut h = Vec::with_capacity(68);
         h.extend_from_slice(b"RIFF");
         h.extend_from_slice(&0u32.to_le_bytes());
         h.extend_from_slice(b"WAVEfmt ");
-        h.extend_from_slice(&16u32.to_le_bytes());
-        h.extend_from_slice(&tag.to_le_bytes());
+        h.extend_from_slice(&(if extensible { 40u32 } else { 16 }).to_le_bytes());
+        h.extend_from_slice(&(if extensible { 0xFFFEu16 } else { code }).to_le_bytes());
         h.extend_from_slice(&channels.to_le_bytes());
         h.extend_from_slice(&rate.to_le_bytes());
         h.extend_from_slice(&byte_rate.to_le_bytes());
         h.extend_from_slice(&(channels * bs).to_le_bytes());
         h.extend_from_slice(&(bs * 8).to_le_bytes());
+        if extensible {
+            h.extend_from_slice(&22u16.to_le_bytes());
+            h.extend_from_slice(&(bs * 8).to_le_bytes());
+            h.extend_from_slice(&channel_mask(channels).to_le_bytes());
+            h.extend_from_slice(&code.to_le_bytes());
+            h.extend_from_slice(&SUBTYPE_TAIL);
+        }
         h.extend_from_slice(b"data");
+        let size_at = h.len() as u64;
         h.extend_from_slice(&0u32.to_le_bytes());
         w.write_all(&h)?;
         Ok(WavWriter {
             w,
             data_len: 0,
+            size_at,
             finished: false,
         })
     }
@@ -304,18 +340,23 @@ impl<W: Write + Seek> WavWriter<W> {
         if self.data_len % 2 == 1 {
             self.w.write_all(&[0])?;
         }
-        let riff = 36 + self.data_len + (self.data_len & 1);
+        let riff = self.size_at - 4 + self.data_len + (self.data_len & 1);
         if riff > u64::from(u32::MAX) {
             return unsupported("WAV output over 4 GiB (RF64 is not supported yet)");
         }
         self.w.seek(SeekFrom::Start(4))?;
         self.w.write_all(&(riff as u32).to_le_bytes())?;
-        self.w.seek(SeekFrom::Start(40))?;
+        self.w.seek(SeekFrom::Start(self.size_at))?;
         self.w.write_all(&(self.data_len as u32).to_le_bytes())?;
         self.w.seek(SeekFrom::End(0))?;
         self.w.flush()?;
         self.finished = true;
         Ok(())
+    }
+
+    /// Offset of the first sample byte in the file (44, or 68 with `WAVE_FORMAT_EXTENSIBLE`).
+    pub fn data_offset(&self) -> u64 {
+        self.size_at + 4
     }
 
     /// Returns the inner writer (after [`WavWriter::finish`]).
