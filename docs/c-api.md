@@ -9,12 +9,17 @@
 
 ## Rules
 
+- The header needs C99 or later (`stdint.h`, `//` comments, designated initialisers in the
+  `*_INIT` macros) or C++.
+
 - Every function that can fail returns an `int` status: `DSD2PCM_OK` (0) or a
   `DSD2PCM_E_*` code. `dsd2pcm_last_error()` gives the message of the last failure on the
-  calling thread (owned by the library, valid until the next failure on that thread);
-  `dsd2pcm_status_str()` names a code.
+  calling thread (owned by the library, valid until the next failure on that thread); it
+  starts with the kind of failure (for example `unsupported: ...`), so print it alone rather
+  than after `dsd2pcm_status_str()`, which names a code.
 - Every pointer is checked for NULL (`DSD2PCM_E_NULL`). A buffer always comes with its
-  length; a NULL buffer is allowed only with length 0 where the function says so.
+  length; a NULL buffer is allowed only with length 0 where the function says so. A
+  non-NULL pointer must be aligned for its type even with length 0.
 - Output buffers must not overlap each other or any input; the library checks and returns
   `DSD2PCM_E_INVALID_ARGUMENT`. On any error nothing is written to the output buffers and
   structs, and `dsd2pcm_convert_file` leaves an existing output file as it was.
@@ -85,7 +90,7 @@ opts.progress = progress;
 dsd2pcm_file_report report = DSD2PCM_FILE_REPORT_INIT;
 int rc = dsd2pcm_convert_file(argv[1], argv[2], &opts, &report);
 if (rc != DSD2PCM_OK)
-    fprintf(stderr, "dsd2pcm: %s: %s\n", dsd2pcm_status_str(rc), dsd2pcm_last_error());
+    fprintf(stderr, "dsd2pcm: %s\n", dsd2pcm_last_error());
 ```
 
 ## Frame runs
@@ -146,9 +151,19 @@ Both run without arguments.
   0.1.0 size (`DSD2PCM_E_INVALID_ARGUMENT`, before reading or writing anything), reads only
   the fields it knows from a larger struct (a newer header), and writes only
   `min(struct_size, its size)` bytes of an output struct.
-- 0.1.0 sizes on 64-bit platforms: `dsd2pcm_file_options` 48, `dsd2pcm_file_report` 88,
-  `dsd2pcm_frames_config` 32, `dsd2pcm_run` 80, `dsd2pcm_stats` 64 bytes (checked when the
-  library is built).
+- 0.1.0 sizes, fixed for ABI 1 whatever fields are appended later (checked when the
+  library is built, and by its tests):
+
+  | Struct | 64-bit | 32-bit x86 Linux (i686) | other 32-bit (8-byte aligned `uint64_t`, e.g. Arm) |
+  |---|---|---|---|
+  | `dsd2pcm_file_options` | 48 | 36 | 40 |
+  | `dsd2pcm_file_report` | 88 | 88 | 88 |
+  | `dsd2pcm_frames_config` | 32 | 28 | 32 |
+  | `dsd2pcm_run` | 80 | 44 | 48 |
+  | `dsd2pcm_stats` | 64 | 64 | 64 |
+
+  A struct from a caller built against an older header is read for its `struct_size` bytes
+  and the fields it lacks are taken as 0.
 
 ## Building from source
 

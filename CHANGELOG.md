@@ -25,6 +25,12 @@
   the input is refused on Unix, as the same path and symbolic links already were.
 - `WavWriter::write_raw` refuses data past the 4 GiB RIFF limit when it is written, not
   only at `finish`.
+- C interface: a struct from a caller built against an older header is read for its
+  `struct_size` bytes only, with the missing fields taken as 0, and the 0.1.0 sizes are
+  fixed per target layout (64-bit, i686, other 32-bit), so fields can be appended later
+  without refusing old callers. No change in behaviour today.
+- Docs: C interface rules (C99, alignment of zero-length buffers, 32-bit struct sizes, error
+  messages); identical output on x86 assumes SSE2 floating point.
 - 32-bit targets: an output count past 2^32 samples per channel no longer panics in
   `dsd64_to_pcm_with`.
 

@@ -1200,3 +1200,110 @@ fn struct_size_is_checked_for_files() {
     assert_eq!(rep.extra, 0xDEAD_BEEF);
     assert_eq!(rep.known.out_samples, (2 * FPC * 8 / 32) as u64);
 }
+
+/// The 0.1.0 sizes are pinned per target layout, whatever fields are appended later.
+#[test]
+fn v1_sizes_are_pinned() {
+    let v1 = [
+        dsd2pcm_file_options::V1_SIZE,
+        dsd2pcm_file_report::V1_SIZE,
+        dsd2pcm_frames_config::V1_SIZE,
+        dsd2pcm_run::V1_SIZE,
+        dsd2pcm_stats::V1_SIZE,
+    ];
+    let want = match (size_of::<usize>(), std::mem::align_of::<u64>()) {
+        (8, _) => [48, 88, 32, 80, 64],
+        (4, 4) => [36, 88, 28, 44, 64],
+        _ => [40, 88, 32, 48, 64],
+    };
+    assert_eq!(v1, want);
+}
+
+/// A later version of a struct: 0.1.0's fields, then an appended one.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LaterStruct {
+    struct_size: u32,
+    a: u32,
+    b: u64,
+    appended: u64,
+}
+
+impl Versioned for LaterStruct {
+    const NAME: &'static str = "LaterStruct";
+    const V1_SIZE: usize = 16;
+    fn set_struct_size(&mut self, size: u32) {
+        self.struct_size = size;
+    }
+}
+
+/// A caller built against the 0.1.0 header passes the shorter struct: only its bytes are
+/// read (the buffer is exactly that long, so an over-read shows under Miri and ASan) and
+/// the appended field reads as 0; written back, only its bytes are written. A caller with
+/// a newer, longer struct gets our fields read and written and the rest left alone.
+#[test]
+fn versioned_structs_old_and_new_callers() {
+    // Old caller: 16 bytes.
+    let mut old = vec![0u8; 16].into_boxed_slice();
+    old[..4].copy_from_slice(&16u32.to_ne_bytes());
+    old[4..8].copy_from_slice(&7u32.to_ne_bytes());
+    old[8..16].copy_from_slice(&9u64.to_ne_bytes());
+    let p = old.as_mut_ptr().cast::<LaterStruct>();
+    // SAFETY (test): `p` is readable for its struct_size (16) bytes.
+    let v = unsafe { read_struct(p.cast_const(), "old") }.ok().unwrap();
+    assert_eq!(
+        v,
+        LaterStruct {
+            struct_size: 16,
+            a: 7,
+            b: 9,
+            appended: 0
+        }
+    );
+    // SAFETY (test): `p` starts with a readable u32.
+    let n = unsafe { out_struct(p, "old") }.ok().unwrap().unwrap();
+    assert_eq!(n, 16);
+    let w = LaterStruct {
+        struct_size: 0,
+        a: 1,
+        b: 2,
+        appended: 3,
+    };
+    // SAFETY (test): `p` is writable for 16 bytes and no reference to it is live.
+    unsafe { write_struct(p, w, n) };
+    assert_eq!(&old[..4], &16u32.to_ne_bytes());
+    assert_eq!(&old[4..8], &1u32.to_ne_bytes());
+    assert_eq!(&old[8..16], &2u64.to_ne_bytes());
+    // Too short.
+    old[..4].copy_from_slice(&15u32.to_ne_bytes());
+    // SAFETY (test): as above.
+    assert!(unsafe { read_struct(old.as_ptr().cast::<LaterStruct>(), "old") }.is_err());
+
+    // Newer caller: our 24 bytes and 8 more.
+    #[repr(C)]
+    struct Newest {
+        known: LaterStruct,
+        extra: u64,
+    }
+    let mut new = Newest {
+        known: LaterStruct {
+            struct_size: size_of::<Newest>() as u32,
+            a: 4,
+            b: 5,
+            appended: 6,
+        },
+        extra: 0xDEAD_BEEF,
+    };
+    let p = (&mut new as *mut Newest).cast::<LaterStruct>();
+    // SAFETY (test): `p` is readable for its struct_size bytes.
+    let v = unsafe { read_struct(p.cast_const(), "new") }.ok().unwrap();
+    assert_eq!((v.a, v.b, v.appended), (4, 5, 6));
+    // SAFETY (test): as above.
+    let n = unsafe { out_struct(p, "new") }.ok().unwrap().unwrap();
+    assert_eq!(n, size_of::<LaterStruct>());
+    // SAFETY (test): writable for n bytes; no reference to `new` is live.
+    unsafe { write_struct(p, w, n) };
+    assert_eq!(new.known.struct_size as usize, size_of::<Newest>());
+    assert_eq!((new.known.a, new.known.appended), (1, 3));
+    assert_eq!(new.extra, 0xDEAD_BEEF);
+}

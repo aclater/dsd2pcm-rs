@@ -930,8 +930,9 @@ mod tests {
                 assert!(sym(op).fused, "{rate:?} {cutoff:?}: {op:?} not fused");
                 x = out;
             }
-            // The gain multiply (at most +24 dB, below 16) of an integer output is exact
-            // too; the quantiser rounds it.
+            // The gain multiply (at most +24 dB, below 16) keeps an integer output below
+            // 2^53: one correctly rounded `f64` product, the same at every level (not exact
+            // unless the gain is a power of two); the quantiser then rounds it.
             assert!(16 * x < exact::LIMIT);
         }
         // The paired S1 tables of the lanes: no half of a sum reaches 2^32, so the halves
