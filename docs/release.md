@@ -107,7 +107,11 @@ commit SHA; checkouts keep no credentials.
 
      The API key needs the Developer role (enough for `notarytool`). Environment secrets
      reach only jobs that name the environment, and only on `v*` tags (the deployment rule
-     above); pull requests and manual runs never see them.
+     above); pull requests and manual runs never see them. Never add these as repository
+     secrets: a manual run from any branch could then read them.
+   - Repository variable (Settings, Secrets and variables, Actions, Variables) `MACOS_TEAM_ID`:
+     the Apple team ID of the Developer ID certificate (the 10 characters in brackets in
+     `MACOS_SIGN_IDENTITY`). The signature checks accept only that team. It is not secret.
 2. **Tag ruleset** (Settings, Rules, Rulesets, New tag ruleset): target `v*`; restrict
    creations to the Orchestrator (bypass list), restrict updates, restrict deletions.
    Release tags are not signed: this ruleset and the build provenance attestations are what
