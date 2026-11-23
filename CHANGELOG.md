@@ -4,30 +4,6 @@
 
 ### Added
 
-- C library: CI, `crates/dsd2pcm-capi/check.sh` and the release archive checks verify that
-  the libraries hold no claxon (FLAC decoder) symbols, by their symbol tables (`nm`), and
-  CI checks that the check catches a library built with `--features flac`
-  ([C interface](docs/c-api.md#checks)).
-- CI: a check that tracked files and commit identities hold no private names or addresses
-  ([testing](docs/testing.md#private-names)).
-### Fixed
-
-- Whole-file conversion on all cores: when the system refuses to start a worker thread
-  (its thread or memory limit), the conversion goes on with the threads that did start, at
-  least the calling one, with the same output; before, it panicked (in the C interface,
-  `DSD2PCM_E_INTERNAL`). The calling thread now converts too, so a conversion starts one
-  thread fewer for the same parallelism ([design](docs/design.md#frame-runs-threading-and-sharing)).
-### Fixed
-
-- Command line: a file name or option value that is not valid UTF-8 (possible on Linux and
-  other Unix systems) no longer ends the tool with a panic. File names are passed to the
-  system as they are; an option value that is not UTF-8 is a usage error (exit status 2).
-
-### Changed
-
-- Command line: `--` ends the options, so a file whose name starts with `-` can be given
-  (`dsd2pcm -- -take1.dsf out.wav`). An unknown argument that starts with `-` is now a usage
-  error; before, one that did not start with `--` was taken as a file name.
 - No-clobber output: the tool's `-n` / `--no-clobber`, the library's `convert_file_to` with
   `OutputOptions { no_clobber, .. }`, and the C interface's
   `dsd2pcm_file_options.no_clobber` (appended; callers built against the 0.1.0 header keep
@@ -42,6 +18,29 @@
   `DsfWriter::set_channel_mask`, `dsf::channel_mask_for_type` and
   `dsf::channel_type_for_mask` ([usage](docs/usage.md#formats)). DSD to WAV conversion
   still writes the mask of the channel count, so output files are unchanged.
+- C library: CI, `crates/dsd2pcm-capi/check.sh` and the release archive checks verify that
+  the libraries hold no claxon (FLAC decoder) symbols, by their symbol tables (`nm`), and
+  CI checks that the check catches a library built with `--features flac`
+  ([C interface](docs/c-api.md#checks)).
+- CI: a check that tracked files and commit identities hold no private names or addresses
+  ([testing](docs/testing.md#private-names)).
+
+### Changed
+
+- Command line: `--` ends the options, so a file whose name starts with `-` can be given
+  (`dsd2pcm -- -take1.dsf out.wav`). An unknown argument that starts with `-` is now a usage
+  error; before, one that did not start with `--` was taken as a file name.
+
+### Fixed
+
+- Command line: a file name or option value that is not valid UTF-8 (possible on Linux and
+  other Unix systems) no longer ends the tool with a panic. File names are passed to the
+  system as they are; an option value that is not UTF-8 is a usage error (exit status 2).
+- Whole-file conversion on all cores: when the system refuses to start a worker thread
+  (its thread or memory limit), the conversion goes on with the threads that did start, at
+  least the calling one, with the same output; before, it panicked (in the C interface,
+  `DSD2PCM_E_INTERNAL`). The calling thread now converts too, so a conversion starts one
+  thread fewer for the same parallelism ([design](docs/design.md#frame-runs-threading-and-sharing)).
 
 ## 0.1.2 (2026-11-23)
 
