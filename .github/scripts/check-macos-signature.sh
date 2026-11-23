@@ -10,12 +10,15 @@
 # - Apple's notarisation ticket for it is found online (codesign --check-notarization with
 #   the requirement `notarized`; a bare Mach-O file has no stapled ticket). The lookup is
 #   retried a few times, as a fresh ticket can take a moment to appear;
-# - Gatekeeper (spctl) accepts it.
+# - Gatekeeper (spctl) accepts it;
+# - the signing team is EXPECTED_TEAM_ID (the repository variable MACOS_TEAM_ID), so that
+#   only this project's Developer ID passes, not any valid one. Required.
 # Needs no credentials. Exits non-zero on the first failure.
 set -euo pipefail
 
 f=$1
 fail() { echo "::error::$f: $*"; exit 1; }
+[[ -n "${EXPECTED_TEAM_ID:-}" ]] || fail "EXPECTED_TEAM_ID is not set (repository variable MACOS_TEAM_ID)"
 
 codesign --verify --strict --verbose=2 "$f"
 info=$(codesign --display --verbose=4 "$f" 2>&1)
@@ -23,6 +26,8 @@ echo "$info" | grep -E '^(Identifier|Format|CodeDirectory|Authority|Timestamp|Te
 grep -q '^Authority=Developer ID Application: ' <<< "$info" || fail "not signed with a Developer ID Application certificate"
 grep -Eq '^CodeDirectory .*flags=0x[0-9a-f]+\([^)]*runtime' <<< "$info" || fail "no hardened runtime"
 grep -q '^Timestamp=' <<< "$info" || fail "no secure timestamp"
+team=$(sed -n 's/^TeamIdentifier=//p' <<< "$info")
+[[ "$team" == "$EXPECTED_TEAM_ID" ]] || fail "signed by team '$team', expected '$EXPECTED_TEAM_ID'"
 
 ok=false
 for attempt in 1 2 3 4 5 6; do

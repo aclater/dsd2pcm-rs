@@ -359,6 +359,8 @@ jobs:
       # notarisation ticket is found online (a few tries: it can take a moment to appear).
       - name: Signed and notarised
         if: env.SIGN == 'true'
+        env:
+          EXPECTED_TEAM_ID: ${{ vars.MACOS_TEAM_ID }}
         run: |
           for f in "$RUNNER_TEMP/out/dsd2pcm" "$RUNNER_TEMP/out/libdsd2pcm.dylib"; do
             .github/scripts/check-macos-signature.sh "$f"
@@ -426,6 +428,8 @@ jobs:
           echo "PKG=dsd2pcm-$VERSION-$NAME" >> "$GITHUB_ENV"
           echo "CPKG=libdsd2pcm-$VERSION-$NAME" >> "$GITHUB_ENV"
       - name: Signed and notarised (required on a tag)
+        env:
+          EXPECTED_TEAM_ID: ${{ vars.MACOS_TEAM_ID }}
         run: |
           abi=$(sed -n 's/^#define DSD2PCM_ABI_VERSION \([0-9]*\).*/\1/p' crates/dsd2pcm-capi/include/dsd2pcm.h)
           files=("$RUNNER_TEMP/check/$PKG/dsd2pcm" "$RUNNER_TEMP/check/$CPKG/lib/libdsd2pcm.$abi.dylib")
