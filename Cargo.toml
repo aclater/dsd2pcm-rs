@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/dsd2pcm", "crates/dsd2pcm-capi", "crates/dsd2pcm-cli"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.83"
@@ -15,7 +15,7 @@ readme = "README.md"
 # Exact: the crates of a release are published together, at one version
 # (.github/scripts/release-preflight.sh checks it). Default features off: each
 # crate turns on the ones it forwards (flac).
-dsd2pcm = { path = "crates/dsd2pcm", version = "=0.1.0", default-features = false }
+dsd2pcm = { path = "crates/dsd2pcm", version = "=0.1.1", default-features = false }
 
 [profile.release]
 codegen-units = 1
