@@ -15,6 +15,10 @@ checked against the file length, so nothing in it is allocated or parsed. `claxo
 Apache-2.0) is handed a minimal stream of `fLaC`, STREAMINFO marked last, and the file from
 the first audio frame, so it only decodes frames; its metadata parsers (Vorbis comment and
 application blocks, the code with its `set_len` on uninitialised buffers) never run.
+claxon's byte reader indexes its buffer unchecked with the count `read` returns, so every
+read from the caller's reader passes through an adapter that caps that count at the buffer
+length; an over-reporting `Read` gives errors or wrong samples, never out-of-bounds access
+(`lying_reader_is_safe`, also run under Miri). claxon is pinned to `=0.4.3`.
 
 STREAMINFO must declare 1 to 6 channels and 8, 12, 16, 20 or 24 bits (claxon does not
 decode 32-bit frames: `Unsupported`). Each decoded block is checked against STREAMINFO: same
@@ -26,7 +30,9 @@ most 2^20 frames per call.
 
 Length: STREAMINFO's total. A total of 0 (unknown, as written by streaming encoders) is the
 FLAC form of WAV's read-to-end rule: the reader decodes the stream once to count the frames,
-then restarts at the first frame; a stream without frames is an error. A stream that ends
+then restarts at the first frame; a stream without frames is an error. If that pass fails
+and the file ends in an ID3v1 tag (`TAG` and 125 bytes), the frames are counted again
+without those 128 bytes. A stream that ends
 before its declared length is an error; frames after it are ignored. Frame CRCs are checked
 (claxon skips the check only in `cfg(fuzzing)` builds).
 

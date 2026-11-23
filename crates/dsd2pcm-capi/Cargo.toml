@@ -18,3 +18,7 @@ doc = false
 
 [dependencies]
 dsd2pcm.workspace = true
+
+[features]
+default = ["flac"]
+flac = ["dsd2pcm/flac"]

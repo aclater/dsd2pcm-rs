@@ -324,3 +324,64 @@ fn malformed_inputs_do_not_panic() {
         }
     }
 }
+
+/// A reader that claims to have read 100 bytes more than the buffer holds.
+struct Liar(Cursor<Vec<u8>>);
+
+impl std::io::Read for Liar {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.0.read(buf)?;
+        Ok(if n > 0 { buf.len() + 100 } else { 0 })
+    }
+}
+
+impl std::io::Seek for Liar {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.0.seek(pos)
+    }
+}
+
+/// An over-reporting `Read` gives an error or wrong samples, never out-of-bounds access
+/// (claxon trusts the count). Run under Miri too:
+/// `cargo +nightly miri test -p dsd2pcm --test flac lying_reader`.
+#[test]
+fn lying_reader_is_safe() {
+    static F: &[u8] = include_bytes!("data/flac/s8_1ch_8000.flac");
+    let mut unknown = F.to_vec();
+    set_total(&mut unknown, 0);
+    for bytes in [F.to_vec(), unknown] {
+        if let Ok(mut r) = FlacReader::new(Liar(Cursor::new(bytes))) {
+            let mut o = vec![Vec::new(); usize::from(r.info().channels)];
+            while let Ok(n) = r.read_frames(500, &mut o) {
+                if n == 0 {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// With an unknown length, a trailing ID3v1 tag is not taken for a frame.
+#[test]
+fn trailing_id3v1_tag() {
+    let mut tag = b"TAG".to_vec();
+    tag.resize(128, b'x');
+    for unknown in [false, true] {
+        let mut f = fixture("s16_2ch_44100.flac");
+        if unknown {
+            set_total(&mut f, 0);
+        }
+        f.extend_from_slice(&tag);
+        let mut r = FlacReader::new(Cursor::new(f)).unwrap();
+        assert_eq!(r.info().frames, 4100);
+        assert_eq!(read_all(&mut r, 3000).unwrap(), expected(16, 2, 4100));
+    }
+    // Other trailing junk with an unknown length is still an error.
+    let mut f = fixture("s16_2ch_44100.flac");
+    set_total(&mut f, 0);
+    f.extend_from_slice(&[0x55; 128]);
+    assert!(matches!(
+        FlacReader::new(Cursor::new(f)),
+        Err(Error::Format(_))
+    ));
+}

@@ -15,12 +15,17 @@
 //! The frame count comes from STREAMINFO. When STREAMINFO gives 0 (unknown), the reader
 //! decodes the stream once to count the frames and then starts again from the first
 //! frame, the FLAC form of the WAV reader's read-to-end rule; a stream with no frames is
-//! an error. A stream that ends before its declared count is an error; frames beyond it
-//! are ignored.
+//! an error; if that pass fails and the file ends in an ID3v1 tag (`TAG` and 125 bytes),
+//! it is counted again without those 128 bytes. A stream that ends before its declared
+//! count is an error; frames beyond it are ignored.
+//!
+//! Every read from the caller's reader goes through [`Honest`], which never reports more
+//! bytes than the buffer holds: claxon's byte reader indexes its buffer unchecked with the
+//! count `read` returns, so a `Read` implementation that over-reports must not reach it.
 
 use crate::error::{format_err, unsupported, Error, Result};
 use crate::io::{read_exact_arr, PcmInfo, PcmRead};
-use std::io::{Chain, Cursor, Read, Seek, SeekFrom};
+use std::io::{Chain, Cursor, Read, Seek, SeekFrom, Take};
 
 /// Largest number of frames one `read_frames` call returns.
 pub const MAX_CHUNK: usize = 1 << 20;
@@ -30,7 +35,25 @@ const MAX_ID3_TAGS: usize = 16;
 /// Most metadata blocks skipped after STREAMINFO.
 const MAX_METADATA_BLOCKS: usize = 4096;
 
-type Inner<R> = claxon::FlacReader<Chain<Cursor<Vec<u8>>, R>>;
+/// A reader whose `read` never returns more than the buffer length, whatever the inner
+/// reader claims.
+struct Honest<R>(R);
+
+impl<R: Read> Read for Honest<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.0.read(buf)?;
+        Ok(n.min(buf.len()))
+    }
+}
+
+impl<R: Seek> Seek for Honest<R> {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.0.seek(pos)
+    }
+}
+
+/// claxon's input: a minimal header, then the audio frames of the file up to `end`.
+type Inner<R> = claxon::FlacReader<Honest<Chain<Cursor<Vec<u8>>, Take<Honest<R>>>>>;
 
 /// FLAC reader.
 pub struct FlacReader<R: Read + Seek> {
@@ -135,9 +158,16 @@ fn parse_container<R: Read + Seek>(r: &mut R, file_len: u64) -> Result<(u64, [u8
     }
 }
 
-/// A claxon reader over a minimal stream (marker and STREAMINFO) followed by `r` from
-/// its current position.
-fn open_frames<R: Read + Seek>(r: R, streaminfo: &[u8; 34]) -> Result<Inner<R>> {
+/// A claxon reader over a minimal stream (marker and STREAMINFO) followed by bytes
+/// `at..end` of `r`.
+fn open_frames<R: Read + Seek>(
+    mut r: Honest<R>,
+    streaminfo: &[u8; 34],
+    at: u64,
+    end: u64,
+) -> Result<Inner<R>> {
+    r.seek(SeekFrom::Start(at))?;
+    let frames = r.take(end.saturating_sub(at));
     let mut head = Vec::with_capacity(42);
     head.extend_from_slice(b"fLaC");
     head.extend_from_slice(&[0x80, 0, 0, 34]);
@@ -146,7 +176,33 @@ fn open_frames<R: Read + Seek>(r: R, streaminfo: &[u8; 34]) -> Result<Inner<R>> 
         metadata_only: false,
         read_vorbis_comment: false,
     };
-    claxon::FlacReader::new_ext(Cursor::new(head).chain(r), opts).map_err(map_err)
+    claxon::FlacReader::new_ext(Honest(Cursor::new(head).chain(frames)), opts).map_err(map_err)
+}
+
+/// The caller's reader back from a claxon reader.
+fn release<R: Read + Seek>(flac: Inner<R>) -> Honest<R> {
+    flac.into_inner().0.into_inner().1.into_inner()
+}
+
+/// Frames from the current position to the end of the stream.
+fn count<R: Read + Seek>(flac: &mut Inner<R>, channels: u16, bits: u32) -> Result<u64> {
+    let mut n = 0u64;
+    let mut buf = Vec::new();
+    while let Some((b, len)) = next_block(flac, channels, bits, buf)? {
+        n += len as u64;
+        buf = b;
+    }
+    Ok(n)
+}
+
+/// Whether the file ends in an ID3v1 tag (`TAG` and 125 bytes) after `start`.
+fn has_id3v1<R: Read + Seek>(r: &mut Honest<R>, start: u64, file_len: u64) -> Result<bool> {
+    if file_len < start + 128 {
+        return Ok(false);
+    }
+    r.seek(SeekFrom::Start(file_len - 128))?;
+    let tag: [u8; 3] = read_exact_arr(r)?;
+    Ok(&tag == b"TAG")
 }
 
 /// Decodes the next block into `buf`; `Ok(None)` at the end of the stream. Checks the
@@ -179,12 +235,12 @@ fn next_block<R: Read + Seek>(
 impl<R: Read + Seek> FlacReader<R> {
     /// Parses the headers and positions the reader at the first frame. When STREAMINFO
     /// does not give the length, decodes the stream once to count the frames.
-    pub fn new(mut r: R) -> Result<Self> {
+    pub fn new(r: R) -> Result<Self> {
+        let mut r = Honest(r);
         let file_len = r.seek(SeekFrom::End(0))?;
         r.seek(SeekFrom::Start(0))?;
         let (frames_at, si) = parse_container(&mut r, file_len)?;
-        r.seek(SeekFrom::Start(frames_at))?;
-        let mut flac = open_frames(r, &si)?;
+        let mut flac = open_frames(r, &si, frames_at, file_len)?;
         let s = flac.streaminfo();
         if !(1..=6).contains(&s.channels) {
             return format_err(format!("FLAC channel count {} is not 1..6", s.channels));
@@ -197,18 +253,25 @@ impl<R: Read + Seek> FlacReader<R> {
         let frames = match s.samples {
             Some(n) => n,
             None => {
-                let mut n = 0u64;
-                let mut buf = Vec::new();
-                while let Some((b, len)) = next_block(&mut flac, channels, bits, buf)? {
-                    n += len as u64;
-                    buf = b;
-                }
+                let counted = count(&mut flac, channels, bits);
+                let mut r = release(flac);
+                let (n, end) = match counted {
+                    Ok(n) => (n, file_len),
+                    Err(e) => {
+                        if !has_id3v1(&mut r, frames_at, file_len)? {
+                            return Err(e);
+                        }
+                        let end = file_len - 128;
+                        let mut f = open_frames(r, &si, frames_at, end)?;
+                        let n = count(&mut f, channels, bits)?;
+                        r = release(f);
+                        (n, end)
+                    }
+                };
                 if n == 0 {
                     return format_err("FLAC stream has no audio frames");
                 }
-                let (_, mut r) = flac.into_inner().into_inner();
-                r.seek(SeekFrom::Start(frames_at))?;
-                flac = open_frames(r, &si)?;
+                flac = open_frames(r, &si, frames_at, end)?;
                 n
             }
         };

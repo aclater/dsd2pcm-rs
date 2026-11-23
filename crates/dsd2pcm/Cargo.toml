@@ -18,7 +18,7 @@ default = ["flac"]
 flac = ["dep:claxon"]
 
 [dependencies]
-claxon = { version = "0.4.3", optional = true }
+claxon = { version = "=0.4.3", optional = true }
 
 [dev-dependencies]
 scarletbook-pcm = "=0.7.0"

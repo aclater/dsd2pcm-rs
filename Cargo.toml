@@ -13,8 +13,9 @@ readme = "README.md"
 
 [workspace.dependencies]
 # Exact: the crates of a release are published together, at one version
-# (.github/scripts/release-preflight.sh checks it).
-dsd2pcm = { path = "crates/dsd2pcm", version = "=0.1.0" }
+# (.github/scripts/release-preflight.sh checks it). Default features off: each
+# crate turns on the ones it forwards (flac).
+dsd2pcm = { path = "crates/dsd2pcm", version = "=0.1.0", default-features = false }
 
 [profile.release]
 codegen-units = 1

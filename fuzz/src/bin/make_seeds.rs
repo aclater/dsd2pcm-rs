@@ -1,5 +1,5 @@
-//! Writes small valid DSF, DFF and WAV files, made with the crate's own writers, into
-//! `corpus/<target>/` as seed inputs. Run from the `fuzz` directory:
+//! Writes small valid DSF, DFF and WAV files, made with the crate's own writers, and the
+//! FLAC test files (with variants) into `corpus/<target>/` as seed inputs. Run from the `fuzz` directory:
 //! `cargo run --release --bin make_seeds`.
 
 use dsd2pcm::dff::DffWriter;
@@ -112,6 +112,36 @@ fn wav_size(size: u32, list_after: bool) -> Vec<u8> {
     b
 }
 
+/// The FLAC test files, each also with an unknown length, a leading ID3v2 tag and a
+/// trailing ID3v1 tag.
+fn flac_seeds() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/dsd2pcm/tests/data/flac");
+    let mut names: Vec<_> = fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter(|n| n.ends_with(".flac"))
+        .collect();
+    names.sort();
+    for name in names {
+        let f = fs::read(dir.join(&name)).unwrap();
+        let stem = name.trim_end_matches(".flac");
+        // STREAMINFO's 36-bit total sample count: low nibble of byte 21, bytes 22..26.
+        let mut unknown = f.clone();
+        unknown[21] &= 0xF0;
+        unknown[22..26].fill(0);
+        let mut id3 = b"ID3\x04\0\0\0\0\0\x10".to_vec();
+        id3.extend_from_slice(&[0; 16]);
+        id3.extend_from_slice(&f);
+        let mut tagged = unknown.clone();
+        tagged.extend_from_slice(b"TAG");
+        tagged.resize(tagged.len() + 125, b' ');
+        put("flac", stem, &f);
+        put("flac", &format!("{stem}-unknown-length"), &unknown);
+        put("flac", &format!("{stem}-id3v2"), &id3);
+        put("flac", &format!("{stem}-unknown-id3v1"), &tagged);
+    }
+}
+
 fn put(dir: &str, name: &str, bytes: &[u8]) {
     let d = Path::new("corpus").join(dir);
     fs::create_dir_all(&d).unwrap();
@@ -150,5 +180,6 @@ fn main() {
     put("wav_read", "data-size-0", &wav_size(0, false));
     put("wav_read", "data-size-ffffffff", &wav_size(u32::MAX, false));
     put("wav_read", "data-size-0-then-list", &wav_size(0, true));
+    flac_seeds();
     println!("seed corpora written under corpus/");
 }
