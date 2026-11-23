@@ -167,14 +167,14 @@ jobs:
           tar -C "$RUNNER_TEMP/check" -xzf "dist/$PKG.tar.gz"
           python3 -I .github/scripts/make-test-dsf.py "$RUNNER_TEMP/test.dsf"
           "$RUNNER_TEMP/check/$PKG/dsd2pcm" "$RUNNER_TEMP/test.dsf" "$RUNNER_TEMP/test.wav"
-          (cd "$RUNNER_TEMP" && sha256sum test.wav) | tee "smoke-$NAME.sha256"
+          (cd "$RUNNER_TEMP" && sha256sum test.wav) | tee "dist/smoke-$NAME.sha256"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: bin-${{ matrix.name }}
+          # dist/ only: the artifact keeps paths relative to it.
           path: |
             dist/*.tar.gz
             dist/*.sha256
-            smoke-*.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -226,14 +226,14 @@ jobs:
           tar -C "$RUNNER_TEMP/check" -xzf "dist/$PKG.tar.gz"
           python3 -I .github/scripts/make-test-dsf.py "$RUNNER_TEMP/test.dsf"
           "$RUNNER_TEMP/check/$PKG/dsd2pcm" "$RUNNER_TEMP/test.dsf" "$RUNNER_TEMP/test.wav"
-          (cd "$RUNNER_TEMP" && shasum -a 256 test.wav) | tee "smoke-$NAME.sha256"
+          (cd "$RUNNER_TEMP" && shasum -a 256 test.wav) | tee "dist/smoke-$NAME.sha256"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: bin-aarch64-macos
+          # dist/ only: the artifact keeps paths relative to it.
           path: |
             dist/*.tar.gz
             dist/*.sha256
-            smoke-*.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -284,14 +284,14 @@ jobs:
           python -I -m zipfile -e "dist/$PKG.zip" "$RUNNER_TEMP/check"
           python -I .github/scripts/make-test-dsf.py "$RUNNER_TEMP/test.dsf"
           "$RUNNER_TEMP/check/$PKG/dsd2pcm.exe" "$RUNNER_TEMP/test.dsf" "$RUNNER_TEMP/test.wav"
-          (cd "$RUNNER_TEMP" && sha256sum test.wav) | tee "smoke-$NAME.sha256"
+          (cd "$RUNNER_TEMP" && sha256sum test.wav) | tee "dist/smoke-$NAME.sha256"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: bin-x86_64-windows
+          # dist/ only: the artifact keeps paths relative to it.
           path: |
             dist/*.zip
             dist/*.sha256
-            smoke-*.sha256
           if-no-files-found: error
           retention-days: 7
 
