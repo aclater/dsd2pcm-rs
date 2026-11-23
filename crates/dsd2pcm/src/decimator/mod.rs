@@ -655,11 +655,14 @@ mod tests {
     /// The detected level is the best this CPU has, and `with_simd_level` caps it.
     #[test]
     fn levels_follow_the_cpu() {
+        // DSD2PCM_SIMD caps every level on purpose; this check only holds without it.
+        if std::env::var_os("DSD2PCM_SIMD").is_some() {
+            return;
+        }
         let levels = SimdLevel::available();
         assert_eq!(levels[0], SimdLevel::Generic);
-        // DSD2PCM_SIMD caps the levels on purpose; the detection check only holds without it.
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        if std::env::var_os("DSD2PCM_SIMD").is_none() {
+        {
             let avx2 = std::arch::is_x86_feature_detected!("avx2");
             let fma = avx2 && std::arch::is_x86_feature_detected!("fma");
             assert_eq!(levels.contains(&SimdLevel::Avx2), avx2);
