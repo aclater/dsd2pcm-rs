@@ -210,3 +210,40 @@ fn malformed_inputs_do_not_panic() {
         }
     }
 }
+
+/// A source that declares an hour of stereo DSD64 and delivers one byte per channel.
+struct ShortSource(bool);
+
+impl dsd2pcm::io::DsdRead for ShortSource {
+    fn info(&self) -> dsd2pcm::io::DsdInfo {
+        dsd2pcm::io::DsdInfo {
+            channels: 2,
+            sample_rate: 2_822_400,
+            samples: 2_822_400 * 3600,
+        }
+    }
+    fn read_bytes(&mut self, _max: usize, out: &mut [Vec<u8>]) -> dsd2pcm::Result<usize> {
+        if std::mem::replace(&mut self.0, true) {
+            return Ok(0);
+        }
+        for o in out.iter_mut() {
+            o.push(0x69);
+        }
+        Ok(1)
+    }
+}
+
+#[test]
+fn source_ending_early_is_an_error() {
+    let mut wav = dsd2pcm::wav::WavWriter::new(
+        std::io::Cursor::new(Vec::new()),
+        dsd2pcm::wav::WavFormat::I24,
+        2,
+        88_200,
+    )
+    .unwrap();
+    let opts = dsd2pcm::PcmOptions::new(dsd2pcm::PcmRate::Hz88200);
+    let r = dsd2pcm::convert::dsd64_to_pcm(Box::new(ShortSource(false)), &mut wav, &opts);
+    assert!(matches!(r, Err(dsd2pcm::Error::Format(_))), "{r:?}");
+    assert!(wav.into_inner().into_inner().len() < 1 << 20);
+}

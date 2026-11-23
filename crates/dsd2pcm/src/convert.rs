@@ -171,8 +171,16 @@ pub fn dsd64_to_pcm<W: Write + Seek>(
         } else {
             r.read_bytes(chunk, &mut bufs)?
         };
-        eof |= got == 0;
         let end = byte_start + bufs[0].len() as i64;
+        if got == 0 && !eof && (end as u64).saturating_mul(8) < info.samples {
+            // A source that ends before the samples it declared: refuse, instead of
+            // converting the missing part as idle in one unbounded batch.
+            return Err(Error::Format(format!(
+                "input ended after {end} of {} bytes per channel",
+                info.samples.div_ceil(8)
+            )));
+        }
+        eof |= got == 0;
         let o0 = done as i64;
         // At the end of the input, the rest is idle: every remaining output is ready.
         let ready = if eof {
