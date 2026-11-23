@@ -48,13 +48,15 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Tests of the check (.github/scripts/check-private-names-test.sh)
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          .github/scripts/check-private-names-test.sh
       - name: Scan tracked files and commit identities
         env:
           PRIVATE_NAMES: ${{ vars.PRIVATE_NAMES }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          .github/scripts/check-private-names.sh
+        run: .github/scripts/check-private-names.sh
 
   lint:
     name: fmt + clippy + docs
