@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/aclater/dsd2pcm-rs/main/docs/assets/icon-256.png" alt="" width="96">
+
 # dsd2pcm-rs
 
 [![CI](https://github.com/aclater/dsd2pcm-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/aclater/dsd2pcm-rs/actions/workflows/ci.yml)
