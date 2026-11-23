@@ -309,7 +309,8 @@ in the same process, hide its symbols:
 
 - GNU ld, lld and MinGW-w64: `-Wl,--exclude-libs,libdsd2pcm.a`, for example
   `cc -shared -fPIC -o myext.so myext.c libdsd2pcm-0.1.2-x86_64-linux/lib/libdsd2pcm.a -Wl,--exclude-libs,libdsd2pcm.a -lpthread -ldl -lm`
-  (or a version script that lists your own exports);
+  (or a version script that lists your own exports); with MinGW-w64 also `-static-libgcc`,
+  or your DLL needs `libgcc_s_seh-1.dll`;
 - macOS: list your own exports, one per line with a leading underscore (`_PyInit_myext`), in
   a file and link with `-Wl,-exported_symbols_list,exports.txt`.
 
