@@ -13,5 +13,5 @@ CARGO_PROFILE_DEV_OPT_LEVEL=2 .github/scripts/test-simd-levels.sh
 ```
 
 Releases are built, tested and published by `.github/workflows/release.yml` from an
-annotated `v*` tag; [docs/release.md](docs/release.md) lists what is published and the
+annotated `v*` tag; [docs/release.md](release.md) lists what is published and the
 manual steps.
