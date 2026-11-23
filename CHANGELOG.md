@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Whole-file conversion on all cores: when the system refuses to start a worker thread
+  (its thread or memory limit), the conversion goes on with the threads that did start, at
+  least the calling one, with the same output; before, it panicked (in the C interface,
+  `DSD2PCM_E_INTERNAL`). The calling thread now converts too, so a conversion starts one
+  thread fewer for the same parallelism ([design](docs/design.md#frame-runs-threading-and-sharing)).
+
 ## 0.1.2 (2026-11-23)
 
 This release contains security fixes; upgrading is recommended. Versions 0.1.0 and 0.1.1 are

@@ -213,6 +213,14 @@ whole-area conversion. Only the neighbour bytes nearest the run matter (`context
   conversion (`convert_file`) cuts each block into per-channel pieces of about 64 KiB of
   input and runs them on all cores (`--single-thread` turns that off). The output does not
   depend on how the work was split.
+- **Out of threads.** The calling thread is one of the workers, and the others take pieces
+  as they become free. If the system refuses a worker thread (its thread or memory limit),
+  the conversion goes on with the threads it has, down to the calling thread alone, rather
+  than failing: the output is the same, so a refused thread costs only speed, and an error
+  would make a busy server fail conversions that one thread can do. Nothing is reported;
+  `Error` gains no variant. (In 0.1.2 and earlier the standard library's `spawn` panicked
+  there, and the C interface returned `DSD2PCM_E_INTERNAL`.) The tests inject a thread
+  builder that refuses workers (`convert::tests`).
 - **Shared tables.** The S1 lookup tables and the paired tables are built once per process
   (`OnceLock`) and shared, read-only, by every converter and thread. A converter only owns
   its buffers, and after the first call it allocates nothing (`tests/frames_alloc.rs`).

@@ -478,44 +478,123 @@ fn plan_k(rate: PcmRate) -> i64 {
     (rate.decimation() / 8) as i64
 }
 
-/// Runs `f` on every item, on up to `scratch.len()` threads (one scratch each), and
-/// returns the results in item order.
+/// Runs `f` on every item, on up to `scratch.len()` threads (one scratch each, the calling
+/// thread being one of them), and returns the results in item order.
+///
+/// A worker thread that cannot be started (the system's thread or memory limit) is not an
+/// error: the items are shared out as they are taken, so the threads that run, at least the
+/// calling one, take the rest, and the results are the same.
 pub(crate) fn run_pieces<T: Sync, R: Send, S: Send>(
     items: &[T],
     scratch: &mut [S],
     f: impl Fn(&T, &mut S) -> R + Sync,
+) -> Vec<R> {
+    run_pieces_with(items, scratch, f, &|_| Ok(std::thread::Builder::new()))
+}
+
+/// [`run_pieces`] with the thread builder for worker `i` (1, 2, ...) from `builder`; an
+/// error from it, or from its `spawn_scoped`, ends the spawning (tests inject one).
+fn run_pieces_with<T: Sync, R: Send, S: Send>(
+    items: &[T],
+    scratch: &mut [S],
+    f: impl Fn(&T, &mut S) -> R + Sync,
+    builder: &dyn Fn(usize) -> std::io::Result<std::thread::Builder>,
 ) -> Vec<R> {
     let workers = scratch.len().min(items.len());
     if workers <= 1 {
         return items.iter().map(|it| f(it, &mut scratch[0])).collect();
     }
     let next = AtomicUsize::new(0);
-    let mut out: Vec<Option<R>> = (0..items.len()).map(|_| None).collect();
+    let work = |sc: &mut S| {
+        let mut mine = Vec::new();
+        loop {
+            let i = next.fetch_add(1, Ordering::Relaxed);
+            let Some(it) = items.get(i) else { break };
+            mine.push((i, f(it, sc)));
+        }
+        mine
+    };
+    let (first, rest) = scratch[..workers]
+        .split_first_mut()
+        .expect("at least two workers");
     let parts: Vec<Vec<(usize, R)>> = std::thread::scope(|s| {
-        let handles: Vec<_> = scratch[..workers]
-            .iter_mut()
-            .map(|sc| {
-                let (next, f) = (&next, &f);
-                s.spawn(move || {
-                    let mut mine = Vec::new();
-                    loop {
-                        let i = next.fetch_add(1, Ordering::Relaxed);
-                        let Some(it) = items.get(i) else { break };
-                        mine.push((i, f(it, sc)));
-                    }
-                    mine
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| h.join().expect("worker panicked"))
-            .collect()
+        let work = &work;
+        let mut handles = Vec::with_capacity(rest.len());
+        for (i, sc) in rest.iter_mut().enumerate() {
+            match builder(i + 1).and_then(|b| b.spawn_scoped(s, move || work(sc))) {
+                Ok(h) => handles.push(h),
+                // Out of threads: the ones running (and this one) take the rest.
+                Err(_) => break,
+            }
+        }
+        let mut parts = vec![work(first)];
+        parts.extend(
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap_or_else(|p| std::panic::resume_unwind(p))),
+        );
+        parts
     });
+    let mut out: Vec<Option<R>> = (0..items.len()).map(|_| None).collect();
     for (i, r) in parts.into_iter().flatten() {
         out[i] = Some(r);
     }
     out.into_iter()
         .map(|r| r.expect("every item ran"))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Error as IoError, ErrorKind};
+    use std::thread::{Builder, ThreadId};
+
+    /// Runs 1000 items on 8 scratch slots while `builder` refuses workers from `fail_from` on;
+    /// returns the results and the threads that ran items.
+    fn run(fail_from: usize) -> (Vec<u64>, Vec<ThreadId>) {
+        let items: Vec<u64> = (0..1000).collect();
+        let mut scratch = vec![0u64; 8];
+        let threads = Mutex::new(Vec::new());
+        let builder = |i: usize| {
+            if i >= fail_from {
+                Err(IoError::new(ErrorKind::WouldBlock, "no more threads"))
+            } else {
+                Ok(Builder::new())
+            }
+        };
+        let out = run_pieces_with(
+            &items,
+            &mut scratch,
+            |&x, sc| {
+                *sc += 1;
+                let mut t = threads.lock().unwrap();
+                let id = std::thread::current().id();
+                if !t.contains(&id) {
+                    t.push(id);
+                }
+                x * x + 1
+            },
+            &builder,
+        );
+        // Every item ran once, on some scratch slot.
+        assert_eq!(scratch.iter().sum::<u64>(), 1000);
+        (out, threads.into_inner().unwrap())
+    }
+
+    #[test]
+    fn spawn_failure_falls_back_to_fewer_threads() {
+        let want: Vec<u64> = (0..1000u64).map(|x| x * x + 1).collect();
+        // No worker starts: everything runs on the calling thread.
+        let (out, threads) = run(1);
+        assert_eq!(out, want);
+        assert_eq!(threads, [std::thread::current().id()]);
+        // Two of the seven workers start, then spawning fails: same results.
+        let (out, threads) = run(3);
+        assert_eq!(out, want);
+        assert!(threads.len() <= 3);
+        // All start.
+        let (out, _) = run(usize::MAX);
+        assert_eq!(out, want);
+    }
 }
