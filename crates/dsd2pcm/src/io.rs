@@ -69,17 +69,6 @@ pub trait PcmRead {
     fn read_frames(&mut self, max_frames: usize, out: &mut [Vec<f64>]) -> Result<usize>;
 }
 
-/// Reverses the bit order of every byte: LSB-first <-> MSB-first.
-pub(crate) static BIT_REVERSE: [u8; 256] = {
-    let mut t = [0u8; 256];
-    let mut i = 0;
-    while i < 256 {
-        t[i] = (i as u8).reverse_bits();
-        i += 1;
-    }
-    t
-};
-
 pub(crate) fn read_exact_arr<const N: usize, R: Read>(r: &mut R) -> Result<[u8; N]> {
     let mut b = [0u8; N];
     r.read_exact(&mut b)?;

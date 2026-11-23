@@ -7,9 +7,7 @@
 //! sample is the least significant bit of each byte.
 
 use crate::error::{format_err, unsupported, Result};
-use crate::io::{
-    check_dsd_rate, le_u32, le_u64, read_exact_arr, skip, DsdInfo, DsdRead, DsdWrite, BIT_REVERSE,
-};
+use crate::io::{check_dsd_rate, le_u32, le_u64, read_exact_arr, skip, DsdInfo, DsdRead, DsdWrite};
 use std::io::{Read, Seek, SeekFrom, Write};
 
 /// Block size per channel that this writer uses (the only value the specification allows).
@@ -177,7 +175,7 @@ impl<R: Read + Seek> DsdRead for DsfReader<R> {
                 let n = left.min(self.block);
                 let src = &self.buf[start..start + n];
                 if self.lsb_first {
-                    o.extend(src.iter().map(|&b| BIT_REVERSE[usize::from(b)]));
+                    o.extend(src.iter().map(|b| b.reverse_bits()));
                 } else {
                     o.extend_from_slice(src);
                 }
@@ -259,24 +257,31 @@ impl<W: Write + Seek> DsfWriter<W> {
     }
 
     fn flush_blocks(&mut self, pad: bool) -> Result<()> {
-        loop {
-            let have = self.pending[0].len();
+        // Whole blocks from `at` on; the written bytes are dropped once at the end, so that
+        // writing a long buffer stays linear.
+        let mut at = 0;
+        let mut out = Vec::with_capacity(BLOCK_SIZE * self.channels);
+        let result = loop {
+            let have = self.pending[0].len() - at;
             if have == 0 || (have < BLOCK_SIZE && !pad) {
-                return Ok(());
+                break Ok(());
             }
-            let mut out = Vec::with_capacity(BLOCK_SIZE * self.channels);
+            out.clear();
             for p in &self.pending {
-                let n = p.len().min(BLOCK_SIZE);
-                out.extend(p[..n].iter().map(|&b| BIT_REVERSE[usize::from(b)]));
+                let n = (p.len() - at).min(BLOCK_SIZE);
+                out.extend(p[at..at + n].iter().map(|b| b.reverse_bits()));
                 out.resize(out.len() + (BLOCK_SIZE - n), 0);
             }
-            self.w.write_all(&out)?;
-            for p in &mut self.pending {
-                let n = p.len().min(BLOCK_SIZE);
-                p.drain(..n);
+            if let Err(e) = self.w.write_all(&out) {
+                break Err(e.into());
             }
+            at += have.min(BLOCK_SIZE);
             self.blocks += 1;
+        };
+        for p in &mut self.pending {
+            p.drain(..at);
         }
+        result
     }
 }
 

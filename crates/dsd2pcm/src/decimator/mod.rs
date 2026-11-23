@@ -12,10 +12,17 @@
 //! Arithmetic (as in the original): samples between stages are integers on a grid where
 //! full scale (100 % modulation) is 2^26; coefficients are integers; every product and
 //! partial sum is an exact integer in `f64`, so summation order cannot change a result.
-//! Each stage rounds half to even after scaling back to the 2^26 grid.
+//! Each stage rounds half to even after scaling back to the 2^26 grid (`exact` proves the
+//! bounds from the tables).
 
+mod dispatch;
+mod exact;
 mod kernel;
 mod tables;
+
+pub(crate) use dispatch::Isa;
+#[doc(hidden)]
+pub use dispatch::{with_simd_level, SimdLevel};
 
 use crate::error::{Error, Result};
 
@@ -97,45 +104,29 @@ fn pow2(e: i32) -> f64 {
     f64::from_bits(((1023 + e) as u64) << 52)
 }
 
-/// S1 lookup tables: entry `[j][b]` is the sum of the taps over the 8 samples of byte `j`
-/// of the window when that byte is `b` (+tap for a 1 bit, -tap for a 0 bit).
-type Lut = Vec<[i32; 256]>;
-
+/// The S1 tables of a filter given from the centre out. The window covers the bytes
+/// `-B/2 .. B/2` around the output's byte (`B` = 4 times the half length, in bytes), and the
+/// output is centred on the first sample of its byte.
 fn lut(half: &[i32]) -> Lut {
-    let m = half.len() - 1;
-    let bytes = (m + 1) / 4;
-    let tap = |t: i64| -> i32 { half.get(t.unsigned_abs() as usize).copied().unwrap_or(0) };
-    (0..bytes)
-        .map(|j| {
-            let rel = j as i64 - (bytes / 2) as i64;
-            let mut table = [0i32; 256];
-            for (b, entry) in table.iter_mut().enumerate() {
-                *entry = (0..8)
-                    .map(|p| {
-                        let h = tap(8 * rel + p);
-                        if (b >> (7 - p)) & 1 == 1 {
-                            h
-                        } else {
-                            -h
-                        }
-                    })
-                    .sum();
-            }
-            table
-        })
-        .collect()
+    let bytes = half.len() / 4;
+    let centre = 8 * (bytes / 2);
+    Lut::new(bytes, |i| {
+        half.get(i.abs_diff(centre)).copied().unwrap_or(0)
+    })
 }
+
+type Lut = kernel::S1Lut;
 
 static LUT_S1: OnceLock<Lut> = OnceLock::new();
 static LUT_S1_WIDE: OnceLock<Lut> = OnceLock::new();
 
 const Q_FIR: i32 = 24;
 
-/// Outputs are computed in whole blocks of this many (the kernels' block).
-const PAD: usize = kernel::L;
+/// Outputs are computed in whole blocks of this many (a multiple of every kernel's block).
+const PAD: usize = kernel::MAX_L;
 
 /// S1 bytes per pass: the scratch buffers stay in the L2 cache.
-const PASS_BYTES: usize = 16 << 10;
+const PASS_BYTES: usize = 32 << 10;
 
 /// One stage after S1.
 #[derive(Clone, Debug)]
@@ -184,6 +175,7 @@ pub(crate) struct Scratch {
 #[derive(Debug, Clone)]
 pub(crate) struct Plan {
     lut: &'static Lut,
+    isa: Isa,
     ops: Vec<Op>,
     /// Bytes per output.
     k: i64,
@@ -198,16 +190,20 @@ impl Plan {
         let hb = || Sym::new(&tables::HB, pow2(-Q_FIR));
         let f40 = || Sym::new(&tables::F40, pow2(-Q_FIR));
         let wide = || LUT_S1_WIDE.get_or_init(|| lut(&tables::S1_WIDE));
-        let (lut, ops) = match (cutoff, rate) {
+        let (s1_half, lut, mut ops) = match (cutoff, rate) {
             (Cutoff::Wide, PcmRate::Hz88200) => {
                 return Err(Error::InvalidArgument(
                     "the wide filter is not available at 88.2 kHz".into(),
                 ))
             }
-            (Cutoff::Wide, PcmRate::Hz352800) => (wide(), vec![Op::Fir1(f40())]),
-            (Cutoff::Wide, PcmRate::Hz176400) => {
-                (wide(), vec![Op::Dec2(Sym::new(&tables::F80, pow2(-Q_FIR)))])
+            (Cutoff::Wide, PcmRate::Hz352800) => {
+                (&tables::S1_WIDE[..], wide(), vec![Op::Fir1(f40())])
             }
+            (Cutoff::Wide, PcmRate::Hz176400) => (
+                &tables::S1_WIDE[..],
+                wide(),
+                vec![Op::Dec2(Sym::new(&tables::F80, pow2(-Q_FIR)))],
+            ),
             (_, rate) => {
                 let f = if cutoff == Cutoff::Low {
                     Sym::new(&tables::F30, pow2(-Q_FIR))
@@ -221,13 +217,19 @@ impl Plan {
                         vec![Op::Dec2(hb()), Op::Fir1(f), Op::Interp2(hb())]
                     }
                 };
-                (LUT_S1.get_or_init(|| lut(&tables::S1)), ops)
+                (
+                    &tables::S1[..],
+                    LUT_S1.get_or_init(|| lut(&tables::S1)),
+                    ops,
+                )
             }
         };
+        exact::prove(s1_half, &mut ops);
         let k = (rate.decimation() / 8) as i64;
         let pass = (PASS_BYTES / k as usize).div_ceil(PAD) * PAD;
         let mut plan = Plan {
             lut,
+            isa: Isa::current(),
             ops,
             k,
             pass,
@@ -249,11 +251,16 @@ impl Plan {
         levels
     }
 
+    /// The kernels' instruction set.
+    pub(crate) fn isa(&self) -> Isa {
+        self.isa
+    }
+
     /// The bytes that outputs `out` need.
     fn byte_range(&self, out: (i64, usize), pad: bool) -> (i64, usize) {
         let (s, n) = self.levels(out, pad)[0];
         let n = if pad { n.div_ceil(PAD) * PAD } else { n };
-        let b = self.lut.len();
+        let b = self.lut.bytes;
         (s - (b / 2) as i64, n + b - 1)
     }
 
@@ -295,65 +302,113 @@ impl Plan {
         }
     }
 
+    /// Outputs `o0 .. o0 + q.len()` (`o0` even), times `gain` and rounded to 24 bits, into
+    /// `q`; returns the number clamped. `src` holds bytes `src0 ..`; all other bytes are the
+    /// idle pattern.
+    pub(crate) fn run_quantised(
+        &self,
+        src: &[u8],
+        src0: i64,
+        o0: i64,
+        gain: f64,
+        sc: &mut Scratch,
+        q: &mut [i32],
+    ) -> u64 {
+        debug_assert!(o0 % 2 == 0);
+        let mut clipped = 0;
+        for (i, q) in q.chunks_mut(self.pass).enumerate() {
+            let m = q.len().next_multiple_of(2);
+            self.pass_run(src, src0, o0 + (i * self.pass) as i64, m, sc);
+            clipped += dispatch::quantise(self.isa, &sc.a[..q.len()], gain, q);
+        }
+        clipped
+    }
+
     /// One pass: outputs `o0 .. o0 + n` into `sc.a[..n]`.
     fn pass_run(&self, src: &[u8], src0: i64, o0: i64, n: usize, sc: &mut Scratch) {
+        let Scratch {
+            bytes: buf,
+            a,
+            b,
+            even,
+            odd,
+        } = sc;
         let levels = self.levels((o0, n), true);
         let (p0, plen) = self.byte_range((o0, n), true);
-        sc.bytes.clear();
-        sc.bytes.resize(plen, IDLE);
-        let lo = src0.max(p0);
-        let hi = (src0 + src.len() as i64).min(p0 + plen as i64);
-        if lo < hi {
-            sc.bytes[(lo - p0) as usize..(hi - p0) as usize]
-                .copy_from_slice(&src[(lo - src0) as usize..(hi - src0) as usize]);
-        }
+        // The bytes `p0 .. p0 + plen`: straight from `src` when it holds them all, else
+        // copied, with the idle pattern beyond `src`.
+        let bytes: &[u8] = if src0 <= p0 && p0 + plen as i64 <= src0 + src.len() as i64 {
+            &src[(p0 - src0) as usize..][..plen]
+        } else {
+            buf.clear();
+            buf.resize(plen, IDLE);
+            let lo = src0.max(p0);
+            let hi = (src0 + src.len() as i64).min(p0 + plen as i64);
+            if lo < hi {
+                buf[(lo - p0) as usize..(hi - p0) as usize]
+                    .copy_from_slice(&src[(lo - src0) as usize..(hi - src0) as usize]);
+            }
+            buf
+        };
+        // The buffers the kernels write are resized, not cleared: they write every element.
         if !matches!(self.ops.first(), Some(Op::Dec2(_))) {
             let n1 = levels[0].1.div_ceil(PAD) * PAD;
-            sc.a.resize(n1, 0.0);
-            kernel::s1(self.lut, &sc.bytes, 0, 1, &mut sc.a);
+            a.resize(n1, 0.0);
+            dispatch::s1(self.isa, self.lut, bytes, 0, 1, a);
         }
         for (k, op) in self.ops.iter().enumerate() {
             let n_out = levels[k + 1].1;
             match op {
                 Op::Fir1(s) => {
-                    sc.b.resize(n_out.div_ceil(PAD) * PAD, 0.0);
-                    kernel::fir1(s, &sc.a, &mut sc.b);
+                    b.resize(n_out.div_ceil(PAD) * PAD, 0.0);
+                    dispatch::fir1(self.isa, s, a, b);
                 }
                 Op::Dec2(s) => {
                     let m = s.half_len();
                     let (e, o) = (s.even.len() - 1, s.odd.len());
                     let np = n_out.div_ceil(PAD) * PAD;
                     let (de, dodd) = (m - 2 * e, m + 1 - 2 * o);
+                    even.resize(np + 2 * e, 0.0);
+                    odd.resize(np + 2 * o, 0.0);
                     if k == 0 {
-                        sc.even.resize(np + 2 * e, 0.0);
-                        sc.odd.resize(np + 2 * o, 0.0);
-                        kernel::s1(self.lut, &sc.bytes, de, 2, &mut sc.even);
-                        kernel::s1(self.lut, &sc.bytes, dodd, 2, &mut sc.odd);
+                        dispatch::s1(self.isa, self.lut, bytes, de, 2, even);
+                        dispatch::s1(self.isa, self.lut, bytes, dodd, 2, odd);
                     } else {
-                        sc.even.clear();
-                        sc.odd.clear();
-                        sc.even
-                            .extend(sc.a.iter().skip(de).step_by(2).take(np + 2 * e));
-                        sc.odd
-                            .extend(sc.a.iter().skip(dodd).step_by(2).take(np + 2 * o));
+                        every_other(&a[de..], even);
+                        every_other(&a[dodd..], odd);
                     }
-                    sc.b.resize(np, 0.0);
-                    kernel::dec2(s, &sc.even, &sc.odd, &mut sc.b);
+                    b.resize(np, 0.0);
+                    dispatch::dec2(self.isa, s, even, odd, b);
                 }
                 Op::Interp2(s) => {
                     let o = s.odd.len();
                     let half = (n_out / 2).div_ceil(PAD) * PAD;
-                    sc.even.resize(half, 0.0);
-                    kernel::interp2_odd(s, &sc.a, &mut sc.even);
-                    sc.b.clear();
-                    for i in 0..n_out / 2 {
-                        sc.b.push(sc.a[o + i]);
-                        sc.b.push(sc.even[i]);
+                    even.resize(half, 0.0);
+                    dispatch::interp2_odd(self.isa, s, a, even);
+                    b.resize(n_out, 0.0);
+                    for ((d, &x), &y) in b[..n_out]
+                        .chunks_exact_mut(2)
+                        .zip(&a[o..o + n_out / 2])
+                        .zip(&*even)
+                    {
+                        d[0] = x;
+                        d[1] = y;
                     }
                 }
             }
-            std::mem::swap(&mut sc.a, &mut sc.b);
+            std::mem::swap(a, b);
         }
+    }
+}
+
+/// `dst[i] = src[2 i]`.
+fn every_other(src: &[f64], dst: &mut [f64]) {
+    let Some(last) = dst.len().checked_sub(1) else {
+        return;
+    };
+    let src = &src[..=2 * last];
+    for (i, d) in dst.iter_mut().enumerate() {
+        *d = src[2 * i];
     }
 }
 
@@ -424,8 +479,199 @@ pub fn output_len(dsd_samples: u64, rate: PcmRate) -> u64 {
 pub fn quantise(v: &[f64], gain: f64, q: &mut Vec<i32>) -> u64 {
     let at = q.len();
     q.resize(at + v.len(), 0);
-    kernel::quantise(v, gain, &mut q[at..])
+    dispatch::quantise(Isa::current(), v, gain, &mut q[at..])
+}
+
+/// Interleaves the channels `q` (equal lengths) as 24-bit little-endian samples into `out`
+/// (3 bytes per sample).
+pub(crate) fn pack24(isa: Isa, q: &[&[i32]], out: &mut [u8]) {
+    dispatch::pack24(isa, q, out)
 }
 
 /// The scale from the 2^26 grid to full scale 1.0.
 pub const GRID_TO_UNIT: f64 = 1.0 / 67_108_864.0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ALL: [(PcmRate, Cutoff); 8] = [
+        (PcmRate::Hz88200, Cutoff::Low),
+        (PcmRate::Hz88200, Cutoff::Standard),
+        (PcmRate::Hz176400, Cutoff::Low),
+        (PcmRate::Hz176400, Cutoff::Standard),
+        (PcmRate::Hz176400, Cutoff::Wide),
+        (PcmRate::Hz352800, Cutoff::Low),
+        (PcmRate::Hz352800, Cutoff::Standard),
+        (PcmRate::Hz352800, Cutoff::Wide),
+    ];
+
+    fn s1_half(cutoff: Cutoff) -> &'static [i32] {
+        if cutoff == Cutoff::Wide {
+            &tables::S1_WIDE
+        } else {
+            &tables::S1
+        }
+    }
+
+    fn sym(op: &Op) -> &Sym {
+        match op {
+            Op::Fir1(s) | Op::Dec2(s) | Op::Interp2(s) => s,
+        }
+    }
+
+    /// The exactness proof holds for every stage of every plan, derived from the tables the
+    /// plans use: S1 sums stay below 2^31 (they are summed in `i32`), and every product and
+    /// partial sum of every later stage is an integer below 2^53. So summation order and
+    /// block size cannot change a result, and `fused` (FMA) is on for every stage. If a
+    /// table or the stage plan changes, `exact::prove` re-derives the bounds; a stage it
+    /// cannot prove runs unfused, and this test fails so that the change is noticed.
+    #[test]
+    fn sums_are_exact() {
+        for (rate, cutoff) in ALL {
+            let plan = Plan::new(rate, cutoff).unwrap();
+            let s1 = exact::s1_bound(s1_half(cutoff));
+            assert!(s1 < i32::MAX as u128, "S1 bound {s1}");
+            // The tables themselves stay within the bound.
+            let worst: u128 = plan
+                .lut
+                .tables
+                .iter()
+                .map(|t| {
+                    t.iter()
+                        .map(|e| u128::from(e.unsigned_abs()))
+                        .max()
+                        .unwrap()
+                })
+                .sum();
+            assert!(worst <= s1, "{rate:?} {cutoff:?}: tables {worst} > {s1}");
+            let mut x = s1;
+            for op in &plan.ops {
+                let (sum, out) = exact::stage(op, x)
+                    .unwrap_or_else(|| panic!("{rate:?} {cutoff:?}: {op:?} not exact"));
+                assert!(sum < exact::LIMIT);
+                assert!(sym(op).fused, "{rate:?} {cutoff:?}: {op:?} not fused");
+                x = out;
+            }
+            // The gain multiply (at most +24 dB, below 16) of an integer output is exact
+            // too; the quantiser rounds it.
+            assert!(16 * x < exact::LIMIT);
+        }
+    }
+
+    /// A stage whose sums could exceed 2^53 is not fused, nor is any stage after it.
+    #[test]
+    fn unproven_stages_are_not_fused() {
+        let big = [1 << 30; 8];
+        let mut ops = vec![
+            Op::Dec2(Sym::new(&tables::HB, pow2(-Q_FIR))),
+            Op::Fir1(Sym::new(&big, pow2(-Q_FIR))),
+            Op::Fir1(Sym::new(&tables::F40, pow2(-Q_FIR))),
+        ];
+        assert!(!exact::prove(&tables::S1, &mut ops));
+        let fused: Vec<bool> = ops.iter().map(|op| sym(op).fused).collect();
+        assert_eq!(fused, [true, false, false]);
+    }
+
+    /// scarletbook-pcm's S1 tables: one per byte of the window.
+    fn byte_tables(half: &[i32]) -> Vec<[i32; 256]> {
+        let bytes = half.len() / 4;
+        let tap = |t: i64| -> i32 { half.get(t.unsigned_abs() as usize).copied().unwrap_or(0) };
+        (0..bytes)
+            .map(|j| {
+                let rel = j as i64 - (bytes / 2) as i64;
+                let mut table = [0i32; 256];
+                for (b, entry) in table.iter_mut().enumerate() {
+                    *entry = (0..8)
+                        .map(|p| {
+                            let h = tap(8 * rel + p);
+                            if (b >> (7 - p)) & 1 == 1 {
+                                h
+                            } else {
+                                -h
+                            }
+                        })
+                        .sum();
+                }
+                table
+            })
+            .collect()
+    }
+
+    /// The S1 kernel with wide-index tables gives the sums of scarletbook-pcm's byte tables,
+    /// for both windows, strides 1 and 2, every start in a word, at every level and on the
+    /// any-window path.
+    #[test]
+    fn s1_chunks_match_bytes() {
+        let mut seed = 0x5DEE_CE66_D1A4_F00Du64;
+        let bytes: Vec<u8> = (0..4096)
+            .map(|i| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                // Runs of all ones and all zeros as well: the largest sums.
+                match (i / 512) % 4 {
+                    1 => 0xFF,
+                    3 => 0x00,
+                    _ => seed as u8,
+                }
+            })
+            .collect();
+        for half in [&tables::S1[..], &tables::S1_WIDE[..]] {
+            let reference = byte_tables(half);
+            let chunked = lut(half);
+            let b = reference.len();
+            for stride in [1, 2] {
+                for start in 0..9 {
+                    let n = (bytes.len() - start - b) / stride;
+                    let want: Vec<f64> = (0..n)
+                        .map(|k| {
+                            let w = &bytes[start + stride * k..][..b];
+                            let sum: i32 = reference
+                                .iter()
+                                .zip(w)
+                                .map(|(t, &x)| t[usize::from(x)])
+                                .sum();
+                            f64::from(sum)
+                        })
+                        .collect();
+                    for level in SimdLevel::available() {
+                        let mut got = vec![0.0; n];
+                        let isa = with_simd_level(level, Isa::current).unwrap();
+                        dispatch::s1(isa, &chunked, &bytes, start, stride, &mut got);
+                        assert!(
+                            got == want,
+                            "{level:?} {b} bytes, stride {stride}, start {start}"
+                        );
+                    }
+                    let mut got = vec![0.0; n];
+                    kernel::s1_any(&chunked, &bytes, start, stride, &mut got);
+                    assert!(got == want, "any window: {b} bytes, stride {stride}");
+                }
+            }
+        }
+    }
+
+    /// The detected level is the best this CPU has, and `with_simd_level` caps it.
+    #[test]
+    fn levels_follow_the_cpu() {
+        let levels = SimdLevel::available();
+        assert_eq!(levels[0], SimdLevel::Generic);
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        {
+            let avx2 = std::arch::is_x86_feature_detected!("avx2");
+            let fma = avx2 && std::arch::is_x86_feature_detected!("fma");
+            assert_eq!(levels.contains(&SimdLevel::Avx2), avx2);
+            assert_eq!(levels.contains(&SimdLevel::Avx2Fma), fma);
+        }
+        for &level in &levels {
+            let plan = with_simd_level(level, || Plan::new(PcmRate::Hz88200, Cutoff::Standard))
+                .unwrap()
+                .unwrap();
+            assert_eq!(plan.isa().level(), level);
+        }
+        if std::env::var_os("DSD2PCM_SIMD").is_none() {
+            assert_eq!(Isa::current().level(), *levels.last().unwrap());
+        }
+    }
+}

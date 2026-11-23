@@ -11,6 +11,7 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 /// DSD to PCM settings.
 #[derive(Clone, Copy, Debug)]
@@ -160,6 +161,8 @@ pub fn dsd64_to_pcm<W: Write + Seek>(
     let mut byte_start = 0i64;
     let mut done = 0u64;
     let mut eof = false;
+    // The 24-bit samples of a block, channel by channel, and interleaved as bytes; reused.
+    let mut q: Vec<i32> = Vec::new();
     let mut bytes = Vec::new();
     while done < n_out {
         let got = if eof {
@@ -180,36 +183,30 @@ pub fn dsd64_to_pcm<W: Write + Seek>(
             continue;
         }
         let keep = ((n_out - done) as usize).min(ready);
-        // Pieces: an even number of outputs each, about PIECE bytes of input.
+        // Pieces: an even number of outputs each, about PIECE bytes of input, each writing
+        // its samples straight into its part of `q` (channel `c` at `c keep ..`).
         let piece = ((PIECE / plan_k(rate)) as usize).max(2);
-        let pieces: Vec<(usize, i64, usize)> = (0..ch)
-            .flat_map(|c| {
-                (0..ready)
-                    .step_by(piece)
-                    .map(move |a| (c, o0 + a as i64, piece.min(ready - a)))
+        q.resize(keep * ch, 0);
+        let pieces: Vec<(usize, i64, Mutex<&mut [i32]>)> = q
+            .chunks_exact_mut(keep)
+            .enumerate()
+            .flat_map(|(c, qc)| {
+                qc.chunks_mut(piece)
+                    .enumerate()
+                    .map(move |(i, part)| (c, o0 + (i * piece) as i64, Mutex::new(part)))
             })
             .collect();
-        let results = run_pieces(&pieces, &mut scratch, |&(c, a, n), sc| {
-            let mut v = Vec::with_capacity(n);
-            plan.run(&bufs[c], byte_start, a, n, sc, &mut v);
-            let n = n.min(keep.saturating_sub((a - o0) as usize));
-            let mut q = Vec::with_capacity(n);
-            let clip = decimator::quantise(&v[..n], gain, &mut q);
-            (q, clip)
+        let results = run_pieces(&pieces, &mut scratch, |(c, a, part), sc| {
+            let mut part = part.lock().unwrap_or_else(|e| e.into_inner());
+            plan.run_quantised(&bufs[*c], byte_start, *a, gain, sc, &mut part)
         });
-        // Channel by channel, in order.
-        let mut per_ch: Vec<Vec<i32>> = vec![Vec::with_capacity(keep); ch];
-        for (&(c, _, _), (q, clip)) in pieces.iter().zip(results) {
-            per_ch[c].extend_from_slice(&q);
+        for (&(c, _, _), clip) in pieces.iter().zip(results) {
             clipped[c] += clip;
         }
-        bytes.clear();
-        bytes.reserve(keep * ch * 3);
-        for i in 0..keep {
-            for q in &per_ch {
-                bytes.extend_from_slice(&q[i].to_le_bytes()[..3]);
-            }
-        }
+        drop(pieces);
+        let per_ch: Vec<&[i32]> = q.chunks_exact(keep).collect();
+        bytes.resize(keep * ch * 3, 0);
+        decimator::pack24(plan.isa(), &per_ch, &mut bytes);
         w.write_raw(&bytes)?;
         done += keep as u64;
         // Drop the bytes no later output needs.

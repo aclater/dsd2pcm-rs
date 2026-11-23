@@ -135,6 +135,88 @@ fn identical_mono_and_six_channels() {
     }
 }
 
+const ALL: [(PcmRate, Cutoff); 8] = [
+    (PcmRate::Hz88200, Cutoff::Low),
+    (PcmRate::Hz88200, Cutoff::Standard),
+    (PcmRate::Hz176400, Cutoff::Low),
+    (PcmRate::Hz176400, Cutoff::Standard),
+    (PcmRate::Hz176400, Cutoff::Wide),
+    (PcmRate::Hz352800, Cutoff::Low),
+    (PcmRate::Hz352800, Cutoff::Standard),
+    (PcmRate::Hz352800, Cutoff::Wide),
+];
+
+/// SHA-256 of the output bytes and clip counts for every channel count (1, 2, 6), input
+/// (the test material and full scale, all 0xFF) and gain (0, -3 and +7.5 dB, which clips),
+/// for one rate and cutoff.
+fn digest(rate: PcmRate, cutoff: Cutoff) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    for ch in [1usize, 2, 6] {
+        let inputs = [
+            material(ch, 3, 0x0dd_ba11 ^ ch as u64),
+            vec![vec![0xFF; 3 * FRAME]; ch],
+        ];
+        for chans in &inputs {
+            for gain_db in [0.0, -3.0, 7.5] {
+                let opts = PcmOptions {
+                    rate,
+                    cutoff,
+                    gain_db,
+                    threads: true,
+                };
+                let (bytes, clipped) = ours(chans, &opts);
+                // The hashed output is scarletbook-pcm's.
+                let (b, cb) = theirs(chans, rate, cutoff, gain_db);
+                assert!(
+                    bytes == b && clipped == cb,
+                    "{rate:?} {cutoff:?} {gain_db} dB"
+                );
+                h.update(&bytes);
+                for c in clipped {
+                    h.update(c.to_le_bytes());
+                }
+            }
+        }
+    }
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Golden output hashes, the same at every SIMD level of this CPU (each forced in turn) and
+/// on every platform. They change only with a major version.
+#[test]
+fn golden_hashes_at_every_simd_level() {
+    use dsd2pcm::decimator::{with_simd_level, SimdLevel};
+    const GOLDEN: [&str; 8] = [
+        "56c126ccdc7ad14f156a408fc41433350ad64799cb029d5c1daf112ea6f2e5e2",
+        "fbf0ced5f83210c736a5ac42b4f71bfe7e35f33eb0b65b663ac3c12b0e209348",
+        "16887deec03b81bdb74fbde173850d7e20f55c06b6d2b25568b6fc0eb3faa972",
+        "f1b7f78e723726b1a0c41f65dc85d2309bf1ff0690189453ebc1d6d23a8607d9",
+        "10a6efd0d4a8b4bf68fb6acd15f0bfaa38ce4a6fdb673934c7d41c10702472ee",
+        "c2cd259fb52881c6fc74baa11c868fda8cb2bb814ddd54da6cf6717305aa4d51",
+        "30de64ebe6a071f889121069306e49b7c8094b9bba4b0c0dd69bbba5214c6be2",
+        "14d04a339fd56e168d5566edc241dae92910fde490ef96a92bf89bbf2f2bf40e",
+    ];
+    let levels = SimdLevel::available();
+    let got: Vec<Vec<String>> = ALL
+        .into_iter()
+        .map(|(rate, cutoff)| {
+            levels
+                .iter()
+                .map(|&level| with_simd_level(level, || digest(rate, cutoff)).unwrap())
+                .collect()
+        })
+        .collect();
+    for ((rate, cutoff), d) in ALL.into_iter().zip(&got) {
+        eprintln!("{rate:?} {cutoff:?}: {d:?}");
+    }
+    for (((rate, cutoff), d), golden) in ALL.into_iter().zip(&got).zip(GOLDEN) {
+        for (level, d) in levels.iter().zip(d) {
+            assert_eq!(d, golden, "{rate:?} {cutoff:?} at {level:?}");
+        }
+    }
+}
+
 /// A real DSD64 file (path in `DSD2PCM_REAL_DSF`), cut to whole 4704-byte frames.
 #[test]
 #[ignore = "needs DSD2PCM_REAL_DSF"]

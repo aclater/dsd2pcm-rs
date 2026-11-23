@@ -26,6 +26,23 @@ history; it starts 4096 idle bytes before the input and flushes with idle bytes,
 output sample is the same function of the input as in scarletbook-pcm's whole-area
 conversion. Output length: `ceil(samples / d)` per channel.
 
+## Speed
+
+- S1 reads each window as 64-bit words cut into 13-bit chunks, one table per chunk (5
+  lookups per output instead of 8 byte tables; 12-byte wide windows: 8 instead of 12). The
+  sum is the same integer.
+- The FIR kernels compute blocks of independent outputs (16 generic, 32 with AVX2), so
+  the compiler puts them in vector lanes; each output keeps its own sum in tap order.
+- Run-time dispatch (`decimator/dispatch.rs`, the crate's only `unsafe`): generic, AVX2,
+  and AVX2 with FMA. FMA is used only in stages that `decimator/exact.rs` proves exact from
+  the tables and stage plan (every product and partial sum an integer below 2^53); the
+  test `sums_are_exact` fails if a table or stage change breaks the proof, and such a stage
+  runs unfused. `DSD2PCM_SIMD=generic|avx2|avx2fma` caps the level; the golden hashes in
+  `tests/identity.rs` are checked at every level the CPU has.
+- Whole-file conversion quantises each piece straight into its slot of a per-block sample
+  buffer and interleaves once into the output bytes; stage input is read straight from the
+  channel buffer when it holds the whole window.
+
 ## Robustness
 
 Parsers check every size against the file length, cap allocations (DSF metadata 16 MiB,

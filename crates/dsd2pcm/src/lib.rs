@@ -8,7 +8,7 @@
 //!
 //! DSD data passes between modules as one byte vector per channel, earliest sample in the
 //! most significant bit, 1 = +1 (see [`io`]).
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod convert;
