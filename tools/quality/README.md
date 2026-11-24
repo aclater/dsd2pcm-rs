@@ -25,6 +25,7 @@ dsd2pcm crate; the decoders are run by path.
 
 From the repository root, on Linux, with Rust and Python 3 (tested with Python 3.15):
 
+<!-- docs-run: skip="needs a checkout, Rust and the quality tools in a Python venv" -->
 ```sh
 python3 -m venv venv
 venv/bin/pip install -r tools/quality/requirements.txt

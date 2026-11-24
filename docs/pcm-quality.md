@@ -868,6 +868,7 @@ this page were made with:
 
 From the repository root:
 
+<!-- docs-run: skip="needs a checkout, Rust and the quality tools in a Python venv" -->
 ```sh
 python3 -m venv venv
 venv/bin/pip install -r tools/quality/requirements.txt
@@ -894,6 +895,7 @@ venv/bin/python tools/quality/report.py --filters out/filters.json --results out
 The [precise filter](#the-precise-filter)'s figures were made with the same tools, ffmpeg 9.0.2 (Fedora 45) and only the signals they
 use:
 
+<!-- docs-run: skip="needs a checkout, Rust, the quality tools in a Python venv and ffmpeg" -->
 ```sh
 venv/bin/python tools/quality/gen_signals.py --out out/sig --no-sox --only idle,silence,sine1k_0,fr_tones,alias_steps,bit_impulse,bit_step,quiet_sine1k,quiet_alias,loud_alias
 venv/bin/python tools/quality/decode.py --signals-dir out/sig --out out/dec --tool dsd2pcm=target/release/dsd2pcm --tool ffmpeg=/usr/bin/ffmpeg --decoders dsd2pcm,dsd2pcm-precise,ffmpeg

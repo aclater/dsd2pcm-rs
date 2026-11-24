@@ -1,4 +1,4 @@
-[dsd2pcm-rs](../../README.md) › [Documentation](../README.md) › [Release quality comparison](README.md) › X.Y.Z
+[dsd2pcm-rs](../../README.md) › [Documentation](../README.md) › [Release quality comparison](README.md) › Quality of X.Y.Z against W.W.W
 
 # Quality of X.Y.Z against W.W.W
 

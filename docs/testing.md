@@ -40,6 +40,7 @@ It asserts, after a warm-up (the first 20 % of iterations):
 - on Linux, after every threaded conversion the thread count (`/proc/self/task`) is back
   at its value before the run.
 
+<!-- docs-run: skip="needs a checkout and Rust; the soak runs for 1000 iterations or an hour" -->
 ```sh
 DSD2PCM_SOAK_ITERATIONS=1000 cargo test --release -p dsd2pcm --test soak -- --ignored --nocapture
 DSD2PCM_SOAK_SECONDS=3600 cargo test --release -p dsd2pcm --test soak -- --ignored --nocapture
@@ -84,6 +85,7 @@ with clang's AddressSanitizer, LeakSanitizer and UndefinedBehaviorSanitizer and 
 iterations with `detect_leaks=1`: one block left allocated fails it. Without a sanitizer it
 also checks the resident set levels off. Locally:
 
+<!-- docs-run: skip="needs a checkout, Rust, cbindgen and clang with AddressSanitizer" -->
 ```sh
 CBINDGEN=cbindgen crates/dsd2pcm-capi/check.sh          # LEAKLOOP_ITERATIONS=100 by default
 ASAN_CC=clang .github/scripts/capi-check.sh crates/dsd2pcm-capi
@@ -91,6 +93,7 @@ ASAN_CC=clang .github/scripts/capi-check.sh crates/dsd2pcm-capi
 
 ## Miri
 
+<!-- docs-run: skip="needs a checkout and nightly Rust with Miri" -->
 ```sh
 rustup toolchain install nightly-2026-11-01 --component miri,rust-src
 cargo +nightly-2026-11-01 miri test -p dsd2pcm-capi
@@ -118,6 +121,7 @@ and 12 for the core crate on a Ryzen AI Max+ 395 (one core each):
 
 ## ThreadSanitizer
 
+<!-- docs-run: skip="needs a checkout and nightly Rust with rust-src (ThreadSanitizer)" -->
 ```sh
 export CARGO_PROFILE_DEV_OPT_LEVEL=2
 RUSTFLAGS=-Zsanitizer=thread DSD2PCM_SOAK_ITERATIONS=100 DSD2PCM_SOAK_RSS_REPORT_ONLY=1 DSD2PCM_SOAK_HEAP_REPORT_ONLY=1 \

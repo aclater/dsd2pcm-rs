@@ -45,6 +45,7 @@ Intel Core i9-13900H (P- and E-cores) and an AMD Ryzen 9 3950X.
 
 On Linux x86_64, with a DSF file named `01 - Track.dsf` in the current directory:
 
+<!-- docs-run: image=fedora-net setup="printf 'DSD \x1c\x00\x00\x00\x00\x00\x00\x00\x5c\x20\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00fmt \x34\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x02\x00\x00\x00\x00\x11\x2b\x00\x01\x00\x00\x00\x00\x80\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00data\x0c\x20\x00\x00\x00\x00\x00\x00' > '01 - Track.dsf' && head -c 8192 /dev/zero | tr '\000' i >> '01 - Track.dsf'" expect="Hz -> 176400 Hz, .*clipped samples: 0" -->
 ```sh
 curl -LO https://github.com/dsd-toolbox/dsd2pcm-rs/releases/download/v0.1.2/dsd2pcm-0.1.2-x86_64-linux.tar.gz
 tar xzf dsd2pcm-0.1.2-x86_64-linux.tar.gz

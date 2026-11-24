@@ -30,6 +30,12 @@ with its measured effect. Releases up to 0.1.2 keep their behaviour as released.
   ([C interface](docs/c-api.md#checks)).
 - CI: a check that tracked files and commit identities hold no private names or addresses
   ([testing](docs/testing.md#private-names)).
+- Docs: the shared DSD Toolbox docs checks in `docs.yml` (page and README shape, links in
+  every Markdown file, the facts regions, a docs change with every code change on pull
+  requests, and weekly the README's Quick start against the published release), and a
+  `docs-audit` workflow to run after each release
+  ([releasing](docs/release.md#after-the-release-run-the-docs-audit)). lychee now checks the
+  external links only; the shared check covers relative links and anchors.
 - Tests: golden SHA-256 hashes of whole output files (header and samples) from
   `convert_file`, for mono, stereo and six-channel input, DSF channel types 5 to 7 and
   DSDIFF files with speaker and numbered channel IDs, at every rate and cutoff and with

@@ -10,13 +10,14 @@ the precise filter's tables are what `tools/filters/design_precise.py --check` g
 ThreadSanitizer run weekly ([testing.md](testing.md)). The speed workflow (`bench.yml`, by
 hand only) is described in [docs/performance.md](performance.md).
 
-Rust versions: the library, the command-line tool and the C library build with Rust 1.83
+Rust versions: the library, the command-line tool and the C library build with Rust <!-- facts:msrv -->1.83<!-- /facts -->
 (`rust-version` in `Cargo.toml`). The test suite needs Rust 1.85 or later, because its
 dev-dependency scarletbook-pcm 0.7.0 uses edition 2024 (rust-version 1.85).
-`.github/workflows/msrv.yml` checks and builds the workspace with 1.83 and builds the tests
+`.github/workflows/msrv.yml` checks and builds the workspace with <!-- facts:msrv -->1.83<!-- /facts --> and builds the tests
 with 1.85.
 Locally:
 
+<!-- docs-run: skip="needs a checkout of this repository and a Rust toolchain; docs-run containers hold only the published release" -->
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -31,7 +32,12 @@ manual steps.
 CHANGELOG, SECURITY.md and `docs/` (lychee, `.github/lychee.toml`), runs the README's
 Quick start block literally on the release it names, and fails when the workspace version,
 the lock files, the newest CHANGELOG section and the release references in the docs
-disagree (`python3 -I .github/scripts/check-doc-versions.py`).
+disagree (`python3 -I .github/scripts/check-doc-versions.py`). It also runs the shared
+[DSD Toolbox docs tools](https://github.com/dsd-toolbox/dsd-toolbox/blob/main/docs/docs-tooling.md),
+pinned to one commit, with the settings in `.docs.toml`: the docs lint, the link check of
+every Markdown file, the facts regions, on pull requests a docs change with every code
+change, and weekly the marked command blocks against the published release. The
+`docs-audit` workflow runs after each release ([releasing](release.md#after-the-release-run-the-docs-audit)).
 
 ## See also
 

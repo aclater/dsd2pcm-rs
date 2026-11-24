@@ -177,6 +177,7 @@ no token when there is nothing to publish).
    `publish-update`, for the crates `dsd2pcm` and `dsd2pcm-cli`, expiring in one day.
 2. From a clean clone of the release commit:
 
+   <!-- docs-run: skip="maintainer step: needs a crates.io token and publishes crates" -->
    ```sh
    git clone https://github.com/dsd-toolbox/dsd2pcm-rs.git
    cd dsd2pcm-rs
@@ -216,6 +217,7 @@ steps 1 to 5 for that crate alone.
 3. Tag the release commit, the `main` commit that CI and a security review approved, and
    push the tag:
 
+   <!-- docs-run: skip="maintainer step: needs push rights and creates the release tag" -->
    ```sh
    git fetch origin
    git tag -a v0.1.2 -m "dsd2pcm 0.1.2" origin/main
@@ -230,6 +232,7 @@ steps 1 to 5 for that crate alone.
 5. Check: the crates on crates.io, the GitHub release with its 55 files (eighteen
    archives, their `.sha256` and `.intoto.jsonl` files, and `SHA256SUMS`), and an asset:
 
+   <!-- docs-run: skip="maintainer step: needs a GitHub login for gh" -->
    ```sh
    gh release download v0.1.2 -R dsd-toolbox/dsd2pcm-rs -p dsd2pcm-0.1.2-x86_64-linux.tar.gz
    gh attestation verify dsd2pcm-0.1.2-x86_64-linux.tar.gz -R dsd-toolbox/dsd2pcm-rs --signer-workflow dsd-toolbox/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.2 --deny-self-hosted-runners
@@ -240,6 +243,7 @@ steps 1 to 5 for that crate alone.
 6. Release notes: the workflow writes the same notes for every release. Put the version's
    CHANGELOG section on top of them, from a clone of the release commit:
 
+   <!-- docs-run: skip="maintainer step: needs a GitHub login with write access to the release" -->
    ```sh
    awk '/^## 0\.1\.2 /{f=1; next} /^## /{f=0} f' CHANGELOG.md > notes.md
    gh release view v0.1.2 -R dsd-toolbox/dsd2pcm-rs --json body -q .body >> notes.md
@@ -251,6 +255,7 @@ steps 1 to 5 for that crate alone.
    0.1.1, with a crates.io token that has the `yank` scope for both crates (Account
    Settings, API Tokens; revoke it afterwards):
 
+   <!-- docs-run: skip="maintainer step: needs a crates.io token with the yank scope" -->
    ```sh
    cargo login
    cargo yank --version 0.1.0 dsd2pcm
@@ -267,6 +272,18 @@ steps 1 to 5 for that crate alone.
 If a run fails after the crates job, re-run the failed jobs: published crates are skipped.
 A tag is never moved or re-created (the ruleset forbids it); a broken release gets a new
 patch version.
+
+<!-- docs-audit:begin -->
+## After the release: run the docs audit
+
+After the release: run the docs audit. Do it once the tag, the packages and the release notes are public, and before the release is announced.
+
+1. Run the `docs-audit` workflow from the Actions tab of the repository (Run workflow). It runs the docs lint, the link check with external URLs and the docs facts check, and fails if any of them does.
+2. Open the checklist it prints: every page that mentions a version, a command-line option or a platform, to compare with the release just published. Fix each mismatch in a docs-only change, or write down why it is right.
+3. Record the result in the release notes or the release checklist: the workflow run, and how many checklist items were fixed.
+
+Every project also runs this audit each month (the `docs-monthly` workflow in the DSD Toolbox repository), so a missed audit shows up within a month.
+<!-- docs-audit:end -->
 
 ## See also
 

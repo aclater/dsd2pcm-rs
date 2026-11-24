@@ -209,6 +209,7 @@ From 0.2.0 on, each release has the source as an attested archive,
 `git archive --format=tar --prefix=dsd2pcm-0.1.2/ v0.1.2 | gzip -n -9` (the same command
 gives the same tar, and with GNU gzip the same bytes). To pin and check it:
 
+<!-- docs-run: skip="needs a GitHub login for gh release download and gh attestation verify, then builds with Rust" -->
 ```sh
 gh release download v0.1.2 -R dsd-toolbox/dsd2pcm-rs -p 'dsd2pcm-0.1.2-src.tar.gz*'
 sha256sum -c dsd2pcm-0.1.2-src.tar.gz.sha256
@@ -221,6 +222,7 @@ cargo build --release --locked -p dsd2pcm-capi
 A minimal program, `crates/dsd2pcm-capi/tests/minimal.c`, converts one stereo frame of
 DSD silence. To build and run it on Linux, from the repository root:
 
+<!-- docs-run: skip="needs a checkout of this repository and a Rust toolchain; docs-run containers hold only the published release" -->
 ```sh
 cargo build --release -p dsd2pcm-capi
 cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c target/release/libdsd2pcm.a -lpthread -ldl -lm -o minimal
@@ -230,6 +232,7 @@ cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c t
 It prints `dsd2pcm 0.1.2: 2352 samples per channel, first byte 0`. To link the shared
 library instead (its SONAME is `libdsd2pcm.so.1`, so it needs that name at run time):
 
+<!-- docs-run: skip="needs a checkout of this repository and a Rust toolchain; docs-run containers hold only the published release" -->
 ```sh
 ln -sf libdsd2pcm.so target/release/libdsd2pcm.so.1
 cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c -L target/release -ldsd2pcm -o minimal
@@ -274,6 +277,8 @@ The `1` in the file names is the ABI version (see [ABI](#abi)). Check a download
 it, and build the example against it, from the folder holding the archive (Linux x86_64
 shown):
 
+<!-- docs-run: skip="needs a GitHub login for gh attestation verify, and the archive downloaded as the text above says" -->
+<!-- docs-lint: ignore placeholder -- pkg-config prints the flags for wherever the archive is unpacked, and '$ORIGIN' is the linker's token for the program's folder, passed on unexpanded -->
 ```sh
 sha256sum -c libdsd2pcm-0.1.2-x86_64-linux.tar.gz.sha256
 gh attestation verify libdsd2pcm-0.1.2-x86_64-linux.tar.gz -R dsd-toolbox/dsd2pcm-rs
@@ -288,6 +293,8 @@ the same with the `aarch64-macos` or `x86_64-macos` archive, `shasum -a 256 -c` 
 `sha256sum -c`, and `-Wl,-rpath,@executable_path/libdsd2pcm-0.1.2-aarch64-macos/lib`.
 Static linking instead (Linux):
 
+<!-- docs-run: skip="continues the block above, in the unpacked archive" -->
+<!-- docs-lint: ignore placeholder -- pkg-config prints the flags and the static library's system libraries for this platform -->
 ```sh
 cc libdsd2pcm-0.1.2-x86_64-linux/examples/minimal.c $(pkg-config --cflags dsd2pcm) libdsd2pcm-0.1.2-x86_64-linux/lib/libdsd2pcm.a $(pkg-config --libs-only-l --static dsd2pcm | sed 's/-ldsd2pcm//') -o minimal
 ```
@@ -296,6 +303,7 @@ To install system-wide, copy `include/` and `lib/` under a prefix such as `/usr/
 pkg-config file needs no change. On Windows, in a Visual Studio developer prompt in the
 unpacked folder:
 
+<!-- docs-run: skip="Windows, in a Visual Studio developer prompt" -->
 ```bat
 cl /I include examples\minimal.c lib\dsd2pcm.dll.lib
 copy bin\dsd2pcm.dll .
@@ -306,6 +314,8 @@ With MinGW-w64, in an MSYS2 MINGW64 shell (`pacman -S mingw-w64-x86_64-gcc
 mingw-w64-x86_64-pkgconf`), in the folder holding the unpacked
 `libdsd2pcm-0.1.2-x86_64-windows-gnu` folder:
 
+<!-- docs-run: skip="Windows, in an MSYS2 MINGW64 shell" -->
+<!-- docs-lint: ignore placeholder -- pkg-config prints the flags for wherever the archive is unpacked -->
 ```sh
 export PKG_CONFIG_PATH=libdsd2pcm-0.1.2-x86_64-windows-gnu/lib/pkgconfig
 gcc libdsd2pcm-0.1.2-x86_64-windows-gnu/examples/minimal.c $(pkg-config --cflags --libs dsd2pcm) -o minimal.exe

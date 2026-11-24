@@ -394,7 +394,7 @@ STREAMINFO must declare 1 to 6 channels and 8, 12, 16, 20 or 24 bits (claxon doe
 decode 32-bit frames: `Unsupported`). Each decoded block is checked against STREAMINFO: same
 channel count, every sample inside the declared bit depth. A `b`-bit sample `v` reads as
 `v * 2^-(b-1)`, the WAV reader's scaling, so 16 and 24-bit FLAC and WAV of the same
-samples give bit-identical `f64` (`tests/flac.rs`). Memory: one decoded block (at most
+samples give byte-identical `f64` (`tests/flac.rs`). Memory: one decoded block (at most
 65 535 frames by 6 channels of `i32`) plus the caller's output; `read_frames` returns at
 most 2^20 frames per call.
 

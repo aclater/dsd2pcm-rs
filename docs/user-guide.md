@@ -12,6 +12,7 @@ what to do when a conversion fails. Every option is listed in [options.md](optio
 176.4 kHz with the 40 kHz filter, on all cores. With the tool on the `PATH` (`cargo install
 dsd2pcm-cli`, or the release archive of the [Quick start](../README.md#quick-start)):
 
+<!-- docs-run: skip="needs dsd2pcm on the PATH and a DSF file of the reader; the README Quick start runs the same conversion" -->
 ```sh
 dsd2pcm "01 - Track.dsf" "01 - Track.wav"
 ```
@@ -36,6 +37,7 @@ linear-phase filters (`--cutoff`):
 
 For example, 88.2 kHz with the 30 kHz filter, 3 dB quieter:
 
+<!-- docs-run: skip="needs dsd2pcm on the PATH and a DSF file of the reader; the README Quick start runs the same conversion" -->
 ```sh
 dsd2pcm "01 - Track.dsf" "01 - Track.wav" --rate 88200 --cutoff 30 --gain -3
 ```
