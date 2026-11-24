@@ -26,6 +26,7 @@ Start with the [Quick start](../README.md#quick-start) in the README.
 
 - [Design](design.md): the design decisions and their reasons, and how the conversion works
 - [Performance](performance.md): speed against scarletbook-pcm 0.7.0, including the gaps
+- [Release quality comparison](quality/README.md): each release measured against the previous one
 - [Fuzzing](fuzzing.md): the fuzz targets and how to run them
 - [Testing for long-lived processes](testing.md): soak, leak loop, Miri, ThreadSanitizer, valgrind
 

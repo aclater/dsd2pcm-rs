@@ -48,6 +48,7 @@ The [documentation index](docs/README.md) lists every page.
 - [User guide](docs/user-guide.md) · [Options](docs/options.md): converting files, rates, filters, formats
 - [C interface](docs/c-api.md): the C library, its ABI and binary releases
 - [Performance](docs/performance.md): speed against scarletbook-pcm 0.7.0, including the gaps
+- [Release quality comparison](docs/quality/README.md): each release measured against the previous one
 - [Design](docs/design.md): the design decisions and their reasons
 - [Changelog](CHANGELOG.md) · [Plan](docs/plan.md)
 - [Contributing](CONTRIBUTING.md) · [Development](docs/development.md) · [Fuzzing](docs/fuzzing.md) · [Testing for long-lived processes](docs/testing.md) · [Releases](docs/release.md)
