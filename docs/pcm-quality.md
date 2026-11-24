@@ -591,9 +591,9 @@ matters to no one.
 **scarletbook-pcm 0.7.0: identical, by construction and by test.** dsd2pcm's default
 filter is scarletbook-pcm's: the taps are copied unchanged and the arithmetic is exact
 integer arithmetic, so the output does not depend on the order of the sums (see
-[design](design.md#dsd64-to-pcm)). Both were run on every DSD64 test signal at every rate
-and cutoff: 272 of 272 outputs had the same samples (equal SHA-256 of the decoded
-samples). Every measurement on this page therefore applies to scarletbook-pcm 0.7.0, and to
+[design](design.md#the-exactness-proof-and-fma)). Both were run on every DSD64 test signal
+at every rate and cutoff: 272 of 272 outputs had the same samples (equal SHA-256 of the
+decoded samples). Every measurement on this page therefore applies to scarletbook-pcm 0.7.0, and to
 programs that use it, unchanged.
 
 **The pysacd preset (`--filter pysacd`).** pysacd's own filter, ported bit for bit: three
