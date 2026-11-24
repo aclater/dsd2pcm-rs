@@ -19,4 +19,21 @@ pub enum Filter {
     /// seeded per Super Audio CD frame from its index in the area; files count frames from
     /// their start, the frames API from [`crate::frames::Run::at_frame`].
     Pysacd,
+    /// The precise filter: the 30, 40 kHz and wide cutoffs at every rate, like
+    /// [`Filter::Default`], with exact integer arithmetic, the same linear phase and centring,
+    /// and the same quantiser (rounded, not dithered), but at least 150 dB of stopband
+    /// wherever ultrasonic content would fold into the passband (scarletbook-pcm's filters:
+    /// about 110 dB) and less passband ripple. It costs more CPU time; see
+    /// `docs/pcm-quality.md`.
+    Precise,
+}
+
+impl Filter {
+    /// The decimator's taps for the filters that run on it.
+    pub(crate) fn design(self) -> crate::decimator::Design {
+        match self {
+            Filter::Precise => crate::decimator::Design::Precise,
+            _ => crate::decimator::Design::Default,
+        }
+    }
 }

@@ -1,0 +1,262 @@
+# Test signal definitions for tools/quality (read by gen_signals.py).
+#
+# Levels are dBFS of a PCM sample where 0 dBFS = 100 % DSD modulation, so
+#   0 dB SACD (the reference level, 50 % modulation)   = -6.02 dBFS,
+#   +3.1 dB SACD (the peak level, 71.43 % modulation)  = -2.92 dBFS.
+# This is also dsd2pcm's output scale at 0 dB gain.
+#
+# source:
+#   "pcm"  a PCM test file at each of pcm_rates, 24-bit (TPDF dither, fixed seed, unless
+#          dither = false), interpolated to the DSD rate and then modulated;
+#   "dsd"  defined at the DSD rate itself (no PCM step), then modulated;
+#   "bits" a bitstream written directly (no modulator; DSD64 only).
+# dsd_rates: 64 = 2.8224 MHz, 128, 256.
+# modulators: "ref" (tools/quality/modulator.py) and/or "sox" (SoX-DSD's sdm, black box;
+#   pcm sources only; filter per DSD rate in [sox]).
+# Tone frequencies are moved to the nearest multiple of coherent_bin_hz (352800 / 2^18), so
+# they are bin-centred in a 2^18-point FFT at 88.2, 176.4 and 352.8 kHz.
+# lead_silence: seconds of white noise at -100 dBFS RMS first; ramp: seconds of a linear
+# amplitude ramp from 0 to the full signal after it (Archimago 2022).
+# Lengths are rounded up to whole Super Audio CD frames (1/75 s).
+
+[settings]
+coherent_bin_hz = 1.3458251953125
+pcm_bits = 24
+seed = 20261123
+
+[sox]
+# Archimago (2022): CLANS-8 for DSD64, CLANS-7 for DSD128, CLANS-6 for DSD256, with the
+# trellis enabled ("-t 32 -n 32").
+args = { 64 = ["sdm", "-f", "clans-8", "-t", "32", "-n", "32"], 128 = ["sdm", "-f", "clans-7", "-t", "32", "-n", "32"], 256 = ["sdm", "-f", "clans-6", "-t", "32", "-n", "32"] }
+
+[[signal]]
+id = "idle"
+desc = "SACD idle pattern 0x69 (DSD silence), both channels"
+source = "bits"
+bits = "idle"
+seconds = 5
+
+[[signal]]
+id = "silence"
+desc = "Digital silence: 24-bit TPDF dither only"
+source = "pcm"
+pcm_rates = [88200, 96000]
+dsd_rates = [64, 128, 256]
+seconds = 15
+left = []
+
+[[signal]]
+id = "sine1k_0"
+desc = "1 kHz at 0 dB SACD (-6.02 dBFS)"
+source = "pcm"
+pcm_rates = [88200, 96000]
+dsd_rates = [64, 128, 256]
+seconds = 10
+left = [{ sine = 1000, dbfs = -6.02 }]
+
+[[signal]]
+id = "sine1k_peak"
+desc = "1 kHz at +3.1 dB SACD (-2.92 dBFS, the peak level); 3 s silence and a 2 s ramp first"
+source = "pcm"
+pcm_rates = [88200, 96000]
+dsd_rates = [64, 128, 256]
+modulators = ["ref", "sox"]
+lead_silence = 3
+ramp = 2
+seconds = 5
+left = [{ sine = 1000, dbfs = -2.92 }]
+
+[[signal]]
+id = "multitone"
+desc = "32 tones, log-spaced 17.6 Hz to 21.4 kHz, peak 0 dB SACD (-6.02 dBFS); 3 s silence and a 2 s ramp first"
+source = "pcm"
+pcm_rates = [88200, 96000]
+dsd_rates = [64, 128, 256]
+modulators = ["ref", "sox"]
+lead_silence = 3
+ramp = 2
+seconds = 10
+left = [{ multitone = 32, low = 17.6, high = 21400, peak_dbfs = -6.02 }]
+
+[[signal]]
+id = "jtest"
+desc = "24-bit J-Test: fs/4 at -3 dBFS plus a 1-LSB square wave at fs/192 (no dither); 3 s silence and a 2 s ramp first"
+source = "pcm"
+pcm_rates = [88200, 96000]
+dsd_rates = [64, 128, 256]
+modulators = ["ref", "sox"]
+dither = false
+lead_silence = 3
+ramp = 2
+seconds = 10
+left = [{ jtest = -3.0 }]
+
+[[signal]]
+id = "level_steps"
+desc = "1 kHz stepped from -3 to -126 dBFS in 3 dB steps, 2.5 s each"
+source = "pcm"
+pcm_rates = [88200]
+dsd_rates = [64]
+left = [{ steps = 1000, from_dbfs = -3, to_dbfs = -126, step_db = 3, step_seconds = 2.5 }]
+
+[[signal]]
+id = "freq_steps"
+desc = "20 Hz, 100 Hz, 1, 5, 10, 15 and 20 kHz at 0 dB SACD, 2.5 s each"
+source = "pcm"
+pcm_rates = [88200]
+dsd_rates = [64]
+left = [{ freq_steps = [20, 100, 1000, 5000, 10000, 15000, 20000], dbfs = -6.02, step_seconds = 2.5 }]
+
+[[signal]]
+id = "smpte"
+desc = "SMPTE IMD: 60 Hz and 7 kHz, 4:1, peak 0 dB SACD"
+source = "pcm"
+pcm_rates = [88200]
+dsd_rates = [64]
+seconds = 10
+left = [{ sine = 60, dbfs = -7.958 }, { sine = 7000, dbfs = -20.0 }]
+
+[[signal]]
+id = "ccif"
+desc = "CCIF IMD: 19 and 20 kHz, 1:1, each -6 dB below 0 dB SACD"
+source = "pcm"
+pcm_rates = [88200]
+dsd_rates = [64]
+seconds = 10
+left = [{ sine = 19000, dbfs = -12.04 }, { sine = 20000, dbfs = -12.04 }]
+
+[[signal]]
+id = "fr_tones"
+desc = "Frequency response: 1/3-octave tones 20 Hz to 20 kHz and 25, 31.5, 35, 40 kHz, -40 dBFS each, Schroeder phases"
+source = "pcm"
+pcm_rates = [88200]
+dsd_rates = [64]
+seconds = 10
+left = [{ tones = [20, 25, 32, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000, 25000, 31500, 35000, 40000], dbfs = -40 }]
+
+[[signal]]
+id = "xtalk_l"
+desc = "Crosstalk: 100 Hz, 1, 10 and 20 kHz at 0 dB SACD on the left only, 2.5 s each"
+source = "pcm"
+pcm_rates = [88200]
+dsd_rates = [64]
+left = [{ freq_steps = [100, 1000, 10000, 20000], dbfs = -6.02, step_seconds = 2.5 }]
+right = "silent"
+
+[[signal]]
+id = "xtalk_r"
+desc = "As xtalk_l with the channels swapped"
+source = "pcm"
+pcm_rates = [88200]
+dsd_rates = [64]
+left = "silent"
+right = [{ freq_steps = [100, 1000, 10000, 20000], dbfs = -6.02, step_seconds = 2.5 }]
+
+[[signal]]
+id = "sine15k"
+desc = "15 kHz at -12 dBFS (-6 dB SACD), for the time-domain view (Archimago 2015)"
+source = "pcm"
+pcm_rates = [88200, 96000]
+dsd_rates = [64, 128]
+seconds = 10
+left = [{ sine = 15000, dbfs = -12.0 }]
+
+[[signal]]
+id = "impulse"
+desc = "One PCM sample at -6.02 dBFS (0 dB SACD) after 0.5 s of silence"
+source = "pcm"
+pcm_rates = [88200, 96000]
+dsd_rates = [64, 128, 256]
+seconds = 2
+left = [{ impulse = 0.5, dbfs = -6.02 }]
+
+[[signal]]
+id = "step"
+desc = "Step from silence to -6.02 dBFS (0 dB SACD) at 0.5 s, held"
+source = "pcm"
+pcm_rates = [88200]
+dsd_rates = [64]
+seconds = 2
+left = [{ step = 0.5, dbfs = -6.02 }]
+
+[[signal]]
+id = "polarity"
+desc = "Positive 10-sample rising half-sine pulse, peak -6.02 dBFS, at 0.5 s"
+source = "pcm"
+pcm_rates = [88200]
+dsd_rates = [64]
+seconds = 2
+left = [{ halfsine = 0.5, samples = 10, dbfs = -6.02 }]
+
+[[signal]]
+id = "alias_steps"
+desc = "Ultrasonic tones at 50, 60, 80, 92, 100, 120, 150 and 200 kHz, -26 dBFS (-20 dB SACD), 2.5 s each"
+source = "dsd"
+dsd_rates = [64]
+left = [{ freq_steps = [50000, 60000, 80000, 92000, 100000, 120000, 150000, 200000], dbfs = -26.02, step_seconds = 2.5 }]
+
+[[signal]]
+id = "hot_ramp"
+desc = "1 kHz rising linearly in dB from -12 to -1.5 dBFS (+4.5 dB SACD) over 10 s"
+source = "dsd"
+dsd_rates = [64]
+ntf_gain = 1.2
+seconds = 10
+left = [{ ramp_sine = 1000, from_dbfs = -12, to_dbfs = -1.5, seconds = 10 }]
+
+[[signal]]
+id = "bit_impulse"
+desc = "DSD silence with one bit flipped from 0 to 1 at 0.5 s, left only: the filter's own impulse response"
+source = "bits"
+bits = "impulse"
+seconds = 2
+
+[[signal]]
+id = "bit_step"
+desc = "DSD silence, then from 0.5 s the pattern 0xEE (75 % ones: +50 % modulation, 0 dB SACD)"
+source = "bits"
+bits = "step"
+seconds = 2
+
+# A very quiet source for the filter floor: an 8th-order modulator (NTF zeros at the
+# 8th-order Legendre roots across 20 kHz, Butterworth poles, largest NTF gain 1.45;
+# at 1.5 it went unstable within 4 s at 0 dB SACD),
+# defined at the DSD rate (no 24-bit PCM step, whose dither would mask the floor). Its loop
+# state legitimately reaches larger values than the 5th order's, so the instability check
+# trips at |u| > 50 instead of 8.
+
+[[signal]]
+id = "quiet_sine1k"
+desc = "1 kHz at 0 dB SACD (-6.02 dBFS) from an 8th-order modulator"
+source = "dsd"
+dsd_rates = [64]
+ntf_order = 8
+ntf_gain = 1.45
+ntf_limit = 50
+seconds = 5
+left = [{ sine = 1000, dbfs = -6.02 }]
+
+[[signal]]
+id = "quiet_alias"
+desc = "Tones at 170, 345, 530, 700, 880, 1050 and 1230 kHz, -26.02 dBFS (-20 dB SACD), 2.5 s each, from an 8th-order modulator"
+source = "dsd"
+dsd_rates = [64]
+ntf_order = 8
+ntf_gain = 1.45
+ntf_limit = 50
+left = [{ freq_steps = [170000, 345000, 530000, 700000, 880000, 1050000, 1230000], dbfs = -26.02, step_seconds = 2.5 }]
+
+# Louder tones in the bands that fold onto 0-20 kHz at every output rate (333-372 kHz,
+# 686-724 kHz, 1040-1078 kHz), same 8th-order modulator, about -8 dBFS nominal. Analysed by
+# narrow-band detection (`analyse.py`, `narrow`), so a rejection of 150 dB and more stays
+# above the output's own floor.
+
+[[signal]]
+id = "loud_alias"
+desc = "Tones at 333, 345, 360, 372, 686, 700, 712, 723.7, 1040, 1060 and 1078 kHz, -8.02 dBFS nominal, 2.5 s each, from an 8th-order modulator"
+source = "dsd"
+dsd_rates = [64]
+ntf_order = 8
+ntf_gain = 1.45
+ntf_limit = 50
+left = [{ freq_steps = [333000, 345000, 360000, 372000, 686000, 700000, 712000, 723700, 1040000, 1060000, 1078000], dbfs = -8.02, step_seconds = 2.5 }]

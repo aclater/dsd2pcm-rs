@@ -47,6 +47,9 @@
   frame from the frame's index in the area: whole files count from their first frame, frame
   runs from `dsd2pcm_run.first_frame` (the index of the run's first frame; a run with no
   frame before it starts the area). The default filter ignores `first_frame`.
+  `DSD2PCM_FILTER_PRECISE` (2) is the precise filter (`Filter::Precise`): every rate and
+  cutoff, rounded as the default, with stopbands of 150 dB and more at about twice the CPU
+  time ([PCM quality](pcm-quality.md#the-precise-filter)); it ignores `first_frame` too.
 
 ## Whole files
 

@@ -41,6 +41,18 @@ version.
   library's objects are marked for the CET shadow stack.
   [c-api.md](docs/c-api.md#binary-releases) explains how to embed the static library in a
   shared library with its symbols hidden.
+- New opt-in filter `precise` (`--filter precise`, `Filter::Precise`,
+  `DSD2PCM_FILTER_PRECISE`): every rate and cutoff, exact integer arithmetic like the
+  default, at least 150 dB of stopband wherever ultrasonic content folds into the passband
+  (the default: about 110 dB) and about half the passband ripple. With a very quiet DSD64
+  source the audio-band floor falls from -128 dBFS (SINAD 122 dB) to the 24-bit output's,
+  about -150 dBFS (SINAD 142 to 145 dB); it takes about twice the CPU time
+  ([PCM quality](docs/pcm-quality.md#the-precise-filter)). Its taps come from
+  `tools/filters/design_precise.py`. The default filter and its output are unchanged.
+- Docs: [PCM quality](docs/pcm-quality.md), the measured audio quality of every filter and
+  rate (frequency response, aliasing, ringing, noise, ultrasonic noise, headroom, an
+  RMAA-style summary; the pysacd preset, scarletbook-pcm 0.7.0 and the foobar2000 SACD
+  plug-in compared), with the measurement scripts in `tools/quality`.
 
 ### Changed
 

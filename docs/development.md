@@ -5,7 +5,8 @@
 CI (`.github/workflows`) runs fmt, clippy, the docs build and the tests on Linux (x86_64,
 aarch64, i686), macOS (arm64) and Windows (x86_64), the tests once per SIMD level the CPU
 has, plus a short soak test, the C tests under AddressSanitizer and LeakSanitizer, the
-minimum Rust version, cargo-deny, a fuzz smoke test, CodeQL and zizmor; Miri and
+minimum Rust version, cargo-deny, a fuzz smoke test, CodeQL, zizmor and the check that
+the precise filter's tables are what `tools/filters/design_precise.py --check` generates; Miri and
 ThreadSanitizer run weekly ([testing.md](testing.md)). The speed workflow (`bench.yml`, by
 hand only) is described in [docs/performance.md](performance.md).
 

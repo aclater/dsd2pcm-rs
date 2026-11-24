@@ -140,6 +140,35 @@ On aarch64 dsd2pcm is level with scarletbook-pcm 0.7.0 (0.97x to 1.04x on Linux,
 `run 1` included); the x86-64 lead comes from the AVX2 kernels. Every run checked that both
 crates give the same bytes on both platforms.
 
+## The precise filter
+
+`--filter precise` against the default filter (not against scarletbook-pcm), whole file,
+2 channels, one thread, best of three over 20 s of audio
+(`cargo run --release --example bench_filters -- FILE.dsf 20`, pinned with `taskset`).
+Multiples of real time, and precise's time over the default's:
+
+| Rate | Cutoff | P-core | E-core | Zen 2 | i686 on the P-core, `sse2` level |
+|---|---|---:|---:|---:|---:|
+| 88.2 kHz | 30 | 170 (2.14x) | 63 (2.25x) | 163 (2.15x) | 82 (2.12x) |
+| 88.2 kHz | 40 | 196 (2.06x) | 75 (2.18x) | 191 (2.05x) | 97 (2.07x) |
+| 176.4 kHz | 30 | 149 (1.83x) | 53 (1.86x) | 142 (1.81x) | 71 (1.82x) |
+| 176.4 kHz | 40 | 171 (1.82x) | 64 (1.82x) | 166 (1.79x) | 85 (1.77x) |
+| 176.4 kHz | wide | 95 (2.06x) | 32 (2.28x) | 93 (2.12x) | 40 (2.16x) |
+| 352.8 kHz | 30 | 115 (1.79x) | 42 (1.84x) | 107 (1.75x) | 58 (1.84x) |
+| 352.8 kHz | 40 | 128 (1.78x) | 48 (1.82x) | 119 (1.73x) | 67 (1.81x) |
+| 352.8 kHz | wide | 116 (1.56x) | 43 (1.61x) | 111 (1.50x) | 55 (1.67x) |
+
+On all cores (120 s of audio, 2 channels) precise takes 1.18x to 2.00x the default's time
+on the i9-13900H (20 threads) and 1.15x to 1.36x on the Zen 2 (32 threads), converting at
+227 to 449 and 365 to 804 times real time. With two channels the threaded default is partly
+limited by work outside the filter, so these ratios vary more from run to run than the
+one-thread ones.
+
+The cost follows the taps per output: the first stage reads a 12-byte window (16 bytes for
+`wide`) instead of 8 (12), and every later stage is two filters of about 80 dB each instead
+of one of 110 dB ([design](design.md#the-precise-filter-filterprecise)). The output is the
+same at every SIMD level, as for the default.
+
 ## Known gaps
 
 - Whole-file conversion of the 2-channel file at 176.4 kHz `wide` on the P-core reads 0.99x.

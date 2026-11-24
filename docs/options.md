@@ -9,7 +9,7 @@ use them.
 ## Synopsis
 
 ```text
-dsd2pcm [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread] [-n|--no-clobber] [--] IN OUT
+dsd2pcm [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|precise|pysacd] [--single-thread] [-n|--no-clobber] [--] IN OUT
 ```
 
 `IN` is a DSF or DFF file (DSD64); `OUT` is the WAV file to write (24-bit PCM). An existing
@@ -27,7 +27,7 @@ option values must be UTF-8, and a value that is not is a usage error.
 | `--rate` | `88200`, `176400`, `352800` (Hz) | `176400` | Output sample rate. |
 | `--cutoff` | `30`, `40`, `wide` | `40` | Filter: passband to 30 kHz, 40 kHz, or 80 kHz (`wide`, 176.4 and 352.8 kHz only). `80` is accepted for `wide`. |
 | `--gain` | -120 to +24 (dB) | `0` | Applied before quantising to 24 bits. |
-| `--filter` | `default`, `pysacd` | `default` | `pysacd`: pysacd's filter and dithered quantiser, 88.2 and 176.4 kHz only, standard cutoff only. |
+| `--filter` | `default`, `precise`, `pysacd` | `default` | `precise`: at least 150 dB of stopband, every rate and cutoff, about twice the CPU time. `pysacd`: pysacd's filter and dithered quantiser, 88.2 and 176.4 kHz only, standard cutoff only. |
 | `--single-thread` | | all cores | Convert on the calling thread only. |
 | `-n`, `--no-clobber` | | off | Refuse an existing `OUT` (exit status 1, the file left as it was), and never replace a file that appears at `OUT` during the conversion. |
 | `--` | | | Ends the options: every later argument is a file name. |

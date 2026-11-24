@@ -144,6 +144,14 @@ fn convert_file_matches_rust_and_reports() {
         ),
         (88_200, DSD2PCM_CUTOFF_LOW, -3.0, 1, DSD2PCM_FILTER_DEFAULT),
         (352_800, DSD2PCM_CUTOFF_WIDE, 0.0, 0, DSD2PCM_FILTER_DEFAULT),
+        (88_200, DSD2PCM_CUTOFF_LOW, 0.0, 1, DSD2PCM_FILTER_PRECISE),
+        (
+            352_800,
+            DSD2PCM_CUTOFF_WIDE,
+            -3.0,
+            0,
+            DSD2PCM_FILTER_PRECISE,
+        ),
         (
             176_400,
             DSD2PCM_CUTOFF_STANDARD,
@@ -233,7 +241,8 @@ fn convert_file_rejects_nulls_and_bad_values() {
     assert_eq!(mutate(&|x| x.rate_hz = 44_100), DSD2PCM_E_INVALID_ARGUMENT);
     assert_eq!(mutate(&|x| x.rate_hz = 0), DSD2PCM_E_INVALID_ARGUMENT);
     assert_eq!(mutate(&|x| x.cutoff = 3), DSD2PCM_E_INVALID_ARGUMENT);
-    assert_eq!(mutate(&|x| x.filter = 2), DSD2PCM_E_INVALID_ARGUMENT);
+    assert_eq!(mutate(&|x| x.filter = 3), DSD2PCM_E_INVALID_ARGUMENT);
+    assert_eq!(mutate(&|x| x.filter = DSD2PCM_FILTER_PRECISE), DSD2PCM_OK);
     // pysacd's filter: 88.2 and 176.4 kHz, standard cutoff only.
     assert_eq!(mutate(&|x| x.filter = DSD2PCM_FILTER_PYSACD), DSD2PCM_OK);
     assert_ne!(
@@ -476,6 +485,8 @@ fn frames_convert_matches_rust() {
         (176_400, 2u32, 6.0, DSD2PCM_FILTER_DEFAULT, 0u64, true),
         (88_200, 1, 0.0, DSD2PCM_FILTER_DEFAULT, 5, false),
         (352_800, 6, 3.0, DSD2PCM_FILTER_DEFAULT, 0, true),
+        (352_800, 2, 3.0, DSD2PCM_FILTER_PRECISE, 0, true),
+        (176_400, 1, 0.0, DSD2PCM_FILTER_PRECISE, 7, false),
         (176_400, 2, 6.0, DSD2PCM_FILTER_PYSACD, 1234, true),
         (88_200, 6, 0.0, DSD2PCM_FILTER_PYSACD, 0, false),
         (176_400, 1, -1.5, DSD2PCM_FILTER_PYSACD, u64::MAX - 40, true),
@@ -962,7 +973,11 @@ static COUNTING: Counting = Counting;
 #[test]
 #[cfg_attr(miri, ignore = "too slow: 40-frame conversions, covered natively")]
 fn frames_convert_allocates_nothing_after_warm_up() {
-    for filter in [DSD2PCM_FILTER_DEFAULT, DSD2PCM_FILTER_PYSACD] {
+    for filter in [
+        DSD2PCM_FILTER_DEFAULT,
+        DSD2PCM_FILTER_PRECISE,
+        DSD2PCM_FILTER_PYSACD,
+    ] {
         alloc_case(filter);
     }
 }

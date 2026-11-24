@@ -187,12 +187,14 @@ where
     O: IntoIterator<Item = &'a mut f64>,
     O::IntoIter: ExactSizeIterator,
 {
-    // S1's 8-byte window and the wide filter's 12-byte one, with a constant table count, so
-    // that the loops unroll.
+    // S1's 8-byte window and the wide filter's 12-byte one, and the precise filter's 12 and
+    // 16 bytes, with a constant table count, so that the loops unroll.
     const W8: usize = s1_tables(8, S1Layout::Wide);
     const W12: usize = s1_tables(12, S1Layout::Wide);
+    const W16: usize = s1_tables(16, S1Layout::Wide);
     const B8: usize = s1_tables(8, S1Layout::Byte);
     const B12: usize = s1_tables(12, S1Layout::Byte);
+    const B16: usize = s1_tables(16, S1Layout::Byte);
     match (&lut.tables, lut.bytes) {
         (S1Tables::Wide(t), 8) if t.len() == W8 => {
             s1_n::<u64, WIDE_BITS, { 1 << WIDE_BITS }, 8, W8, _>(
@@ -212,11 +214,23 @@ where
                 out,
             )
         }
+        (S1Tables::Wide(t), 16) if t.len() == W16 => {
+            s1_n::<u64, WIDE_BITS, { 1 << WIDE_BITS }, 16, W16, _>(
+                t[..].try_into().unwrap(),
+                bytes,
+                start,
+                stride,
+                out,
+            )
+        }
         (S1Tables::Byte(t), 8) if t.len() == B8 => {
             s1_n::<u32, 8, 256, 8, B8, _>(t[..].try_into().unwrap(), bytes, start, stride, out)
         }
         (S1Tables::Byte(t), 12) if t.len() == B12 => {
             s1_n::<u32, 8, 256, 12, B12, _>(t[..].try_into().unwrap(), bytes, start, stride, out)
+        }
+        (S1Tables::Byte(t), 16) if t.len() == B16 => {
+            s1_n::<u32, 8, 256, 16, B16, _>(t[..].try_into().unwrap(), bytes, start, stride, out)
         }
         _ => s1_any(lut, bytes, start, stride, out),
     }

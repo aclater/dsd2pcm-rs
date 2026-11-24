@@ -47,6 +47,7 @@ The [documentation index](docs/README.md) lists every page.
 
 - [User guide](docs/user-guide.md) · [Options](docs/options.md): converting files, rates, filters, formats
 - [C interface](docs/c-api.md): the C library, its ABI and binary releases
+- [PCM quality](docs/pcm-quality.md): measured audio quality of every filter and rate, and the decisions behind it, following [Archimago](https://archimago.blogspot.com/)'s DSD-to-PCM method, with [Audio Science Review](https://www.audiosciencereview.com/) and [Stereophile](https://www.stereophile.com/content/measurements-maps-precision) as references for measurement practice
 - [Performance](docs/performance.md): speed against scarletbook-pcm 0.7.0, including the gaps
 - [Release quality comparison](docs/quality/README.md): each release measured against the previous one
 - [Design](docs/design.md): the design decisions and their reasons

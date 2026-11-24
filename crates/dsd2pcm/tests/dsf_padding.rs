@@ -86,7 +86,7 @@ fn reader_masks_the_padding_bits() {
 
 #[test]
 fn padding_converts_as_silence() {
-    for filter in [Filter::Default, Filter::Pysacd] {
+    for filter in [Filter::Default, Filter::Precise, Filter::Pysacd] {
         for (rate, cutoff) in ALL {
             let mut opts = PcmOptions::new(rate);
             opts.cutoff = cutoff;
@@ -98,9 +98,9 @@ fn padding_converts_as_silence() {
             for p in 1u32..=7 {
                 let len = 3 * 4704 + 37 + p as usize;
                 let samples = 8 * len as u64 - u64::from(p);
-                // Idle content with zero padding: digital silence (the default filter;
-                // pysacd's quantiser adds dither).
-                if filter == Filter::Default {
+                // Idle content with zero padding: digital silence (the default and precise
+                // filters; pysacd's quantiser adds dither).
+                if filter != Filter::Pysacd {
                     let idle = with_pad(&vec![0x69; len], p, 0x00);
                     let out = convert(&dsf(&idle, &idle, samples), &opts);
                     assert!(

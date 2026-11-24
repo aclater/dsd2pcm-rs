@@ -5,7 +5,8 @@
 //! - `flac` (feature `flac`, default): FLAC reader.
 //! - [`decimator`]: streaming DSD64 to 24-bit PCM at 88.2, 176.4 or 352.8 kHz, with the
 //!   filters of scarletbook-pcm 0.7.0 and identical output samples.
-//! - [`Filter`]: the filter choice: scarletbook-pcm's (default) or pysacd's
+//! - [`Filter`]: the filter choice: scarletbook-pcm's (default), the precise filter
+//!   ([`Filter::Precise`], 150 dB stopbands, exact like the default) or pysacd's
 //!   ([`Filter::Pysacd`], 88.2 and 176.4 kHz, dithered).
 //! - [`convert`]: whole-file conversion.
 //! - [`frames`]: Super Audio CD frame runs (with neighbour frames) to PCM, with the

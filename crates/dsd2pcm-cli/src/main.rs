@@ -10,13 +10,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 const USAGE: &str = "usage: dsd2pcm [OPTIONS] [--] IN.dsf|IN.dff OUT.wav
-options: [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread] [-n|--no-clobber]
+options: [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|precise|pysacd] [--single-thread] [-n|--no-clobber]
 
 Converts DSD64 to 24-bit PCM WAV. Defaults: --rate 176400 --cutoff 40 --gain 0.
 Cutoffs: 30 (pass 30 kHz, stop 36 kHz), 40 (pass 40 kHz, stop 48 kHz),
 wide (pass 80 kHz; 176.4 and 352.8 kHz only).
-Filters: default (scarletbook-pcm 0.7.0's), pysacd (pysacd's filter and dithered
-quantiser, bit-exact with its reference; 88200 and 176400 only, fixed response).
+Filters: default (scarletbook-pcm 0.7.0's), precise (150 dB stopbands, every rate and
+cutoff, more CPU), pysacd (pysacd's filter and dithered quantiser, bit-exact with its
+reference; 88200 and 176400 only, fixed response).
 --single-thread: convert on the calling thread only (default: all cores).
 -n, --no-clobber: fail if OUT exists, and never replace a file that appears at OUT
 during the conversion (default: replace OUT).
@@ -69,8 +70,9 @@ fn parse(args: Vec<OsString>) -> Result<(PathBuf, PathBuf, PcmOptions, OutputOpt
             "--filter" => {
                 opts.filter = match val("--filter")?.as_str() {
                     "default" => Filter::Default,
+                    "precise" => Filter::Precise,
                     "pysacd" => Filter::Pysacd,
-                    v => return Err(format!("filter {v:?}: default or pysacd")),
+                    v => return Err(format!("filter {v:?}: default, precise or pysacd")),
                 }
             }
             "--single-thread" => opts.threads = false,

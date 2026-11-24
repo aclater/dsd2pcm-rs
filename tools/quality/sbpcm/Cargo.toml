@@ -1,0 +1,13 @@
+[package]
+name = "sbpcm-ref"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "MIT OR Apache-2.0"
+description = "Converts raw DSD64 with scarletbook-pcm 0.7.0, for tools/quality/measure.py"
+
+# Not part of the dsd2pcm workspace.
+[workspace]
+
+[dependencies]
+scarletbook-pcm = "=0.7.0"

@@ -434,7 +434,7 @@ pub fn check_options(opts: &PcmOptions) -> Result<()> {
     }
     match opts.filter {
         Filter::Pysacd => pysacd::Pysacd::new(opts.rate, opts.cutoff).map(|_| ()),
-        _ => Plan::new(opts.rate, opts.cutoff).map(|_| ()),
+        f => Plan::with_design(opts.rate, opts.cutoff, f.design()).map(|_| ()),
     }
 }
 
@@ -468,7 +468,7 @@ pub fn dsd64_to_pcm_with<W: Write + Seek>(
     }
     let gain = decimator::db_to_linear(opts.gain_db);
     let rate = opts.rate;
-    let plan = Plan::new(rate, opts.cutoff)?;
+    let plan = Plan::with_design(rate, opts.cutoff, opts.filter.design())?;
     let ch = usize::from(info.channels);
     let n_out = decimator::output_len(info.samples, rate);
     let workers = if opts.threads {

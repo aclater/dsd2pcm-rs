@@ -1,0 +1,95 @@
+# Decoders for decode.py. Each is a black box: a DSD file in, a PCM WAV out.
+#
+# command: an argument list; {input}, {output}, {rate}, {cutoff}, {gain} and {tool:NAME}
+#   (a path given with --tool NAME=PATH) are filled in.
+# input: "dsf" (the generated DSF), or "raw" (Super Audio CD frame layout: channels
+#   interleaved byte by byte, MSB first; decode.py makes it from the DSF).
+# output: "wav", or "s24" (raw 24-bit little-endian, interleaved; decode.py wraps it).
+# settings: the runs, each a table of the placeholders; "name" names the output folder.
+# dsd_rates: the DSD rates the decoder accepts.
+
+[decoder.dsd2pcm]
+desc = "dsd2pcm (default filter)"
+command = ["{tool:dsd2pcm}", "{input}", "{output}", "--rate", "{rate}", "--cutoff", "{cutoff}", "--gain", "{gain}"]
+input = "dsf"
+output = "wav"
+dsd_rates = [64]
+settings = [
+  { name = "88k2-30", rate = 88200, cutoff = "30", gain = "0" },
+  { name = "88k2-40", rate = 88200, cutoff = "40", gain = "0" },
+  { name = "176k4-30", rate = 176400, cutoff = "30", gain = "0" },
+  { name = "176k4-40", rate = 176400, cutoff = "40", gain = "0" },
+  { name = "176k4-wide", rate = 176400, cutoff = "wide", gain = "0" },
+  { name = "352k8-30", rate = 352800, cutoff = "30", gain = "0" },
+  { name = "352k8-40", rate = 352800, cutoff = "40", gain = "0" },
+  { name = "352k8-wide", rate = 352800, cutoff = "wide", gain = "0" },
+]
+
+[decoder.dsd2pcm-gain]
+desc = "dsd2pcm, 176.4 kHz, 40 kHz filter, with gain (headroom tests)"
+command = ["{tool:dsd2pcm}", "{input}", "{output}", "--rate", "{rate}", "--cutoff", "{cutoff}", "--gain", "{gain}"]
+input = "dsf"
+output = "wav"
+dsd_rates = [64]
+signals = ["hot_ramp", "sine1k_peak", "bit_step"]
+settings = [
+  { name = "176k4-40-g-3", rate = 176400, cutoff = "40", gain = "-3" },
+  { name = "176k4-40-g+3", rate = 176400, cutoff = "40", gain = "3" },
+  { name = "176k4-40-g+6", rate = 176400, cutoff = "40", gain = "6" },
+]
+
+[decoder.pysacd]
+desc = "dsd2pcm --filter pysacd (the pysacd preset)"
+command = ["{tool:dsd2pcm}", "{input}", "{output}", "--rate", "{rate}", "--filter", "pysacd"]
+input = "dsf"
+output = "wav"
+dsd_rates = [64]
+settings = [
+  { name = "88k2", rate = 88200 },
+  { name = "176k4", rate = 176400 },
+]
+
+[decoder.scarletbook-pcm]
+desc = "scarletbook-pcm 0.7.0 (tools/quality/sbpcm)"
+command = ["{tool:sbpcm}", "{input}", "{output}", "2", "{rate}", "{cutoff}"]
+input = "raw"
+output = "s24"
+dsd_rates = [64]
+settings = [
+  { name = "88k2-30", rate = 88200, cutoff = "30" },
+  { name = "88k2-40", rate = 88200, cutoff = "40" },
+  { name = "176k4-30", rate = 176400, cutoff = "30" },
+  { name = "176k4-40", rate = 176400, cutoff = "40" },
+  { name = "176k4-wide", rate = 176400, cutoff = "wide" },
+  { name = "352k8-30", rate = 352800, cutoff = "30" },
+  { name = "352k8-40", rate = 352800, cutoff = "40" },
+  { name = "352k8-wide", rate = 352800, cutoff = "wide" },
+]
+
+[decoder.dsd2pcm-precise]
+desc = "dsd2pcm --filter precise"
+command = ["{tool:dsd2pcm}", "{input}", "{output}", "--rate", "{rate}", "--cutoff", "{cutoff}", "--gain", "{gain}", "--filter", "precise"]
+input = "dsf"
+output = "wav"
+dsd_rates = [64]
+settings = [
+  { name = "88k2-30", rate = 88200, cutoff = "30", gain = "0" },
+  { name = "88k2-40", rate = 88200, cutoff = "40", gain = "0" },
+  { name = "176k4-30", rate = 176400, cutoff = "30", gain = "0" },
+  { name = "176k4-40", rate = 176400, cutoff = "40", gain = "0" },
+  { name = "176k4-wide", rate = 176400, cutoff = "wide", gain = "0" },
+  { name = "352k8-30", rate = 352800, cutoff = "30", gain = "0" },
+  { name = "352k8-40", rate = 352800, cutoff = "40", gain = "0" },
+  { name = "352k8-wide", rate = 352800, cutoff = "wide", gain = "0" },
+]
+
+[decoder.ffmpeg]
+desc = "ffmpeg's DSD decoder (352.8 kHz, 32-bit float; 176.4 kHz through its default resampler)"
+command = ["{tool:ffmpeg}", "-v", "error", "-y", "-i", "{input}", "-ar", "{rate}", "-c:a", "pcm_f32le", "{output}"]
+input = "dsf"
+output = "wav"
+dsd_rates = [64]
+settings = [
+  { name = "176k4", rate = 176400 },
+  { name = "352k8", rate = 352800 },
+]
