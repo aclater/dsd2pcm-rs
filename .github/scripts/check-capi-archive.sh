@@ -107,7 +107,6 @@ esac
 # shellcheck disable=SC2086
 $cc -std=c99 -Wall -Wextra -Werror "${cflags[@]}" -o "$work/minimal-static" "$src" "$dir/lib/libdsd2pcm.a" "${private[@]}"
 "$work/minimal-static"
-"$(dirname "$0")/check-capi-no-claxon.sh" "$dir/lib/libdsd2pcm.a"
 
 # Embedded: minimal.c's main renamed minimal_main, in a shared library with libdsd2pcm.a.
 echo "global symbols defined in libdsd2pcm.a: $(nm -g --defined-only "$dir/lib/libdsd2pcm.a" 2> /dev/null | grep -c ' [A-Z] ')"
@@ -148,4 +147,5 @@ grep -qx minimal_main <<< "$exports" || { echo "::error::$lib does not export mi
 # shellcheck disable=SC2086
 $cc -o "$work/embedded" "$work/main.c" -L"$work" -lembed "${erpath[@]}"
 "$work/embedded"
+"$(dirname "$0")/check-capi-no-claxon.sh" "$dir/lib/libdsd2pcm.a"
 echo "C library archive: shared, static and embedded programs built and ran; no claxon code"
