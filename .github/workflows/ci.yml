@@ -1,7 +1,8 @@
 # CI: formatting, clippy, the docs, and the tests on Linux (x86_64, aarch64, i686), macOS
 # (arm64) and Windows (x86_64), each test run once per SIMD level the CPU has
 # (.github/scripts/test-simd-levels.sh), a short soak test on Linux (tests/soak.rs), the
-# C library's header and C tests, also under AddressSanitizer and LeakSanitizer, the speed
+# C library's header and C tests, also under AddressSanitizer and LeakSanitizer, the C
+# library's source archive built with no network (.github/scripts/check-capi-src.sh), the speed
 # in a consumer's release profile against ours (.github/scripts/profile-ab.sh), and a scan
 # for private names in the files and commit identities. MSRV,
 # cargo-deny, fuzzing, zizmor, Miri and ThreadSanitizer (sanitizers.yml) have their own
@@ -309,3 +310,35 @@ jobs:
             echo "::error::the check failed on the flac build for another reason (status $rc)"; exit 1
           fi
           echo "the check catches a library built with the flac feature"
+
+  # The C library's source archive, libdsd2pcm-<v>-src.tar.gz (a release asset, for builds
+  # with no network: docs/c-api.md, "Offline source build"). The manifest transform's tests,
+  # then the archive from this commit, checked by .github/scripts/check-capi-src.sh: made a
+  # second time with the same bytes, the expected files with the commit's sources, a
+  # Cargo.lock of the two crates only, `cargo build --offline --locked` with an empty
+  # CARGO_HOME in a network namespace of its own (unshare -rn), and examples/minimal.c built
+  # and run against it. On the runner itself, not in a container: a container's seccomp
+  # profile refuses the user namespace that unshare -rn needs; Ubuntu 24.04 allows it once
+  # AppArmor's restriction is lifted.
+  capi-src:
+    name: C library source archive (offline build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust
+        run: |
+          rustup toolchain install "$RUST_STABLE" --profile minimal
+          rustup default "$RUST_STABLE"
+      - name: Unprivileged user namespaces, for unshare -rn
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Tests of the manifest transform (.github/scripts/capi-src-manifests-test.sh)
+        run: .github/scripts/capi-src-manifests-test.sh
+      - name: Make the archive and check it (.github/scripts/check-capi-src.sh)
+        env:
+          REQUIRE_NO_NETWORK: "1"
+        run: |
+          .github/scripts/make-capi-src.sh "$RUNNER_TEMP/dist"
+          .github/scripts/check-capi-src.sh "$RUNNER_TEMP"/dist/libdsd2pcm-*-src.tar.gz

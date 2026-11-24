@@ -181,6 +181,17 @@ Each with what to change in a caller. The C interface stays ABI version 1, with 
   library's objects are marked for the CET shadow stack.
   [c-api.md](docs/c-api.md#binary-releases) explains how to embed the static library in a
   shared library with its symbols hidden.
+- Releases: the C library's own source archive, `libdsd2pcm-<version>-src.tar.gz`
+  (attested, with a `.sha256` file): `dsd2pcm` and `dsd2pcm-capi` as a workspace of their
+  own whose `Cargo.lock` lists only them, so `cargo build --offline --locked --release -p
+  dsd2pcm-capi` builds it with an empty `CARGO_HOME` and no network, for a build inside
+  another project's source distribution. Its manifests leave out the `flac` feature, claxon
+  and the dev-dependencies, which Cargo otherwise looks up even when unused; the C library
+  never has `flac`, and its output is the same (the C example converts the same test files
+  to the same bytes as with the repository's build, at every SIMD level). It is made
+  reproducibly by `.github/scripts/make-capi-src.sh`, and CI checks on every pull request
+  that a second run gives the same bytes and that it builds offline and runs its example
+  ([C interface](docs/c-api.md#offline-source-build)).
 - New filter `precise` (`--filter precise`, `Filter::Precise`,
   `DSD2PCM_FILTER_PRECISE`), the default since this release (see Changed, Output): every rate and
   cutoff, exact integer arithmetic like scarletbook-pcm's filters, at least 150 dB of stopband

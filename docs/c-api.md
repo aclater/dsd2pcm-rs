@@ -256,10 +256,66 @@ cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c -
 LD_LIBRARY_PATH=target/release ./minimal
 ```
 
+## Offline source build
+
+From 0.2.0 on, each release also has the C library's own source archive,
+`libdsd2pcm-0.1.2-src.tar.gz` for this version, with a `.sha256` file and a build provenance
+attestation. It is for building the C library where there is no network and no crates.io
+index, for example inside another project's source distribution. It holds the crates
+`dsd2pcm` and `dsd2pcm-capi` as a workspace of their own: their `src/` (and `build.rs`) as
+in the tagged commit, no tests, benches, examples or fuzz targets, a `Cargo.lock` that lists
+only the two crates, `include/dsd2pcm.h`, `examples/minimal.c`, the licences, `NOTICE` and a
+README.
+
+Only the manifests differ from the repository's. `dsd2pcm` has no `flac` feature, no claxon
+and no dev-dependencies there. Cargo puts optional and dev-dependencies in the lock file even
+when nothing turns them on, and then looks them up in the registry index, so with them
+`cargo build --offline` fails with an empty `CARGO_HOME`. The C library is built without
+`flac` anyway, so the library is the same.
+`.github/scripts/capi-src-manifests.py` writes the manifests and stops on anything it does
+not know, such as a new dependency.
+
+`.github/scripts/make-capi-src.sh` makes the archive from a commit: sorted entries, every
+file with the commit's time, owner 0, `gzip -n`, so the same commit gives the same bytes.
+CI makes it on every pull request (job `capi-src` in `ci.yml`). The job makes it twice and
+compares the bytes, then builds it with an empty `CARGO_HOME` and no network
+(`unshare -rn`), and builds and runs `examples/minimal.c` against the result
+(`.github/scripts/check-capi-src.sh`).
+
+To download, check and build a release's archive, with Rust 1.83 or later:
+
+<!-- docs-run: skip="needs a GitHub login for gh release download and gh attestation verify, and a release from 0.2.0 on" -->
+```sh
+gh release download v0.1.2 -R dsd-toolbox/dsd2pcm-rs -p 'libdsd2pcm-0.1.2-src.tar.gz*'
+sha256sum -c libdsd2pcm-0.1.2-src.tar.gz.sha256
+gh attestation verify libdsd2pcm-0.1.2-src.tar.gz -R dsd-toolbox/dsd2pcm-rs --signer-workflow dsd-toolbox/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.2 --deny-self-hosted-runners
+tar -xzf libdsd2pcm-0.1.2-src.tar.gz
+cd libdsd2pcm-0.1.2
+cargo build --offline --locked --release -p dsd2pcm-capi
+```
+
+To make the archive from a clone of the repository and build it with an empty `CARGO_HOME`
+(on Linux, `unshare -rn cargo build ...` also takes the network away), then build and run
+the example against the static library:
+
+<!-- docs-run: checkout=1 group=capi-offline image=fedora-net timeout=3600 setup="dnf -y -q --setopt=install_weak_deps=False install gcc git-core tar gzip python3 && .github/scripts/rust-setup.sh 1.100.0 && mkdir -p ~/.local && ln -s ~/.cargo/bin ~/.local/bin && git init -q && git add -A && git -c user.name=docs-run -c user.email=docs-run@localhost commit -q -m checkout" expect="2352 samples per channel, first byte 0" -->
+```sh
+.github/scripts/make-capi-src.sh dist
+tar -C dist -xzf dist/libdsd2pcm-0.1.2-src.tar.gz
+cd dist/libdsd2pcm-0.1.2
+mkdir /tmp/empty-cargo-home
+CARGO_HOME=/tmp/empty-cargo-home cargo build --offline --locked --release -p dsd2pcm-capi
+cc -std=c11 -I include examples/minimal.c target/release/libdsd2pcm.a -lpthread -ldl -lm -o minimal
+./minimal
+```
+
+It prints `dsd2pcm 0.1.2: 2352 samples per channel, first byte 0`.
+
 ## Binary releases
 
 Each GitHub release has the C library built for nine platforms (four of them from 0.2.0 on),
-next to the command-line tool, each with a `.sha256` file and a build provenance attestation:
+next to the command-line tool, each with a `.sha256` file and a build provenance attestation.
+The C library's source archive is in [Offline source build](#offline-source-build).
 
 | Archive | Platform |
 |---|---|
@@ -414,7 +470,8 @@ byte identity with the Rust API. They also run under Miri
 (`cargo +nightly-2026-11-01 miri test -p dsd2pcm-capi`; CI: `sanitizers.yml`, weekly and on
 pull requests that touch the interface), apart from those that use files or convert many
 frames, which are marked as ignored under Miri, and under ThreadSanitizer (weekly).
-[testing.md](testing.md) has the details and the latest results.
+[testing.md](testing.md) has the details and the latest results. The C library's source
+archive has its own checks ([Offline source build](#offline-source-build)).
 
 ## See also
 

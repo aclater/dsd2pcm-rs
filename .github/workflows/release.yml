@@ -12,9 +12,10 @@
 #      dependency order: dsd2pcm, then dsd2pcm-capi if it is publishable (not for 0.1.0),
 #      then dsd2pcm-cli (.github/scripts/publish-crates.sh). This job runs in the GitHub
 #      environment `release`, whose required reviewers approve it;
-#   3. create the GitHub release with eighteen archives (dsd2pcm-<v>-<platform> for eight
-#      platforms, libdsd2pcm-<v>-<platform> for nine, and the source, dsd2pcm-<v>-src made
-#      with git archive), a .sha256 file for each,
+#   3. create the GitHub release with nineteen archives (dsd2pcm-<v>-<platform> for eight
+#      platforms, libdsd2pcm-<v>-<platform> for nine, the source, dsd2pcm-<v>-src made
+#      with git archive, and the C library's source, libdsd2pcm-<v>-src made by
+#      .github/scripts/make-capi-src.sh), a .sha256 file for each,
 #      SHA256SUMS and a build provenance attestation (Sigstore) for each archive.
 # Any other run (a pull request that changes the release files, or a manual run) is a dry run:
 # the same builds and checks, and `cargo publish --dry-run`, with nothing published.
@@ -774,6 +775,11 @@ jobs:
   # `git archive --format=tar --prefix=dsd2pcm-<v>/ v<v> | gzip -n -9` makes it from the tag:
   # the files' times are the commit's, so anyone can make the same bytes again. Checked by
   # unpacking it in a fresh folder and building the C library from it.
+  # And the C library's source archive, libdsd2pcm-<v>-src.tar.gz: dsd2pcm and dsd2pcm-capi
+  # as a workspace of their own that builds with no network and no registry
+  # (.github/scripts/make-capi-src.sh), checked as in CI (.github/scripts/check-capi-src.sh:
+  # same bytes a second time, the expected files, an offline build in a network namespace
+  # of its own, the example run against it).
   source:
     name: source archive
     needs: preflight
@@ -812,6 +818,17 @@ jobs:
           cd "$RUNNER_TEMP/src/dsd2pcm-$VERSION"
           cargo build --release --locked -p dsd2pcm-capi
           ls -l target/release/libdsd2pcm.so target/release/libdsd2pcm.a
+      - name: Unprivileged user namespaces, for unshare -rn
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: The C library's source archive (.github/scripts/make-capi-src.sh), built offline
+        env:
+          REQUIRE_NO_NETWORK: "1"
+        run: |
+          .github/scripts/capi-src-manifests-test.sh
+          capi=$(.github/scripts/make-capi-src.sh dist "$SHA")
+          [[ "$capi" == "libdsd2pcm-$VERSION-src.tar.gz" ]] || { echo "::error::made $capi, expected libdsd2pcm-$VERSION-src.tar.gz"; exit 1; }
+          cat "dist/$capi.sha256"
+          .github/scripts/check-capi-src.sh "dist/$capi" "$SHA"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: bin-source
@@ -848,7 +865,8 @@ jobs:
           tools=$(find . -maxdepth 1 \( -name 'dsd2pcm-*.tar.gz' -o -name 'dsd2pcm-*.zip' \) ! -name '*-src.tar.gz' | wc -l)
           [[ "$tools" -eq 8 ]] || { echo "::error::expected eight archives of the tool, found $tools"; exit 1; }
           [[ -f "dsd2pcm-${VERSION}-src.tar.gz" ]] || { echo "::error::no source archive"; exit 1; }
-          clibs=$(find . -maxdepth 1 \( -name 'libdsd2pcm-*.tar.gz' -o -name 'libdsd2pcm-*.zip' \) | wc -l)
+          [[ -f "libdsd2pcm-${VERSION}-src.tar.gz" ]] || { echo "::error::no source archive of the C library"; exit 1; }
+          clibs=$(find . -maxdepth 1 \( -name 'libdsd2pcm-*.tar.gz' -o -name 'libdsd2pcm-*.zip' \) ! -name '*-src.tar.gz' | wc -l)
           [[ "$clibs" -eq 9 ]] || { echo "::error::expected nine archives of the C library, found $clibs"; exit 1; }
           echo "all nine binaries: the same output"
       - name: What a tag would publish
@@ -958,6 +976,8 @@ jobs:
             echo "The C library (\`include/dsd2pcm.h\`, shared and static libraries, a pkg-config file; ABI version 1), \`libdsd2pcm-$VERSION-<platform>\` for the same eight platforms (on Linux with musl: musl 1.2.3 or later) and for Windows with MinGW-w64 (\`x86_64-windows-gnu\`, for gcc): \`.tar.gz\`, and \`.zip\` for Windows. On x86_64 Linux the static libraries are marked for the CET shadow stack. See [docs/c-api.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/c-api.md#binary-releases)."
             echo
             echo "The source: \`dsd2pcm-$VERSION-src.tar.gz\`, the tagged commit's whole tree (\`git archive --format=tar --prefix=dsd2pcm-$VERSION/ v$VERSION | gzip -n -9\` makes the same bytes)."
+            echo
+            echo "The C library's source: \`libdsd2pcm-$VERSION-src.tar.gz\`, the crates dsd2pcm and dsd2pcm-capi as a workspace of their own whose Cargo.lock lists only them, for \`cargo build --offline --locked --release -p dsd2pcm-capi\` with no network (\`.github/scripts/make-capi-src.sh\` on the tag makes the same bytes). See [docs/c-api.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/c-api.md#offline-source-build)."
             echo
             echo "Verify a download: \`sha256sum -c <asset>.sha256\` and \`gh attestation verify <asset> -R $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml --source-ref refs/tags/v$VERSION --deny-self-hosted-runners\`."
             echo
