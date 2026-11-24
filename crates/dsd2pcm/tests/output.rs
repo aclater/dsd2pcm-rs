@@ -4,7 +4,9 @@
 
 use dsd2pcm::dsf::DsfWriter;
 use dsd2pcm::io::DsdWrite;
-use dsd2pcm::{convert_file, convert_file_with, Error, PcmOptions, PcmRate};
+use dsd2pcm::{
+    convert_file, convert_file_to, convert_file_with, Error, OutputOptions, PcmOptions, PcmRate,
+};
 use std::io::Cursor;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
@@ -290,5 +292,76 @@ fn unwritable_directory_is_refused_before_converting() {
         assert_eq!(calls, 0, "refused before the conversion started");
     }
     std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+fn is_exists(r: &Result<dsd2pcm::Report, Error>) -> bool {
+    matches!(r, Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::AlreadyExists)
+}
+
+/// `no_clobber`: an existing output is refused before converting; a new one is written and
+/// equals the output without the option.
+#[test]
+fn no_clobber_refuses_an_existing_output() {
+    let d = dir("no-clobber");
+    let (inp, out, plain) = (d.join("in.dsf"), d.join("out.wav"), d.join("plain.wav"));
+    std::fs::write(&inp, dsf(50_000, 2_822_400)).unwrap();
+    let opts = PcmOptions::new(PcmRate::Hz88200);
+    let keep = OutputOptions::default().with_no_clobber(true);
+    convert_file_to(&inp, &out, &opts, &keep, &mut |_| ControlFlow::Continue(())).unwrap();
+    convert_file(&inp, &plain, &opts).unwrap();
+    assert_eq!(std::fs::read(&out).unwrap(), std::fs::read(&plain).unwrap());
+
+    std::fs::write(&out, PRECIOUS).unwrap();
+    let mut calls = 0;
+    let r = convert_file_to(&inp, &out, &opts, &keep, &mut |_| {
+        calls += 1;
+        ControlFlow::Continue(())
+    });
+    assert!(is_exists(&r), "{r:?}");
+    assert_eq!(calls, 0, "refused before converting");
+    assert_eq!(std::fs::read(&out).unwrap(), PRECIOUS);
+    // A symbolic link, even a dangling one, counts as existing.
+    #[cfg(unix)]
+    {
+        let link = d.join("link.wav");
+        std::os::unix::fs::symlink(d.join("nowhere.wav"), &link).unwrap();
+        let r = convert_file_to(
+            &inp,
+            &link,
+            &opts,
+            &keep,
+            &mut |_| ControlFlow::Continue(()),
+        );
+        assert!(is_exists(&r), "{r:?}");
+        assert!(!d.join("nowhere.wav").exists());
+        std::fs::remove_file(&link).unwrap();
+    }
+    assert_eq!(names(&d), ["in.dsf", "out.wav", "plain.wav"]);
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+/// `no_clobber` is race-free: a file that appears at the output path while converting (here
+/// created from the progress hook, as another process might) is not replaced, and no
+/// temporary file is left.
+#[test]
+fn no_clobber_never_replaces_a_file_that_appears_meanwhile() {
+    let d = dir("no-clobber-race");
+    let (inp, out) = (d.join("in.dsf"), d.join("out.wav"));
+    std::fs::write(&inp, dsf(200_000, 2_822_400)).unwrap();
+    let opts = PcmOptions::new(PcmRate::Hz176400);
+    let keep = OutputOptions::default().with_no_clobber(true);
+    let mut calls = 0;
+    let r = convert_file_to(&inp, &out, &opts, &keep, &mut |_| {
+        calls += 1;
+        if calls == 2 {
+            std::fs::write(&out, PRECIOUS).unwrap();
+        }
+        ControlFlow::Continue(())
+    });
+    assert!(calls > 2);
+    assert!(is_exists(&r), "{r:?}");
+    assert_eq!(std::fs::read(&out).unwrap(), PRECIOUS);
+    assert_eq!(names(&d), ["in.dsf", "out.wav"]);
     std::fs::remove_dir_all(&d).unwrap();
 }

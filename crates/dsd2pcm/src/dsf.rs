@@ -217,6 +217,36 @@ impl<R: Read + Seek> DsdRead for DsfReader<R> {
     }
 }
 
+/// The channel masks of DSF channel types 1 to 7 (DSF specification 1.01) in the
+/// `WAVE_FORMAT_EXTENSIBLE` bits (FL 0x1, FR 0x2, FC 0x4, LFE 0x8, BL 0x10, BR 0x20). Each
+/// type's channel order is the order of its bits.
+const TYPE_MASKS: [u32; 7] = [
+    0x04, // 1: mono, C
+    0x03, // 2: stereo, FL FR
+    0x07, // 3: 3 channels, FL FR C
+    0x33, // 4: quad, FL FR BL BR
+    0x0F, // 5: 4 channels, FL FR C LFE
+    0x37, // 6: 5 channels, FL FR C BL BR
+    0x3F, // 7: 5.1, FL FR C LFE BL BR
+];
+
+/// The channel mask of DSF channel type `channel_type` (1 to 7) for a file of `channels`
+/// channels, or `None` if the type is unknown or has another number of channels.
+pub fn channel_mask_for_type(channel_type: u32, channels: u16) -> Option<u32> {
+    let i = usize::try_from(channel_type.checked_sub(1)?).ok()?;
+    let mask = *TYPE_MASKS.get(i)?;
+    (mask.count_ones() == u32::from(channels)).then_some(mask)
+}
+
+/// The DSF channel type of a channel mask for `channels` channels: the type with exactly
+/// that mask, or [`default_channel_type`] of the count when no type has it.
+pub fn channel_type_for_mask(mask: u32, channels: u16) -> u32 {
+    match TYPE_MASKS.iter().position(|&m| m == mask) {
+        Some(i) if mask.count_ones() == u32::from(channels) => i as u32 + 1,
+        _ => default_channel_type(channels),
+    }
+}
+
 /// DSF channel-type code for a channel count, as the specification lists them.
 pub fn default_channel_type(channels: u16) -> u32 {
     match channels {
@@ -266,6 +296,14 @@ impl<W: Write + Seek> DsfWriter<W> {
             metadata: None,
             finished: false,
         })
+    }
+
+    /// Sets the channel type from a `WAVE_FORMAT_EXTENSIBLE` channel mask
+    /// ([`channel_type_for_mask`]): the DSF type with that mask, or the type of the channel
+    /// count when none has it (or it does not match the count). The channels must already
+    /// be in the type's order, which is the order of the mask's bits.
+    pub fn set_channel_mask(&mut self, mask: u32) {
+        self.channel_type = channel_type_for_mask(mask, self.channels as u16);
     }
 
     /// Sets an ID3v2 tag to append after the audio data.

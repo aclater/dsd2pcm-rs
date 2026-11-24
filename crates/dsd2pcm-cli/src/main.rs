@@ -1,6 +1,7 @@
-//! `dsd2pcm IN.dsf|IN.dff OUT.wav [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread]`
+//! `dsd2pcm [OPTIONS] [--] IN.dsf|IN.dff OUT.wav`
 
-use dsd2pcm::{convert_file_with, Cutoff, Filter, PcmOptions, PcmRate};
+use dsd2pcm::{convert_file_to, Cutoff, Filter, OutputOptions, PcmOptions, PcmRate};
+use std::ffi::OsString;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -8,29 +9,48 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-const USAGE: &str = "usage: dsd2pcm IN.dsf|IN.dff OUT.wav [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread]
+const USAGE: &str = "usage: dsd2pcm [OPTIONS] [--] IN.dsf|IN.dff OUT.wav
+options: [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread] [-n|--no-clobber]
 
 Converts DSD64 to 24-bit PCM WAV. Defaults: --rate 176400 --cutoff 40 --gain 0.
 Cutoffs: 30 (pass 30 kHz, stop 36 kHz), 40 (pass 40 kHz, stop 48 kHz),
 wide (pass 80 kHz; 176.4 and 352.8 kHz only).
 Filters: default (scarletbook-pcm 0.7.0's), pysacd (pysacd's filter and dithered
 quantiser, bit-exact with its reference; 88200 and 176400 only, fixed response).
---single-thread: convert on the calling thread only (default: all cores).";
+--single-thread: convert on the calling thread only (default: all cores).
+-n, --no-clobber: fail if OUT exists, and never replace a file that appears at OUT
+during the conversion (default: replace OUT).
+--: every later argument is a file name, even one that starts with '-'.
+File names may be in any encoding the system allows.";
 
-fn parse(args: &[String]) -> Result<(PathBuf, PathBuf, PcmOptions), String> {
+/// Parses the arguments (without the program name). File names stay `OsString`s, so any
+/// name the operating system allows works; option values must be UTF-8. Messages quote
+/// argument text with `{:?}`, so control characters in it reach the terminal escaped.
+/// `Err("")` asks for the usage on standard output.
+fn parse(args: Vec<OsString>) -> Result<(PathBuf, PathBuf, PcmOptions, OutputOptions), String> {
     let mut pos = Vec::new();
     let mut opts = PcmOptions::new(PcmRate::Hz176400);
-    let mut it = args.iter();
+    let mut out_opts = OutputOptions::default();
+    let mut it = args.into_iter();
     while let Some(a) = it.next() {
-        let mut val = |name: &str| {
-            it.next()
-                .cloned()
-                .ok_or_else(|| format!("{name} needs a value"))
+        // A name that is not UTF-8 is never an option.
+        let Some(s) = a.to_str() else {
+            pos.push(PathBuf::from(a));
+            continue;
         };
-        match a.as_str() {
+        let mut val = |name: &str| -> Result<String, String> {
+            let v = it.next().ok_or_else(|| format!("{name} needs a value"))?;
+            v.into_string().map_err(|v| {
+                format!(
+                    "{name}: the value {:?} is not valid UTF-8",
+                    v.to_string_lossy()
+                )
+            })
+        };
+        match s {
             "--rate" => {
                 let v = val("--rate")?;
-                let hz: u32 = v.parse().map_err(|_| format!("bad rate {v}"))?;
+                let hz: u32 = v.parse().map_err(|_| format!("bad rate {v:?}"))?;
                 opts.rate = PcmRate::from_hz(hz)
                     .ok_or_else(|| format!("rate {hz}: 88200, 176400 or 352800"))?;
             }
@@ -39,23 +59,32 @@ fn parse(args: &[String]) -> Result<(PathBuf, PathBuf, PcmOptions), String> {
                     "30" => Cutoff::Low,
                     "40" => Cutoff::Standard,
                     "wide" | "80" => Cutoff::Wide,
-                    v => return Err(format!("cutoff {v}: 30, 40 or wide")),
+                    v => return Err(format!("cutoff {v:?}: 30, 40 or wide")),
                 }
             }
             "--gain" => {
                 let v = val("--gain")?;
-                opts.gain_db = v.parse().map_err(|_| format!("bad gain {v}"))?;
+                opts.gain_db = v.parse().map_err(|_| format!("bad gain {v:?}"))?;
             }
             "--filter" => {
                 opts.filter = match val("--filter")?.as_str() {
                     "default" => Filter::Default,
                     "pysacd" => Filter::Pysacd,
-                    v => return Err(format!("filter {v}: default or pysacd")),
+                    v => return Err(format!("filter {v:?}: default or pysacd")),
                 }
             }
             "--single-thread" => opts.threads = false,
+            "-n" | "--no-clobber" => out_opts.no_clobber = true,
             "-h" | "--help" => return Err(String::new()),
-            s if s.starts_with("--") => return Err(format!("unknown option {s}")),
+            "--" => {
+                pos.extend(it.by_ref().map(PathBuf::from));
+                break;
+            }
+            s if s.starts_with('-') && s.len() > 1 => {
+                return Err(format!(
+                    "unknown option {s:?} (put -- before file names that start with '-')"
+                ))
+            }
             _ => pos.push(PathBuf::from(a)),
         }
     }
@@ -64,12 +93,11 @@ fn parse(args: &[String]) -> Result<(PathBuf, PathBuf, PcmOptions), String> {
     }
     let out = pos.pop().unwrap_or_default();
     let inp = pos.pop().unwrap_or_default();
-    Ok((inp, out, opts))
+    Ok((inp, out, opts, out_opts))
 }
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let (inp, out, opts) = match parse(&args) {
+    let (inp, out, opts, out_opts) = match parse(std::env::args_os().skip(1).collect()) {
         Ok(v) => v,
         Err(e) if e.is_empty() => {
             println!("{USAGE}");
@@ -90,7 +118,7 @@ fn main() -> ExitCode {
             ControlFlow::Break(())
         }
     };
-    match convert_file_with(&inp, &out, &opts, &mut hook) {
+    match convert_file_to(&inp, &out, &opts, &out_opts, &mut hook) {
         Ok(rep) => {
             let secs = t.elapsed().as_secs_f64();
             let total: u64 = rep.clipped.iter().sum();

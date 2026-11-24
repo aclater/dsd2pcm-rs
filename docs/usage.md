@@ -11,7 +11,18 @@
   default; `--no-default-features` builds without it and its one dependency, `claxon`).
 - Writes DSF, DSDIFF and WAV. WAV files with more than 16 bits, float samples or more than two
   channels use `WAVE_FORMAT_EXTENSIBLE` with the channel mask of the channel count (SACD
-  order: FL FR FC LFE BL BR).
+  order: FL FR FC LFE BL BR), or one given to `WavWriter::with_channel_mask`.
+- Channel layouts: `DsdRead::channel_mask` gives the speakers a DSD file declares: the DSF
+  channel type (specification 1.01: 1 mono C, 2 FL FR, 3 FL FR C, 4 FL FR BL BR, 5 FL FR C
+  LFE, 6 FL FR C BL BR, 7 FL FR C LFE BL BR) when it matches the channel count, or the
+  DSDIFF `CHNL` IDs (`SLFT`/`MLFT`, `SRGT`/`MRGT`, `C`, `LFE`, `LS`, `RS`) when each is a
+  speaker, none twice, in WAV's channel order; otherwise none (numbered IDs such as `C000`,
+  an order WAV cannot express). `WavReader::channel_mask` and `FlacReader::channel_mask`
+  (also `PcmRead::channel_mask`) give the mask a file declares: `dwChannelMask`, or the
+  `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` Vorbis comment. `DsfWriter::set_channel_mask` sets the
+  DSF type from a mask (the type of the count when no type has that mask). A DSD to WAV
+  conversion still writes the mask of the channel count; it will take the input's layout
+  in 0.2, as that changes output files.
 - Converts DSD64 to 24-bit PCM at 88.2, 176.4 or 352.8 kHz with one of three linear-phase
   filters:
 
@@ -59,7 +70,7 @@ output are unchanged.
 ## Command line
 
 ```
-dsd2pcm IN OUT [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread]
+dsd2pcm [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|pysacd] [--single-thread] [-n|--no-clobber] [--] IN OUT
 ```
 
 The `dsd2pcm` tool converts one DSF or DFF file (DSD64) to a 24-bit WAV file; WAV and FLAC
@@ -68,7 +79,14 @@ input is read by the library only. Defaults: `--rate 176400 --cutoff 40 --gain 0
 the rates, the length of the audio, the time taken and the clipped samples, in all and per
 channel. Exit status: 0 on success, 1 when the conversion fails, 2 for a usage error, 130
 or 143 when interrupted by SIGINT or SIGTERM.
-`--help` prints the usage.
+`--help` prints the usage. `-n` or `--no-clobber` refuses an existing OUT (exit status 1,
+the file left as it was) instead of replacing it.
+
+Options and file names may come in any order. An argument that starts with `-` is an
+option; `--` ends the options, so `dsd2pcm -- -take1.dsf -take1.wav` converts a file whose
+name starts with `-`. File names are passed to the system as they are, in any encoding it
+allows (on Linux any bytes); option values must be UTF-8, and a value that is not is a
+usage error.
 
 ## Build settings for consumers
 
@@ -105,6 +123,11 @@ and a directory that cannot be written. The WAV goes to a temporary file
 success and given the permissions of the file it replaces (not its owner, ACLs or extended
 attributes). On any error or cancel an existing output is left as it was and no partial
 file remains. A symbolic link at the output path is replaced, not followed.
+
+`convert_file_to` takes `OutputOptions` as well; with `no_clobber` set, anything at the
+output path is refused with `Error::Io` of kind `AlreadyExists`, before converting and again
+when the result is put in place, which never replaces a file that appeared meanwhile
+([design](design.md#output-files)).
 
 The `dsd2pcm` tool treats Ctrl-C, SIGINT and SIGTERM (on Windows Ctrl-C and Ctrl-Break) as a
 cancel: an interrupted conversion leaves no file and an existing output as it was, and the

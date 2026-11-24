@@ -1,5 +1,52 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- No-clobber output: the tool's `-n` / `--no-clobber`, the library's `convert_file_to` with
+  `OutputOptions { no_clobber, .. }`, and the C interface's
+  `dsd2pcm_file_options.no_clobber` (appended; callers built against the 0.1.0 header keep
+  working) with the new status `DSD2PCM_E_EXISTS`. An existing output is refused and left
+  as it was, and the result is put in place without ever replacing a file that appeared
+  during the conversion: a hard link, or on file systems without hard links an exclusive
+  create then a rename ([design](docs/design.md#output-files)).
+- Channel layouts: `WavReader::channel_mask` and `FlacReader::channel_mask` (and
+  `PcmRead::channel_mask`) give the channel mask a file declares (`WAVE_FORMAT_EXTENSIBLE`,
+  or FLAC's `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` comment); `DsdRead::channel_mask` the
+  layout of a DSF channel type or of DSDIFF channel IDs; `WavWriter::with_channel_mask`,
+  `DsfWriter::set_channel_mask`, `dsf::channel_mask_for_type` and
+  `dsf::channel_type_for_mask` ([usage](docs/usage.md#formats)). DSD to WAV conversion
+  still writes the mask of the channel count, so output files are unchanged.
+- C library: CI, `crates/dsd2pcm-capi/check.sh` and the release archive checks verify that
+  the libraries hold no claxon (FLAC decoder) symbols, by their symbol tables (`nm`), and
+  CI checks that the check catches a library built with `--features flac`
+  ([C interface](docs/c-api.md#checks)).
+- CI: a check that tracked files and commit identities hold no private names or addresses
+  ([testing](docs/testing.md#private-names)).
+- Tests: golden SHA-256 hashes of whole output files (header and samples) from
+  `convert_file`, for mono, stereo and six-channel input, DSF channel types 5 to 7 and
+  DSDIFF files with speaker and numbered channel IDs, at every rate and cutoff and with
+  pysacd's filter, pinned to 0.1.2's files; the MSRV workflow also builds the tests with
+  Rust 1.85, which they need ([development](docs/development.md)).
+
+### Changed
+
+- Command line: `--` ends the options, so a file whose name starts with `-` can be given
+  (`dsd2pcm -- -take1.dsf out.wav`). An unknown argument that starts with `-` is now a usage
+  error; before, one that did not start with `--` was taken as a file name.
+
+### Fixed
+
+- Command line: a file name or option value that is not valid UTF-8 (possible on Linux and
+  other Unix systems) no longer ends the tool with a panic. File names are passed to the
+  system as they are; an option value that is not UTF-8 is a usage error (exit status 2).
+- Whole-file conversion on all cores: when the system refuses to start a worker thread
+  (its thread or memory limit), the conversion goes on with the threads that did start, at
+  least the calling one, with the same output; before, it panicked (in the C interface,
+  `DSD2PCM_E_INTERNAL`). The calling thread now converts too, so a conversion starts one
+  thread fewer for the same parallelism ([design](docs/design.md#frame-runs-threading-and-sharing)).
+
 ## 0.1.2 (2026-11-23)
 
 This release contains security fixes; upgrading is recommended. Versions 0.1.0 and 0.1.1 are

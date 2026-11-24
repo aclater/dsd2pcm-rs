@@ -44,6 +44,30 @@ impl PcmOptions {
     }
 }
 
+/// Settings for the output file of [`convert_file_to`]. Start from
+/// [`OutputOptions::default`] (replace an existing output, as [`convert_file`] does) and set
+/// fields; new fields may be added in minor versions, with defaults that keep the old
+/// behaviour.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct OutputOptions {
+    /// Refuse an existing output instead of replacing it: the conversion fails with
+    /// [`Error::Io`] of kind [`std::io::ErrorKind::AlreadyExists`] if anything (a file, a
+    /// symbolic link, even a dangling one) is at the output path, before converting or when
+    /// the result is put in place, and that file is left as it was. Putting the result in
+    /// place never replaces a file that appeared during the conversion (see
+    /// [`convert_file_to`]).
+    pub no_clobber: bool,
+}
+
+impl OutputOptions {
+    /// [`OutputOptions::no_clobber`] set to `on`.
+    pub fn with_no_clobber(mut self, on: bool) -> OutputOptions {
+        self.no_clobber = on;
+        self
+    }
+}
+
 /// Result of a DSD to PCM conversion.
 #[derive(Clone, Debug, Default)]
 pub struct Report {
@@ -140,13 +164,35 @@ pub fn convert_file_with(
     opts: &PcmOptions,
     progress: ProgressHook<'_>,
 ) -> Result<Report> {
+    convert_file_to(input, output, opts, &OutputOptions::default(), progress)
+}
+
+/// [`convert_file_with`] with settings for the output file ([`OutputOptions`]).
+///
+/// With [`OutputOptions::no_clobber`], an existing output is refused before converting, and
+/// the result is put in place without ever replacing a file: it is hard-linked to the
+/// output path, which fails if anything is there by then, and the temporary name is
+/// removed. Where the file system has no hard links (FAT and exFAT, some network and FUSE
+/// file systems), the output path is first created empty with an exclusive create, which
+/// fails the same way, and the result is renamed over that empty file. That fallback is
+/// best effort: a crash at that moment can leave an empty output, and a file another
+/// process puts there in that moment is replaced. A refusal is [`Error::Io`] of kind
+/// [`std::io::ErrorKind::AlreadyExists`]; the temporary file is removed and the existing
+/// file is left as it was.
+pub fn convert_file_to(
+    input: &Path,
+    output: &Path,
+    opts: &PcmOptions,
+    out_opts: &OutputOptions,
+    progress: ProgressHook<'_>,
+) -> Result<Report> {
     let Input::Dsd(r) = open_input(input)? else {
         return Err(Error::Unsupported("input is PCM, not DSD".into()));
     };
     check_options(opts)?;
     let info = r.info();
     check_dsd64(info.sample_rate)?;
-    let replaced = check_output(output)?;
+    let replaced = check_output(output, out_opts.no_clobber)?;
     if same_file(input, output) {
         return Err(Error::InvalidArgument("output is the input file".into()));
     }
@@ -170,13 +216,26 @@ pub fn convert_file_with(
     }
     file.sync_all()?;
     drop(file);
-    tmp.persist(output)?;
+    if out_opts.no_clobber {
+        tmp.persist_new(output, &|a, b| std::fs::hard_link(a, b))?;
+    } else {
+        tmp.persist(output)?;
+    }
     Ok(rep)
+}
+
+/// The error for an output that exists when it must not be replaced.
+fn exists_error() -> Error {
+    Error::Io(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "the output exists; not replacing it (no-clobber)",
+    ))
 }
 
 /// Checks the output path before converting. Returns the permissions of the regular file it
 /// would replace, or `None` when there is none (or it is a symbolic link, which is replaced).
-fn check_output(output: &Path) -> Result<Option<std::fs::Permissions>> {
+/// With `no_clobber`, anything at the path is refused.
+fn check_output(output: &Path, no_clobber: bool) -> Result<Option<std::fs::Permissions>> {
     let ends_in_separator = output
         .as_os_str()
         .as_encoded_bytes()
@@ -195,6 +254,9 @@ fn check_output(output: &Path) -> Result<Option<std::fs::Permissions>> {
     let kind = meta.file_type();
     if kind.is_dir() {
         return Err(Error::InvalidArgument("output is a directory".into()));
+    }
+    if no_clobber {
+        return Err(exists_error());
     }
     if kind.is_symlink() {
         return Ok(None);
@@ -273,6 +335,51 @@ impl TempFile {
             let _ = std::fs::remove_file(&path);
             return Err(e.into());
         }
+        #[cfg(unix)]
+        if let Some(dir) = path.parent() {
+            let _ = File::open(dir).and_then(|d| d.sync_all());
+        }
+        Ok(())
+    }
+}
+
+impl TempFile {
+    /// Puts the file at `target` only if nothing is there, atomically: `link` (a hard link,
+    /// failing with `AlreadyExists` if `target` exists) and then removing the temporary
+    /// name. If `link` fails otherwise (no hard links on this file system), `target` is
+    /// created empty and exclusively, failing the same way, and the file is renamed over
+    /// it. Then the directory is synced (Unix, best effort).
+    fn persist_new(
+        mut self,
+        target: &Path,
+        link: &dyn Fn(&Path, &Path) -> std::io::Result<()>,
+    ) -> Result<()> {
+        let path = self.path.take().expect("not yet persisted");
+        // From here on, `path` is removed on every return.
+        let done = (|| match link(&path, target) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(exists_error()),
+            Err(_) => {
+                match OpenOptions::new().write(true).create_new(true).open(target) {
+                    Ok(f) => drop(f),
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        return Err(exists_error())
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+                std::fs::rename(&path, target).map_err(|e| {
+                    // Remove the empty file this call created, unless it has been
+                    // written to since.
+                    if std::fs::symlink_metadata(target).is_ok_and(|m| m.is_file() && m.len() == 0)
+                    {
+                        let _ = std::fs::remove_file(target);
+                    }
+                    e.into()
+                })
+            }
+        })();
+        let _ = std::fs::remove_file(&path);
+        done?;
         #[cfg(unix)]
         if let Some(dir) = path.parent() {
             let _ = File::open(dir).and_then(|d| d.sync_all());
@@ -478,44 +585,205 @@ fn plan_k(rate: PcmRate) -> i64 {
     (rate.decimation() / 8) as i64
 }
 
-/// Runs `f` on every item, on up to `scratch.len()` threads (one scratch each), and
-/// returns the results in item order.
+/// Runs `f` on every item, on up to `scratch.len()` threads (one scratch each, the calling
+/// thread being one of them), and returns the results in item order.
+///
+/// A worker thread that cannot be started (the system's thread or memory limit) is not an
+/// error: the items are shared out as they are taken, so the threads that run, at least the
+/// calling one, take the rest, and the results are the same.
 pub(crate) fn run_pieces<T: Sync, R: Send, S: Send>(
     items: &[T],
     scratch: &mut [S],
     f: impl Fn(&T, &mut S) -> R + Sync,
+) -> Vec<R> {
+    run_pieces_with(items, scratch, f, &|_| Ok(std::thread::Builder::new()))
+}
+
+/// [`run_pieces`] with the thread builder for worker `i` (1, 2, ...) from `builder`; an
+/// error from it, or from its `spawn_scoped`, ends the spawning (tests inject one).
+fn run_pieces_with<T: Sync, R: Send, S: Send>(
+    items: &[T],
+    scratch: &mut [S],
+    f: impl Fn(&T, &mut S) -> R + Sync,
+    builder: &dyn Fn(usize) -> std::io::Result<std::thread::Builder>,
 ) -> Vec<R> {
     let workers = scratch.len().min(items.len());
     if workers <= 1 {
         return items.iter().map(|it| f(it, &mut scratch[0])).collect();
     }
     let next = AtomicUsize::new(0);
-    let mut out: Vec<Option<R>> = (0..items.len()).map(|_| None).collect();
+    let work = |sc: &mut S| {
+        let mut mine = Vec::new();
+        loop {
+            let i = next.fetch_add(1, Ordering::Relaxed);
+            let Some(it) = items.get(i) else { break };
+            mine.push((i, f(it, sc)));
+        }
+        mine
+    };
+    let (first, rest) = scratch[..workers]
+        .split_first_mut()
+        .expect("at least two workers");
     let parts: Vec<Vec<(usize, R)>> = std::thread::scope(|s| {
-        let handles: Vec<_> = scratch[..workers]
-            .iter_mut()
-            .map(|sc| {
-                let (next, f) = (&next, &f);
-                s.spawn(move || {
-                    let mut mine = Vec::new();
-                    loop {
-                        let i = next.fetch_add(1, Ordering::Relaxed);
-                        let Some(it) = items.get(i) else { break };
-                        mine.push((i, f(it, sc)));
-                    }
-                    mine
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| h.join().expect("worker panicked"))
-            .collect()
+        let work = &work;
+        let mut handles = Vec::with_capacity(rest.len());
+        for (i, sc) in rest.iter_mut().enumerate() {
+            match builder(i + 1).and_then(|b| b.spawn_scoped(s, move || work(sc))) {
+                Ok(h) => handles.push(h),
+                // Out of threads: the ones running (and this one) take the rest.
+                Err(_) => break,
+            }
+        }
+        let mut parts = vec![work(first)];
+        parts.extend(
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap_or_else(|p| std::panic::resume_unwind(p))),
+        );
+        parts
     });
+    let mut out: Vec<Option<R>> = (0..items.len()).map(|_| None).collect();
     for (i, r) in parts.into_iter().flatten() {
         out[i] = Some(r);
     }
     out.into_iter()
         .map(|r| r.expect("every item ran"))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Error as IoError, ErrorKind};
+    use std::thread::{Builder, ThreadId};
+
+    /// Runs 1000 items on 8 scratch slots while `builder` refuses workers from `fail_from` on;
+    /// returns the results and the threads that ran items.
+    fn run(fail_from: usize) -> (Vec<u64>, Vec<ThreadId>) {
+        let items: Vec<u64> = (0..1000).collect();
+        let mut scratch = vec![0u64; 8];
+        let threads = Mutex::new(Vec::new());
+        let builder = |i: usize| {
+            if i >= fail_from {
+                Err(IoError::new(ErrorKind::WouldBlock, "no more threads"))
+            } else {
+                Ok(Builder::new())
+            }
+        };
+        let out = run_pieces_with(
+            &items,
+            &mut scratch,
+            |&x, sc| {
+                *sc += 1;
+                let mut t = threads.lock().unwrap();
+                let id = std::thread::current().id();
+                if !t.contains(&id) {
+                    t.push(id);
+                }
+                x * x + 1
+            },
+            &builder,
+        );
+        // Every item ran once, on some scratch slot.
+        assert_eq!(scratch.iter().sum::<u64>(), 1000);
+        (out, threads.into_inner().unwrap())
+    }
+
+    #[test]
+    fn spawn_failure_falls_back_to_fewer_threads() {
+        let want: Vec<u64> = (0..1000u64).map(|x| x * x + 1).collect();
+        // No worker starts: everything runs on the calling thread.
+        let (out, threads) = run(1);
+        assert_eq!(out, want);
+        assert_eq!(threads, [std::thread::current().id()]);
+        // Two of the seven workers start, then spawning fails: same results.
+        let (out, threads) = run(3);
+        assert_eq!(out, want);
+        assert!(threads.len() <= 3);
+        // All start.
+        let (out, _) = run(usize::MAX);
+        assert_eq!(out, want);
+    }
+
+    fn dir(name: &str) -> PathBuf {
+        let d = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/unit-tmp")
+            .join(format!("{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn temp(target: &Path, body: &[u8]) -> TempFile {
+        let mut t = TempFile::create(target, false).unwrap();
+        t.file.take().unwrap().write_all(body).unwrap();
+        t
+    }
+
+    fn names(d: &Path) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(d)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    }
+
+    /// A file system without hard links: the exclusive-create fallback puts a new file in
+    /// place and refuses an existing one, leaving no temporary file either way.
+    #[test]
+    #[cfg_attr(miri, ignore = "file I/O")]
+    fn persist_new_without_hard_links() {
+        let d = dir("persist-new-fallback");
+        let out = d.join("out.wav");
+        let no_links = |_: &Path, _: &Path| -> std::io::Result<()> {
+            Err(IoError::new(ErrorKind::Unsupported, "no hard links"))
+        };
+        temp(&out, b"new").persist_new(&out, &no_links).unwrap();
+        assert_eq!(std::fs::read(&out).unwrap(), b"new");
+        assert_eq!(names(&d), ["out.wav"]);
+        let e = temp(&out, b"newer")
+            .persist_new(&out, &no_links)
+            .unwrap_err();
+        assert!(
+            matches!(&e, Error::Io(e) if e.kind() == ErrorKind::AlreadyExists),
+            "{e}"
+        );
+        assert_eq!(std::fs::read(&out).unwrap(), b"new");
+        assert_eq!(names(&d), ["out.wav"]);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// With hard links: a new file goes in place, an existing one (here a dangling symbolic
+    /// link on Unix, or a file) is refused and left as it was.
+    #[test]
+    #[cfg_attr(miri, ignore = "file I/O")]
+    fn persist_new_with_hard_links() {
+        let d = dir("persist-new-link");
+        let out = d.join("out.wav");
+        let link = |a: &Path, b: &Path| std::fs::hard_link(a, b);
+        temp(&out, b"new").persist_new(&out, &link).unwrap();
+        assert_eq!(std::fs::read(&out).unwrap(), b"new");
+        assert_eq!(names(&d), ["out.wav"]);
+        let e = temp(&out, b"newer").persist_new(&out, &link).unwrap_err();
+        assert!(
+            matches!(&e, Error::Io(e) if e.kind() == ErrorKind::AlreadyExists),
+            "{e}"
+        );
+        assert_eq!(std::fs::read(&out).unwrap(), b"new");
+        #[cfg(unix)]
+        {
+            let dangling = d.join("dangling.wav");
+            std::os::unix::fs::symlink(d.join("nowhere"), &dangling).unwrap();
+            let e = temp(&dangling, b"x")
+                .persist_new(&dangling, &link)
+                .unwrap_err();
+            assert!(
+                matches!(&e, Error::Io(e) if e.kind() == ErrorKind::AlreadyExists),
+                "{e}"
+            );
+            assert!(!d.join("nowhere").exists(), "the link is not followed");
+        }
+        std::fs::remove_dir_all(&d).unwrap();
+    }
 }

@@ -150,3 +150,15 @@ DSD64 DSF file, under `valgrind --tool=memcheck --leak-check=full --show-leak-ki
 The 64 bytes are the standard library's handle of the main thread (`Thread::new_current`,
 created once when the first scoped thread starts), which lives until exit by design; the
 rest still reachable at exit (under 200 KB) are the standard library's own buffers.
+
+## Private names
+
+`ci.yml` (job `no private names`, every pull request and push) runs
+`.github/scripts/check-private-names.sh`: tracked files and the author and committer of
+each new commit must hold no `home.arpa` name, no private (RFC 1918) IPv4 address and no
+match of the repository variable `PRIVATE_NAMES`, a regular expression kept outside the
+repository; without the variable the built-in patterns still run. It exits 0 when clean, 1
+on a hit and 2 when the check itself fails (an invalid or match-everything regex, a git
+error), so an error never passes; `.github/scripts/check-private-names-test.sh` (run first
+in the same job) checks each of those cases in throwaway repositories. Locally:
+`PRIVATE_NAMES='pattern' .github/scripts/check-private-names.sh`.

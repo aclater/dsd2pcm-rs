@@ -56,7 +56,8 @@ int dsd2pcm_convert_file(const char *input_path, const char *output_path,
 
 Converts a DSF or DFF file (DSD64) to a 24-bit WAV file. `options` holds the rate (88200,
 176400, 352800), cutoff, filter, gain (-120 to +24 dB), `threads` (0: all cores, 1: the
-calling thread only) and an optional progress callback:
+calling thread only), `no_clobber` (0: replace an existing output, 1: refuse it; since
+0.1.3) and an optional progress callback:
 
 ```c
 typedef int (*dsd2pcm_progress_fn)(uint64_t done, uint64_t total, void *user_data);
@@ -81,6 +82,17 @@ left as it was, so a partial WAV never appears under `output_path`. A symbolic l
 attributes of a replaced file are not kept. If the process is killed (SIGKILL, power loss),
 a `.dsd2pcm-PID-N.tmp` file may remain; it is safe to delete. The library installs no
 signal handlers.
+
+With `no_clobber` 1, anything at `output_path` (a file, a symbolic link, even a dangling
+one) is refused with `DSD2PCM_E_EXISTS` before converting, and the result is put in place
+without ever replacing a file that appeared during the conversion: it is hard-linked to
+`output_path`, which fails if anything is there by then, and the temporary name is
+removed. On a file system without hard links (FAT, exFAT, some network and FUSE file
+systems) `output_path` is first created empty and exclusively, which fails the same way,
+and the result is renamed over that empty file. That fallback is best effort: a crash at
+that moment can leave an empty output, and a file another process puts there in that
+moment is replaced. Either way a refused output is left as it was and the temporary file is
+removed. Values other than 0 and 1 give `DSD2PCM_E_INVALID_ARGUMENT`.
 
 `crates/dsd2pcm-capi/examples/convert.c` is a complete program:
 
@@ -171,12 +183,18 @@ Both run without arguments.
 
   A struct from a caller built against an older header is read for its `struct_size` bytes
   and the fields it lacks are taken as 0.
+- Appended since 0.1.0: `dsd2pcm_file_options.no_clobber` (`uint32_t`, 0.1.3), which makes
+  the struct 56 bytes on 64-bit targets, 40 on i686 Linux and 48 on other 32-bit targets.
+  The status code `DSD2PCM_E_EXISTS` (9) is new in 0.1.3; the library returns it only
+  when `no_clobber` is set.
 
 ## Building from source
 
 The C library is built without the crate's `flac` feature: its whole-file conversion takes
 DSD input only, and without FLAC reading it holds no third-party code, only Rust's standard
-library (MIT OR Apache-2.0). `--features flac` adds it back.
+library (MIT OR Apache-2.0). `--features flac` adds it back. Build it on its own
+(`-p dsd2pcm-capi`): a workspace build (`cargo build --workspace`) turns the feature on for
+it too, through the command-line tool, and its libraries then hold claxon's code.
 
 A minimal program, `crates/dsd2pcm-capi/tests/minimal.c`, converts one stereo frame of
 DSD silence. To build and run it on Linux, from the repository root:
@@ -255,10 +273,15 @@ minimal.exe
 equals cbindgen's output (cbindgen from `PATH`, or the binary named by the `CBINDGEN`
 environment variable; install it with `cargo install cbindgen`), then builds and runs
 `tests/*.c` and `examples/convert.c` under gcc and clang with `-Wall -Wextra -Werror`,
-compiles the header and its init macros as C++11, and runs the smoke test and the leak loop
+compiles the header and its init macros as C++11, checks that the static library holds no
+claxon symbols (`.github/scripts/check-capi-no-claxon.sh`, which lists the symbol table with
+`nm`, so a stripped library fails instead of passing unchecked), and runs the smoke test and the leak loop
 (`tests/leakloop.c`: create, convert and free on every path, many times over) under clang's
 AddressSanitizer, LeakSanitizer and UndefinedBehaviorSanitizer (`ASAN=0` skips that). CI
-does the same in the C library job. The Rust tests of the interface
+does the same in the C library job, runs the claxon check on both libraries, and checks that
+it fails on a library built with `--features flac`. The release workflow runs it on the
+static library of every Linux and macOS archive (`check-capi-archive.sh`; the shared
+libraries there are stripped). The Rust tests of the interface
 (`cargo test -p dsd2pcm-capi`) cover NULL pointers, bad lengths and values, `struct_size`,
 overlapping buffers, cancelling, busy and poisoned handles, allocation after warm-up, and
 byte identity with the Rust API. They also run under Miri

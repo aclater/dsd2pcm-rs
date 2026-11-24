@@ -50,6 +50,7 @@ pub struct WavReader<R> {
     r: R,
     info: PcmInfo,
     format: WavFormat,
+    channel_mask: Option<u32>,
     remaining: u64,
     buf: Vec<u8>,
 }
@@ -64,7 +65,7 @@ impl<R: Read + Seek> WavReader<R> {
             return format_err("not a WAV file (no RIFF/WAVE header)");
         }
         let mut pos = 12u64;
-        let mut fmt: Option<(WavFormat, u16, u32)> = None;
+        let mut fmt: Option<(WavFormat, u16, u32, Option<u32>)> = None;
         let mut chunks = 0;
         loop {
             if chunks == MAX_CHUNKS {
@@ -89,10 +90,12 @@ impl<R: Read + Seek> WavReader<R> {
                     let rate = le_u32(&f, 4);
                     let align = le_u16(&f, 12);
                     let bits = le_u16(&f, 14);
+                    let mut mask = None;
                     if tag == 0xFFFE {
                         if size < 40 {
                             return format_err("WAV extensible 'fmt ' chunk is too small");
                         }
+                        mask = Some(le_u32(&f, 20));
                         tag = le_u16(&f, 24);
                     }
                     let format = match (tag, bits) {
@@ -112,10 +115,10 @@ impl<R: Read + Seek> WavReader<R> {
                     if usize::from(align) != usize::from(channels) * format.bytes() {
                         return format_err("WAV block alignment does not match the format");
                     }
-                    fmt = Some((format, channels, rate));
+                    fmt = Some((format, channels, rate, mask));
                 }
                 b"data" => {
-                    let Some((format, channels, rate)) = fmt else {
+                    let Some((format, channels, rate, channel_mask)) = fmt else {
                         return format_err("WAV 'data' chunk before 'fmt '");
                     };
                     // Streamed files and some encoders past 4 GiB leave a placeholder
@@ -142,6 +145,7 @@ impl<R: Read + Seek> WavReader<R> {
                             frames,
                         },
                         format,
+                        channel_mask,
                         remaining: frames,
                         buf: Vec::new(),
                     });
@@ -156,6 +160,12 @@ impl<R: Read + Seek> WavReader<R> {
     /// Sample encoding.
     pub fn format(&self) -> WavFormat {
         self.format
+    }
+
+    /// The `dwChannelMask` of a `WAVE_FORMAT_EXTENSIBLE` file, as it is (0 means no
+    /// speaker assignment); `None` for a plain `fmt ` chunk, which declares none.
+    pub fn channel_mask(&self) -> Option<u32> {
+        self.channel_mask
     }
 }
 
@@ -249,14 +259,20 @@ impl<R: Read + Seek> PcmRead for WavReader<R> {
         self.remaining -= n as u64;
         Ok(n)
     }
+
+    fn channel_mask(&self) -> Option<u32> {
+        self.channel_mask
+    }
 }
 
 /// WAV writer for interleaved sample bytes already in the target encoding.
 ///
 /// Mono and stereo 16-bit files get a 16-byte `fmt ` chunk (format tag 1). Everything else
-/// (more than 16 bits, floats, more than two channels) gets `WAVE_FORMAT_EXTENSIBLE`, as
-/// Microsoft's WAVE rules require, with the PCM or IEEE-float subtype and the channel mask
-/// of the channel count ([`channel_mask`]). Samples start at [`WavWriter::data_offset`].
+/// (more than 16 bits, floats, more than two channels, or a channel mask other than the
+/// count's) gets `WAVE_FORMAT_EXTENSIBLE`, as Microsoft's WAVE rules require, with the PCM
+/// or IEEE-float subtype and the channel mask of the channel count ([`channel_mask`]) or
+/// the one given to [`WavWriter::with_channel_mask`]. Samples start at
+/// [`WavWriter::data_offset`].
 #[derive(Debug)]
 pub struct WavWriter<W: Write + Seek> {
     w: W,
@@ -266,8 +282,10 @@ pub struct WavWriter<W: Write + Seek> {
     finished: bool,
 }
 
-/// Bytes before the first sample in a file from [`WavWriter`] of `format` and `channels`:
-/// 44, or 68 with `WAVE_FORMAT_EXTENSIBLE`.
+/// Bytes before the first sample in a file from [`WavWriter::new`] of `format` and
+/// `channels`: 44, or 68 with `WAVE_FORMAT_EXTENSIBLE`. For [`WavWriter::with_channel_mask`]
+/// it is a lower bound: a mask other than the count's ([`channel_mask`]) always gives 68;
+/// [`WavWriter::data_offset`] gives the real value.
 pub fn header_len(format: WavFormat, channels: u16) -> u64 {
     if channels > 2 || format.bytes() > 2 {
         68
@@ -297,19 +315,37 @@ pub fn channel_mask(channels: u16) -> u32 {
 }
 
 impl<W: Write + Seek> WavWriter<W> {
-    /// Starts a WAV file.
-    pub fn new(mut w: W, format: WavFormat, channels: u16, rate: u32) -> Result<Self> {
+    /// Starts a WAV file, with the channel mask of the channel count ([`channel_mask`]).
+    pub fn new(w: W, format: WavFormat, channels: u16, rate: u32) -> Result<Self> {
+        Self::with_channel_mask(w, format, channels, rate, channel_mask(channels))
+    }
+
+    /// Starts a WAV file whose channels are the speakers of `mask` (the
+    /// `WAVE_FORMAT_EXTENSIBLE` bits, the channels in the order of the bits). `mask` must
+    /// have one bit per channel, or be 0 (no speaker assignment).
+    pub fn with_channel_mask(
+        mut w: W,
+        format: WavFormat,
+        channels: u16,
+        rate: u32,
+        mask: u32,
+    ) -> Result<Self> {
         if !(1..=6).contains(&channels) || rate == 0 {
             return Err(crate::Error::InvalidArgument(
                 "WAV writer: 1..6 channels, rate > 0".into(),
             ));
+        }
+        if mask != 0 && mask.count_ones() != u32::from(channels) {
+            return Err(crate::Error::InvalidArgument(format!(
+                "WAV writer: channel mask {mask:#x} does not have {channels} speakers"
+            )));
         }
         let bs = format.bytes() as u16;
         let byte_rate = rate
             .checked_mul(u32::from(channels) * u32::from(bs))
             .ok_or_else(|| crate::Error::InvalidArgument("WAV writer: rate too high".into()))?;
         let code: u16 = if format.is_float() { 3 } else { 1 };
-        let extensible = header_len(format, channels) == 68;
+        let extensible = header_len(format, channels) == 68 || mask != channel_mask(channels);
         let mut h = Vec::with_capacity(68);
         h.extend_from_slice(b"RIFF");
         h.extend_from_slice(&0u32.to_le_bytes());
@@ -324,7 +360,7 @@ impl<W: Write + Seek> WavWriter<W> {
         if extensible {
             h.extend_from_slice(&22u16.to_le_bytes());
             h.extend_from_slice(&(bs * 8).to_le_bytes());
-            h.extend_from_slice(&channel_mask(channels).to_le_bytes());
+            h.extend_from_slice(&mask.to_le_bytes());
             h.extend_from_slice(&code.to_le_bytes());
             h.extend_from_slice(&SUBTYPE_TAIL);
         }

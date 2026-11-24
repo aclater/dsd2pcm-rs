@@ -5,8 +5,13 @@ aarch64, i686), macOS (arm64) and Windows (x86_64), the tests once per SIMD leve
 has, plus a short soak test, the C tests under AddressSanitizer and LeakSanitizer, the
 minimum Rust version, cargo-deny, a fuzz smoke test, CodeQL and zizmor; Miri and
 ThreadSanitizer run weekly ([testing.md](testing.md)). The speed workflow (`bench.yml`, by
-hand only) is described in [docs/performance.md](performance.md). The tests need Rust 1.85
-or later (a test-only dependency uses edition 2024); the crates themselves build with 1.83.
+hand only) is described in [docs/performance.md](performance.md).
+
+Rust versions: the library, the command-line tool and the C library build with Rust 1.83
+(`rust-version` in `Cargo.toml`). The test suite needs Rust 1.85 or later, because its
+dev-dependency scarletbook-pcm 0.7.0 uses edition 2024 (rust-version 1.85).
+`.github/workflows/msrv.yml` checks and builds the workspace with 1.83 and builds the tests
+with 1.85.
 Locally:
 
 ```

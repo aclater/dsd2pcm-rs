@@ -213,6 +213,14 @@ whole-area conversion. Only the neighbour bytes nearest the run matter (`context
   conversion (`convert_file`) cuts each block into per-channel pieces of about 64 KiB of
   input and runs them on all cores (`--single-thread` turns that off). The output does not
   depend on how the work was split.
+- **Out of threads.** The calling thread is one of the workers, and the others take pieces
+  as they become free. If the system refuses a worker thread (its thread or memory limit),
+  the conversion goes on with the threads it has, down to the calling thread alone, rather
+  than failing: the output is the same, so a refused thread costs only speed, and an error
+  would make a busy server fail conversions that one thread can do. Nothing is reported;
+  `Error` gains no variant. (In 0.1.2 and earlier the standard library's `spawn` panicked
+  there, and the C interface returned `DSD2PCM_E_INTERNAL`.) The tests inject a thread
+  builder that refuses workers (`convert::tests`).
 - **Shared tables.** The S1 lookup tables and the paired tables are built once per process
   (`OnceLock`) and shared, read-only, by every converter and thread. A converter only owns
   its buffers, and after the first call it allocates nothing (`tests/frames_alloc.rs`).
@@ -278,6 +286,11 @@ checked against the file length, so nothing in it is allocated or parsed. `claxo
 Apache-2.0) is handed a minimal stream of `fLaC`, STREAMINFO marked last, and the file from
 the first audio frame, so it only decodes frames; its metadata parsers (Vorbis comment and
 application blocks, the code with its `set_len` on uninitialised buffers) never run.
+The reader looks into the first Vorbis comment block itself, for the
+`WAVEFORMATEXTENSIBLE_CHANNEL_MASK` field only: it reads the length fields, checks each
+against the block, reads comments of up to 64 bytes into a fixed buffer and skips longer
+ones by seeking, so nothing is allocated. A malformed block gives no mask rather than an
+error, so files that opened before still open.
 claxon's byte reader indexes its buffer unchecked with the count `read` returns, so every
 read from the caller's reader passes through an adapter that caps that count at the buffer
 length; an over-reporting `Read` gives errors or wrong samples, never out-of-bounds access
@@ -433,6 +446,24 @@ file the user had, nor leave a partial WAV that a reader would take as complete.
   signal number; a second signal ends it at once. Only SIGKILL, a crash or a power loss can
   leave a `.dsd2pcm-PID-N.tmp` behind, which is safe to delete. The library installs no
   signal handlers: that is the application's choice.
+- No-clobber (`OutputOptions::no_clobber`, `-n`, `dsd2pcm_file_options.no_clobber`): an
+  existing output is refused before converting, and the result is put in place with
+  "create, never replace" semantics, because a file can appear at the output path during a
+  long conversion (another conversion of the same name, a copy) and checking first then
+  renaming would replace it. The temporary file is hard-linked to the output path, which
+  fails if anything is there, atomically, on every platform with hard links (Linux, macOS,
+  the BSDs, Windows on NTFS), and the temporary name is then removed. That needs no `unsafe`
+  or platform calls, unlike Linux's `renameat2(RENAME_NOREPLACE)` or macOS's
+  `renamex_np(RENAME_EXCL)`, which also fail on some file systems. Where linking fails for
+  another reason (no hard links: FAT, exFAT, some SMB, NFS and FUSE mounts), the output path
+  is created empty with an exclusive create (`O_EXCL`; `CREATE_NEW` on Windows), which
+  fails the same way, and the result is renamed over it. That path is best effort: a crash
+  in the moment between the two leaves the empty file, and a process with write access to
+  the directory that replaces the empty file in that moment has its file replaced by the
+  rename. With hard links there is no such moment.
+  Not exposed through `PcmOptions`, because adding a field to that struct would break
+  every caller that builds it with a struct literal; `OutputOptions` is
+  `#[non_exhaustive]`, so later output settings can be added to it.
 
 ## Known gaps
 

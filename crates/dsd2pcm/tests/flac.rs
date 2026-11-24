@@ -399,3 +399,107 @@ fn trailing_id3v1_tag() {
         Err(Error::Format(_))
     ));
 }
+
+/// `f` with its Vorbis comment blocks turned into padding.
+fn without_comments(f: &[u8]) -> Vec<u8> {
+    let mut f = f.to_vec();
+    let mut at = 4;
+    loop {
+        let (last, kind) = (f[at] & 0x80, f[at] & 0x7F);
+        let len = u32::from_be_bytes([0, f[at + 1], f[at + 2], f[at + 3]]) as usize;
+        if kind == 4 {
+            f[at] = last | 1;
+        }
+        if last != 0 {
+            return f;
+        }
+        at += 4 + len;
+    }
+}
+
+/// `f` with a Vorbis comment block of `comments` inserted after STREAMINFO.
+fn with_comments(f: &[u8], comments: &[&[u8]], count: Option<u32>) -> Vec<u8> {
+    let mut body = Vec::new();
+    let vendor = b"reference libFLAC 1.4.3 20230623";
+    body.extend((vendor.len() as u32).to_le_bytes());
+    body.extend(vendor);
+    body.extend(count.unwrap_or(comments.len() as u32).to_le_bytes());
+    for c in comments {
+        body.extend((c.len() as u32).to_le_bytes());
+        body.extend(*c);
+    }
+    // STREAMINFO's header is at 4; the new block takes its "last" flag.
+    let last = f[4] & 0x80;
+    let mut out = f[..42].to_vec();
+    out[4] &= 0x7F;
+    out.push(last | 4);
+    out.extend(&(body.len() as u32).to_be_bytes()[1..]);
+    out.extend(body);
+    out.extend(&f[42..]);
+    out
+}
+
+/// The `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` Vorbis comment, as the reference encoder writes
+/// it, gives the channel mask; a malformed comment block is ignored, as before.
+#[test]
+fn channel_mask_from_vorbis_comment() {
+    let f = fixture("s16_2ch_44100.flac");
+    let mask = |f: Vec<u8>| -> Option<u32> {
+        let r = FlacReader::new(Cursor::new(f)).unwrap();
+        let m = r.channel_mask();
+        assert_eq!(PcmRead::channel_mask(&r), m);
+        m
+    };
+    // The reference encoder's own comment (make.sh: from a WAVE_FORMAT_EXTENSIBLE input).
+    assert_eq!(mask(f.clone()), Some(0x03));
+    let six = FlacReader::new(Cursor::new(fixture("s24_6ch_96000.flac"))).unwrap();
+    assert_eq!(six.channel_mask(), Some(0x3F));
+    let mono = FlacReader::new(Cursor::new(fixture("s8_1ch_8000.flac"))).unwrap();
+    assert_eq!(mono.channel_mask(), Some(0x01));
+    // Only the first Vorbis comment block counts: one without the field before the
+    // encoder's block gives none.
+    let first = with_comments(&f, &[&b"TITLE=first"[..]], None);
+    assert_eq!(mask(first), None);
+    // Without it: none.
+    let f = without_comments(&f);
+    assert_eq!(mask(f.clone()), None);
+    let long = [b'x'; 200];
+    for (comments, want) in [
+        (
+            &[&b"WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x0003"[..]][..],
+            Some(3),
+        ),
+        (
+            &[
+                &b"TITLE=t"[..],
+                &long[..],
+                &b"waveformatextensible_channel_mask=0X30"[..],
+            ][..],
+            Some(0x30),
+        ),
+        (
+            &[&b"WAVEFORMATEXTENSIBLE_CHANNEL_MASK=51"[..]][..],
+            Some(51),
+        ),
+        (&[&b"WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0xZZ"[..]][..], None),
+        (&[&b"TITLE=no mask"[..]][..], None),
+        (&[][..], None),
+    ] {
+        assert_eq!(
+            mask(with_comments(&f, comments, None)),
+            want,
+            "{comments:?}"
+        );
+    }
+    // The samples are unaffected by the comment block.
+    let c = &[&b"WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x3"[..]][..];
+    let mut r = FlacReader::new(Cursor::new(with_comments(&f, c, None))).unwrap();
+    assert_eq!(read_all(&mut r, 1000).unwrap(), expected(16, 2, 4100));
+    // A count past the block, a comment length past the block: ignored.
+    assert_eq!(mask(with_comments(&f, c, Some(u32::MAX))), Some(3));
+    assert_eq!(mask(with_comments(&f, &[][..], Some(u32::MAX))), None);
+    let mut bad = with_comments(&f, c, None);
+    let at = 42 + 4 + 4 + 32 + 4;
+    bad[at..at + 4].copy_from_slice(&1000u32.to_le_bytes());
+    assert_eq!(mask(bad), None);
+}
