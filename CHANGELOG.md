@@ -21,8 +21,7 @@ version.
   or FLAC's `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` comment); `DsdRead::channel_mask` the
   layout of a DSF channel type or of DSDIFF channel IDs; `WavWriter::with_channel_mask`,
   `DsfWriter::set_channel_mask`, `dsf::channel_mask_for_type` and
-  `dsf::channel_type_for_mask` ([user guide](docs/user-guide.md#formats)). DSD to WAV conversion
-  still writes the mask of the channel count, so output files are unchanged.
+  `dsf::channel_type_for_mask` ([user guide](docs/user-guide.md#formats)).
 - C library: CI, `crates/dsd2pcm-capi/check.sh` and the release archive checks verify that
   the libraries hold no claxon (FLAC decoder) symbols, by their symbol tables (`nm`), and
   CI checks that the check catches a library built with `--features flac`
@@ -56,6 +55,11 @@ version.
 
 ### Changed
 
+- Output: DSD to WAV conversion writes the channel mask of the input's layout (DSF channel
+  type, DSDIFF channel IDs) instead of the one of its channel count. The WAV header changes
+  only where the two differ: a DSF of type 5 (FL FR C LFE) was labelled quad (FL FR BL BR),
+  and DSDIFF files with other speaker sets, such as FL FR LFE, were labelled by their
+  count. The samples are unchanged.
 - Speed in a consumer's release profile (codegen units 16, no LTO, overflow checks on, as
   a dependency): it was up to 25 % slower than with ours, now within 1 % on the measured
   CPUs. CI checks it on every pull request. Output bytes unchanged.

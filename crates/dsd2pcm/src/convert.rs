@@ -207,7 +207,13 @@ pub fn convert_file_to(
     let mut tmp = TempFile::create(output, replaced.is_some())?;
     let file = tmp.file.take().expect("a new temporary file is open");
     let out = BufWriter::with_capacity(1 << 20, file);
-    let mut w = WavWriter::new(out, WavFormat::I24, info.channels, opts.rate.hz())?;
+    // The speakers the input declares (DSF channel type, DSDIFF channel IDs), else those
+    // of the channel count.
+    let mask = r
+        .channel_mask()
+        .unwrap_or_else(|| crate::wav::channel_mask(info.channels));
+    let mut w =
+        WavWriter::with_channel_mask(out, WavFormat::I24, info.channels, opts.rate.hz(), mask)?;
     let rep = dsd64_to_pcm_with(r, &mut w, opts, progress)?;
     w.finish()?;
     let file = w.into_inner().into_inner().map_err(|e| e.into_error())?;

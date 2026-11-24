@@ -128,8 +128,8 @@ may remain next to the output; it is safe to delete. The library installs no sig
   (also `PcmRead::channel_mask`) give the mask a file declares: `dwChannelMask`, or the
   `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` Vorbis comment. `DsfWriter::set_channel_mask` sets the
   DSF type from a mask (the type of the count when no type has that mask). A DSD to WAV
-  conversion still writes the mask of the channel count; it will take the input's layout
-  in 0.2, as that changes output files.
+  conversion writes the input's layout as the WAV channel mask (since 0.2), or the mask of
+  the channel count when the input declares none.
 - Converts DSD64 to PCM. The command-line tool converts DSF and DFF only; WAV and FLAC
   input is read by the library.
 
