@@ -1387,13 +1387,17 @@ fn versioned_structs_old_and_new_callers() {
         },
         extra: 0,
     };
-    let p = (&mut new as *mut Newest).cast::<LaterStruct>();
+    // Every access until the last use of `p` goes through `pn`, which `p` derives from: a
+    // direct write to `new` would invalidate `p` (Stacked Borrows).
+    let pn = &raw mut new;
+    let p = pn.cast::<LaterStruct>();
     // SAFETY (test): `p` is readable for its struct_size bytes.
     let v = unsafe { read_struct(p.cast_const(), "new") }.ok().unwrap();
     assert_eq!((v.a, v.b, v.appended), (4, 5, 6));
     // A field we do not know, set: refused, whichever of its bytes is set.
     for byte in 0..8 {
-        new.extra = 1 << (8 * byte);
+        // SAFETY (test): `pn` points to `new`, and no reference to it is live.
+        unsafe { (*pn).extra = 1 << (8 * byte) };
         // SAFETY (test): as above.
         let e = unsafe { read_struct(p.cast_const(), "new") }.err().unwrap();
         assert_eq!(e.0, DSD2PCM_E_INVALID_ARGUMENT);
@@ -1404,7 +1408,8 @@ fn versioned_structs_old_and_new_callers() {
         );
     }
     // An output struct's unknown bytes are the caller's: left alone.
-    new.extra = 0xDEAD_BEEF;
+    // SAFETY (test): `pn` points to `new`, and no reference to it is live.
+    unsafe { (*pn).extra = 0xDEAD_BEEF };
     // SAFETY (test): as above.
     let n = unsafe { out_struct(p, "new") }.ok().unwrap().unwrap();
     assert_eq!(n, size_of::<LaterStruct>());
