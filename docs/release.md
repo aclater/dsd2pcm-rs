@@ -43,6 +43,7 @@ The GitHub release, with these assets:
 | `libdsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.2.0) C library, macOS 11 or later, Intel; `libdsd2pcm.1.dylib` signed and notarised |
 | `libdsd2pcm-0.1.2-x86_64-windows.zip` | C library, Windows 10 and 11, x86_64, for MSVC |
 | `libdsd2pcm-0.1.2-x86_64-windows-gnu.zip` | (from 0.2.0) C library, Windows 10 and 11, x86_64, for MinGW-w64 gcc (msvcrt) |
+| `libdsd2pcm-0.1.2-src.tar.gz` | (from 0.2.0) The C library's source: `dsd2pcm` and `dsd2pcm-capi` as a workspace of their own, for an offline build ([c-api.md](c-api.md#offline-source-build)) |
 
 A `dsd2pcm-` archive holds `dsd2pcm` (or `dsd2pcm.exe`), `README.md`, `LICENSE-MIT`,
 `LICENSE-APACHE` and `NOTICE`. A `libdsd2pcm-` archive holds `include/dsd2pcm.h`, the shared library
@@ -61,9 +62,14 @@ has eight platforms and the C library nine: the MinGW-w64 build is the C library
 `git archive --format=tar --prefix=dsd2pcm-0.1.2/ v0.1.2 | gzip -n -9`: the files carry the
 commit's time, so the same command on the tag gives the same tar (and, with GNU gzip, the
 same bytes); the workflow checks that the C library builds from it (`cargo build --release
---locked -p dsd2pcm-capi` in the unpacked folder). Every archive has a `.sha256` file and a
+--locked -p dsd2pcm-capi` in the unpacked folder). `libdsd2pcm-0.1.2-src.tar.gz` is made by
+`.github/scripts/make-capi-src.sh` from the tag (the same commit gives the same bytes), and
+`.github/scripts/check-capi-src.sh` checks it: made twice with the same bytes, the expected
+files, a `Cargo.lock` of the two crates only, `cargo build --offline --locked --release -p
+dsd2pcm-capi` with an empty `CARGO_HOME` and no network, and `examples/minimal.c` run
+against the result. Every archive has a `.sha256` file and a
 build provenance attestation (`.intoto.jsonl`, also stored with GitHub). `SHA256SUMS` lists every archive:
-55 files in all (18 archives, 18 `.sha256`, 18 `.intoto.jsonl`, `SHA256SUMS`).
+58 files in all (19 archives, 19 `.sha256`, 19 `.intoto.jsonl`, `SHA256SUMS`).
 
 ## How the workflow runs
 
@@ -111,7 +117,7 @@ build provenance attestation (`.intoto.jsonl`, also stored with GitHub). `SHA256
    the smoke tests. Bare Mach-O files cannot be stapled: macOS looks the ticket up online.
    A tag without the signing secrets fails here, before anything is published; a dry run
    skips signing with a notice.
-3. **same output everywhere**: all eighteen archives (with the source archive, job
+3. **same output everywhere**: all nineteen archives (with the two source archives, job
    `source archive`) are there and match their `.sha256`,
    and all nine binaries made byte-identical output from the test file.
 4. **publish to crates.io** (tag only): in the GitHub environment `release`, so it waits for
@@ -230,7 +236,7 @@ steps 1 to 5 for that crate alone.
    deployments): `sign and notarise (macos)` early in the run, then
    `publish to crates.io` once every build is checked. Notarisation usually takes a few
    minutes.
-5. Check: the crates on crates.io, the GitHub release with its 55 files (eighteen
+5. Check: the crates on crates.io, the GitHub release with its 58 files (nineteen
    archives, their `.sha256` and `.intoto.jsonl` files, and `SHA256SUMS`), and an asset:
 
    <!-- docs-run: skip="maintainer step: needs a GitHub login for gh" -->
@@ -239,8 +245,10 @@ steps 1 to 5 for that crate alone.
    gh attestation verify dsd2pcm-0.1.2-x86_64-linux.tar.gz -R dsd-toolbox/dsd2pcm-rs --signer-workflow dsd-toolbox/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.2 --deny-self-hosted-runners
    ```
 
-   From 0.2.0 on, also run the source archive's commands in [c-api.md](c-api.md) (download,
-   `sha256sum -c`, `gh attestation verify`, unpack, build) against the new tag.
+   From 0.2.0 on, also run the source archives' commands in [c-api.md](c-api.md) (download,
+   `sha256sum -c`, `gh attestation verify`, unpack, build), for `dsd2pcm-0.1.2-src.tar.gz`
+   and for `libdsd2pcm-0.1.2-src.tar.gz` ([Offline source build](c-api.md#offline-source-build)),
+   against the new tag.
 6. Release notes: the workflow writes the same notes for every release. Put the version's
    CHANGELOG section on top of them, from a clone of the release commit:
 
