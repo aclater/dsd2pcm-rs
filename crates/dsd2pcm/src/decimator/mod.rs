@@ -145,6 +145,31 @@ fn s1_lut(half: &'static [i32], layout: S1Layout) -> &'static Lut {
     cell[layout as usize].get_or_init(|| lut(half, layout))
 }
 
+/// S1's tables in a layout, built on first use: the level with paired tables never needs
+/// them, so a converter there does not build them.
+#[derive(Clone, Copy, Debug)]
+struct S1Src {
+    half: &'static [i32],
+    layout: S1Layout,
+    /// Bytes per window.
+    bytes: usize,
+}
+
+impl S1Src {
+    fn new(half: &'static [i32], layout: S1Layout) -> S1Src {
+        S1Src {
+            half,
+            layout,
+            bytes: half.len() / 4,
+        }
+    }
+
+    /// The tables.
+    fn get(self) -> &'static Lut {
+        s1_lut(self.half, self.layout)
+    }
+}
+
 const Q_FIR: i32 = 24;
 
 /// Outputs are computed in whole blocks of this many (a multiple of every kernel's block).
@@ -202,16 +227,20 @@ impl Op {
 /// The S1 values of one channel's previous ordered pass with paired tables, for the next
 /// pass to reuse where it continues it (frame runs converted a frame at a time). A value is
 /// reused only if every byte of its window is the same in both passes (compared, not
-/// assumed): S1 is a function of those bytes alone, so the output cannot change.
+/// assumed): S1 is a function of those bytes alone, so the output cannot change. Only the
+/// bytes a following pass can share are kept, so a pass that is not followed by its
+/// neighbour (pooled converters) costs a copy of a few hundred bytes.
 #[derive(Debug, Default)]
 pub(crate) struct Carry {
-    /// The previous pass's bytes, the first at byte `b0` of its timeline.
+    /// The previous pass's bytes from where the next adjacent pass starts to its end; the
+    /// first at byte `b0` of its timeline.
     bytes: Vec<u8>,
     b0: i64,
-    /// Its S1 values: split (`ev[i]` over the window from byte `b0 + 2 i`, `od[i]` from
-    /// `b0 + 2 i + 1`) or not (`ev[i]` from `b0 + i`).
+    /// Its S1 values: split (`ev[i]` over the window from byte `s0 + 2 i`, `od[i]` from
+    /// `s0 + 2 i + 1`) or not (`ev[i]` from `s0 + i`).
     ev: Vec<f64>,
     od: Vec<f64>,
+    s0: i64,
     split: bool,
     valid: bool,
     reserved: bool,
@@ -233,21 +262,26 @@ impl Carry {
         ev: &mut [f64],
         od: &mut [f64],
     ) -> usize {
-        let start = self.b0 - self.shift;
-        if !self.valid || self.split != split || start > p0 {
+        // The previous pass's kept bytes and S1 values, on this pass's timeline.
+        let (b0, s0) = (self.b0 - self.shift, self.s0 - self.shift);
+        if !self.valid || self.split != split || b0 > p0 || s0 > p0 {
             return 0;
         }
-        let off = (p0 - start) as usize;
-        let Some(prev) = self.bytes.get(off..) else {
+        let Some(prev) = self.bytes.get((p0 - b0) as usize..) else {
             return 0;
         };
-        // The bytes both passes share, from `p0` on.
+        // The bytes both passes share, from `p0` on: a quick look at the first one first,
+        // which fails at once for a pass that does not continue the previous one.
         let n = prev.len().min(bytes.len());
+        if n < win || prev[0] != bytes[0] {
+            return 0;
+        }
         let eq = if prev[..n] == bytes[..n] {
             n
         } else {
             prev.iter().zip(bytes).take_while(|(x, y)| x == y).count()
         };
+        let off = (p0 - s0) as usize;
         if split {
             // Pair `i` covers windows from bytes `2 i` and `2 i + 1`.
             if off % 2 != 0 || eq < win + 1 {
@@ -273,12 +307,26 @@ impl Carry {
         }
     }
 
-    /// Keeps a pass's bytes (the first at byte `p0`) and its S1 values, swapping the
-    /// buffers.
-    fn keep(&mut self, bytes: &[u8], p0: i64, split: bool, ev: &mut Vec<f64>, od: &mut Vec<f64>) {
+    /// Keeps a pass's S1 values (windows from byte `p0` on, swapping the buffers) and its
+    /// bytes from `next` on (`bytes` starts at `p0`; `next` is where the next adjacent pass
+    /// starts: the S1 values it can reuse lie past it).
+    fn keep(
+        &mut self,
+        bytes: &[u8],
+        p0: i64,
+        next: usize,
+        split: bool,
+        ev: &mut Vec<f64>,
+        od: &mut Vec<f64>,
+    ) {
+        let Some(tail) = bytes.get(next..).filter(|t| !t.is_empty()) else {
+            self.valid = false;
+            return;
+        };
         self.bytes.clear();
-        self.bytes.extend_from_slice(bytes);
-        self.b0 = p0;
+        self.bytes.extend_from_slice(tail);
+        self.b0 = p0 + next as i64;
+        self.s0 = p0;
         self.split = split;
         std::mem::swap(&mut self.ev, ev);
         if split {
@@ -306,7 +354,7 @@ pub(crate) struct Scratch {
 /// the idle pattern.
 #[derive(Debug, Clone)]
 pub(crate) struct Plan {
-    lut: &'static Lut,
+    lut: S1Src,
     isa: Isa,
     ops: Vec<Op>,
     /// Bytes per output.
@@ -329,7 +377,7 @@ impl Plan {
         let f40 = || Sym::new(&tables::F40, pow2(-Q_FIR));
         let isa = Isa::current();
         let layout = dispatch::s1_layout(isa);
-        let wide = || s1_lut(&tables::S1_WIDE, layout);
+        let wide = || S1Src::new(&tables::S1_WIDE, layout);
         let (s1_half, lut, mut ops) = match (cutoff, rate) {
             (Cutoff::Wide, PcmRate::Hz88200) => {
                 return Err(Error::InvalidArgument(
@@ -357,7 +405,7 @@ impl Plan {
                         vec![Op::Dec2(hb()), Op::Fir1(f), Op::Interp2(hb())]
                     }
                 };
-                (&tables::S1[..], s1_lut(&tables::S1, layout), ops)
+                (&tables::S1[..], S1Src::new(&tables::S1, layout), ops)
             }
         };
         debug_assert!(ops.len() <= MAX_OPS);
@@ -569,7 +617,7 @@ impl Plan {
             return;
         }
         c.reserved = true;
-        let n = LANES_MIN - 2;
+        let n = self.lanes_min - 2;
         let (_, plen) = self.byte_range((0, n), true);
         let s1 = self.levels((0, n), true)[0].1.div_ceil(PAD) * PAD;
         c.bytes.reserve(plen);
@@ -593,11 +641,16 @@ impl Plan {
             }
             if !sc.ordered_sized {
                 // Size the ordered buffers too, for every shorter pass, so that a caller
-                // that warmed up with a long pass allocates nothing later: one ordered pass
-                // of the longest length that stays ordered (on idle bytes; `sc.a` is
-                // overwritten below).
+                // that warmed up with a long pass allocates nothing later. S1's level is the
+                // longest of an ordered pass, so it bounds every buffer of one.
                 sc.ordered_sized = true;
-                self.pass_ordered(&[], 0, 0, LANES_MIN - 2, sc, None);
+                let n = self.lanes_min - 2;
+                let longest = self.levels((0, n), true)[0].1.div_ceil(PAD) * PAD;
+                for v in [&mut sc.a, &mut sc.b, &mut sc.even, &mut sc.odd] {
+                    v.reserve(longest.saturating_sub(v.len()));
+                }
+                let plen = self.byte_range((0, n), true).1;
+                sc.bytes.reserve(plen.saturating_sub(sc.bytes.len()));
             }
             return self.pass_lanes(pair, src, src0, o0, n, sc);
         }
@@ -630,6 +683,8 @@ impl Plan {
         } = sc;
         let levels = self.levels((o0, n), true);
         let (p0, plen) = self.byte_range((o0, n), true);
+        // Where the next adjacent pass (outputs from `o0 + n`) starts in `bytes`.
+        let next = (self.byte_range((o0 + n as i64, n), true).0 - p0).max(0) as usize;
         let bytes = fetch(src, src0, p0, plen, buf);
         // The buffers the kernels write are resized, not cleared: they write every element.
         if !matches!(self.ops.first(), Some(Op::Dec2(_))) {
@@ -642,7 +697,7 @@ impl Plan {
                         .map_or(0, |c| c.reuse(bytes, p0, self.lut.bytes, false, a, &mut []));
                     pair.run(self.lut, &bytes[from..], &mut lanes::Flat(&mut a[from..]));
                 }
-                _ => dispatch::s1(self.isa, self.lut, bytes, 0, 1, a),
+                _ => dispatch::s1(self.isa, self.lut.get(), bytes, 0, 1, a),
             }
         }
         for (k, op) in self.ops.iter().enumerate() {
@@ -652,7 +707,7 @@ impl Plan {
                     b.resize(n_out.div_ceil(PAD) * PAD, 0.0);
                     dispatch::fir1(self.isa, s, a, b);
                     if let (0, Some(c)) = (k, carry.as_deref_mut()) {
-                        c.keep(bytes, p0, false, a, &mut Vec::new());
+                        c.keep(bytes, p0, next, false, a, &mut Vec::new());
                     }
                 }
                 Op::Dec2(s) => {
@@ -678,14 +733,14 @@ impl Plan {
                         let (xe, xo) = lanes::split(even, odd, de, dodd);
                         dispatch::dec2(self.isa, s, xe, xo, b);
                         if let Some(c) = carry.as_deref_mut() {
-                            c.keep(bytes, p0, true, even, odd);
+                            c.keep(bytes, p0, next, true, even, odd);
                         }
                     } else {
                         even.resize(np + 2 * e, 0.0);
                         odd.resize(np + 2 * o, 0.0);
                         if k == 0 {
-                            dispatch::s1(self.isa, self.lut, bytes, de, 2, even);
-                            dispatch::s1(self.isa, self.lut, bytes, dodd, 2, odd);
+                            dispatch::s1(self.isa, self.lut.get(), bytes, de, 2, even);
+                            dispatch::s1(self.isa, self.lut.get(), bytes, dodd, 2, odd);
                         } else {
                             every_other(&a[de..], even);
                             every_other(&a[dodd..], odd);

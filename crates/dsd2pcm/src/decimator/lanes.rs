@@ -21,7 +21,7 @@
     allow(dead_code)
 )]
 
-use super::kernel::{round_even, s1, Mac, S1Lut, Sym};
+use super::kernel::{round_even, s1, Mac, Sym};
 use super::Op;
 
 /// Lanes per vector: runs per pass.
@@ -49,7 +49,7 @@ pub(super) struct Bufs {
 
 /// One pass: what `Plan::pass_run` computes for each run.
 pub(super) struct Pass<'a> {
-    pub lut: &'a S1Lut,
+    pub lut: super::S1Src,
     /// The same S1 as paired tables, if the level uses them.
     pub pair: Option<&'a S1Pair>,
     pub ops: &'a [Op],
@@ -222,8 +222,9 @@ fn s1_pairs_lane<const B: usize, const T: usize>(
                 s += P_BITS;
             }
         }
-        o[0].0[w] = (i64::from(sum as u32) - bias[0]) as f64;
-        o[1].0[w] = (i64::from((sum >> 32) as u32) - bias[1]) as f64;
+        // In range: each half is below 2^32 and each bias below 2^31 (`sums_are_exact`).
+        o[0].0[w] = i64::from(sum as u32).wrapping_sub(bias[0]) as f64;
+        o[1].0[w] = i64::from((sum >> 32) as u32).wrapping_sub(bias[1]) as f64;
     }
 }
 
@@ -257,8 +258,8 @@ fn s1_pairs_n<const B: usize, const T: usize>(
         }
         out.put(
             k,
-            (i64::from(sum as u32) - bias[0]) as f64,
-            (i64::from((sum >> 32) as u32) - bias[1]) as f64,
+            i64::from(sum as u32).wrapping_sub(bias[0]) as f64,
+            i64::from((sum >> 32) as u32).wrapping_sub(bias[1]) as f64,
         );
     }
 }
@@ -267,7 +268,7 @@ impl S1Pair {
     /// S1 for each pair of `out`: pair `k` over the windows at `bytes[2 k ..]` and
     /// `bytes[2 k + 1 ..]`; `lut` (the same filter) serves any other window size.
     #[inline(always)]
-    pub(super) fn run(&self, lut: &S1Lut, bytes: &[u8], out: &mut impl PairSink) {
+    pub(super) fn run(&self, lut: super::S1Src, bytes: &[u8], out: &mut impl PairSink) {
         const T9: usize = pair_tables(9);
         const T13: usize = pair_tables(13);
         if let (8, Ok(t)) = (self.bytes, <&[PTable; T9]>::try_from(&self.tables[..])) {
@@ -277,7 +278,7 @@ impl S1Pair {
         } else {
             for k in 0..out.pairs() {
                 let mut v = [0.0; 2];
-                s1(lut, bytes, 2 * k, 1, &mut v);
+                s1(lut.get(), bytes, 2 * k, 1, &mut v);
                 out.put(k, v[0], v[1]);
             }
         }
@@ -323,7 +324,7 @@ fn s1_lanes(p: &Pass<'_>, a: &mut [Lanes]) {
         } else if let Some((12, t, bias)) = pr.filter(|pr| pr.1.len() == T13) {
             s1_pairs_lane::<13, T13>(t.try_into().unwrap(), bias, bytes, a, w);
         } else {
-            s1(p.lut, bytes, 0, 1, a.iter_mut().map(|v| &mut v.0[w]));
+            s1(p.lut.get(), bytes, 0, 1, a.iter_mut().map(|v| &mut v.0[w]));
         }
     }
 }
@@ -360,10 +361,13 @@ fn pairs<M: Mac, const S: usize, const SV: usize, const WHOLE: bool>(
         }
         return;
     }
+    debug_assert!(h.len() <= lo + 1 && S * (hi + h.len()) <= x.len());
     for (j, &hj) in h.iter().enumerate() {
-        // `X[hi + j ..]` and `X[lo - j ..]`, `SV` vectors each.
-        let up = &x[S * (hi + j)..][..S * (SV - 1) + 1];
-        let dn = &x[S * (lo - j)..][..S * (SV - 1) + 1];
+        // `X[hi + j ..]` and `X[lo - j ..]`, `SV` vectors each. The offsets are in range
+        // (asserted above; the slices check them again), so wrapping arithmetic gives the same
+        // values without the overflow checks some release profiles add to this inner loop.
+        let up = &x[S.wrapping_mul(hi.wrapping_add(j))..][..S * (SV - 1) + 1];
+        let dn = &x[S.wrapping_mul(lo.wrapping_sub(j))..][..S * (SV - 1) + 1];
         for (g, acc) in acc.iter_mut().enumerate() {
             let (a, b) = (&up[S * g].0, &dn[S * g].0);
             for l in 0..W {
@@ -376,17 +380,25 @@ fn pairs<M: Mac, const S: usize, const SV: usize, const WHOLE: bool>(
 /// `acc[g] = c X[c + g]` with `X[k] = x[S k]`.
 #[inline(always)]
 fn centre<const S: usize, const SV: usize>(c0: f64, x: &[Lanes], c: usize) -> [[f64; W]; SV] {
-    std::array::from_fn(|g| {
-        let x = x[S * (c + g)].0;
-        std::array::from_fn(|l| c0 * x[l])
-    })
+    // Plain loops, no closures: with some release profiles (no LTO, overflow checks) the
+    // closures of `array::from_fn` were not inlined, and the sums went through the stack
+    // (docs/design.md, "Speed").
+    let mut acc = [[0.0; W]; SV];
+    for (g, a) in acc.iter_mut().enumerate() {
+        for (a, &x) in a.iter_mut().zip(&x[S * (c + g)].0) {
+            *a = c0 * x;
+        }
+    }
+    acc
 }
 
 /// `out[i + g]` = `acc[g]` rescaled and rounded.
 #[inline(always)]
 fn store<const SV: usize>(acc: &[[f64; W]; SV], scale: f64, out: &mut [Lanes]) {
     for (o, a) in out[..SV].iter_mut().zip(acc) {
-        o.0 = std::array::from_fn(|l| round_even(a[l] * scale));
+        for (d, &a) in o.0.iter_mut().zip(a) {
+            *d = round_even(a * scale);
+        }
     }
 }
 

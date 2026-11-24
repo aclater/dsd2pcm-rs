@@ -32,6 +32,16 @@
 
 ### Changed
 
+- Speed in a consumer's release profile (codegen units 16, no LTO, overflow checks on, as
+  a dependency): it was up to 25 % slower than with ours, now within 1 % on the measured
+  CPUs. CI checks it on every pull request. Output bytes unchanged.
+- `frames::Converter`: the first-stage values kept between calls cost next to nothing
+  when consecutive calls are not adjacent runs (pooled converters): only the bytes the next
+  run could share are kept. Output bytes unchanged.
+- `frames::Converter`: a new converter's first call no longer runs a throwaway pass to
+  size its buffers, and the 13-bit first-stage tables, which the AVX2 levels with paired
+  tables never use, are built only when needed. A new converter plus its first 4-frame run
+  takes about as long as scarletbook-pcm 0.7.0's.
 - Command line: `--` ends the options, so a file whose name starts with `-` can be given
   (`dsd2pcm -- -take1.dsf out.wav`). An unknown argument that starts with `-` is now a usage
   error; before, one that did not start with `--` was taken as a file name.
