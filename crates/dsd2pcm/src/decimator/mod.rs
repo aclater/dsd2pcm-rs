@@ -80,11 +80,11 @@ pub enum Cutoff {
 
 /// The filter taps: scarletbook-pcm 0.7.0's, or the `precise` filter's
 /// (`crate::Filter::Precise`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Design {
-    /// scarletbook-pcm 0.7.0's tables (`tables`).
-    #[default]
-    Default,
+    /// scarletbook-pcm 0.7.0's tables (`tables`), for `crate::Filter::Fast` and
+    /// [`Decimator`].
+    Fast,
     /// The precise filter's tables (`tables_precise`): S1 with stopbands of 150 dB where
     /// the input folds into the passband, and every later stage as a cascade of two filters
     /// of about 80 dB each.
@@ -146,8 +146,8 @@ fn pair(half: &[i32]) -> lanes::S1Pair {
 /// [`Design`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum S1Kind {
-    Default,
-    DefaultWide,
+    Fast,
+    FastWide,
     Precise,
     PreciseWide,
 }
@@ -155,16 +155,16 @@ enum S1Kind {
 impl S1Kind {
     #[cfg(test)]
     const ALL: [S1Kind; 4] = [
-        S1Kind::Default,
-        S1Kind::DefaultWide,
+        S1Kind::Fast,
+        S1Kind::FastWide,
         S1Kind::Precise,
         S1Kind::PreciseWide,
     ];
 
     fn of(design: Design, cutoff: Cutoff) -> S1Kind {
         match (design, cutoff == Cutoff::Wide) {
-            (Design::Default, false) => S1Kind::Default,
-            (Design::Default, true) => S1Kind::DefaultWide,
+            (Design::Fast, false) => S1Kind::Fast,
+            (Design::Fast, true) => S1Kind::FastWide,
             (Design::Precise, false) => S1Kind::Precise,
             (Design::Precise, true) => S1Kind::PreciseWide,
         }
@@ -173,8 +173,8 @@ impl S1Kind {
     /// The taps, from the centre out.
     fn half(self) -> &'static [i32] {
         match self {
-            S1Kind::Default => &tables::S1,
-            S1Kind::DefaultWide => &tables::S1_WIDE,
+            S1Kind::Fast => &tables::S1,
+            S1Kind::FastWide => &tables::S1_WIDE,
             S1Kind::Precise => &tables_precise::S1,
             S1Kind::PreciseWide => &tables_precise::S1_WIDE,
         }
@@ -423,7 +423,7 @@ pub(crate) struct Plan {
 }
 
 /// scarletbook-pcm 0.7.0's stages after S1 for `rate` and `cutoff`.
-fn default_ops(rate: PcmRate, cutoff: Cutoff) -> Vec<Op> {
+fn fast_ops(rate: PcmRate, cutoff: Cutoff) -> Vec<Op> {
     let sym = |t: &[i32]| Sym::new(t, pow2(-Q_FIR));
     let hb = || sym(&tables::HB);
     match (cutoff, rate) {
@@ -497,7 +497,7 @@ fn precise_ops(rate: PcmRate, cutoff: Cutoff) -> Vec<Op> {
 
 impl Plan {
     pub(crate) fn new(rate: PcmRate, cutoff: Cutoff) -> Result<Plan> {
-        Plan::with_design(rate, cutoff, Design::Default)
+        Plan::with_design(rate, cutoff, Design::Fast)
     }
 
     pub(crate) fn with_design(rate: PcmRate, cutoff: Cutoff, design: Design) -> Result<Plan> {
@@ -510,7 +510,7 @@ impl Plan {
         let kind = S1Kind::of(design, cutoff);
         let lut = S1Src::new(kind, dispatch::s1_layout(isa));
         let mut ops = match design {
-            Design::Default => default_ops(rate, cutoff),
+            Design::Fast => fast_ops(rate, cutoff),
             Design::Precise => precise_ops(rate, cutoff),
         };
         debug_assert!(ops.len() <= MAX_OPS);
@@ -947,7 +947,8 @@ fn every_other(src: &[f64], dst: &mut [f64]) {
     }
 }
 
-/// Streaming DSD64 decimator producing scarletbook-pcm's samples on the 2^26 grid.
+/// Streaming DSD64 decimator producing scarletbook-pcm's samples on the 2^26 grid: the
+/// filters of [`crate::Filter::Fast`], whatever the default [`crate::Filter`] is.
 #[derive(Debug)]
 pub struct Decimator {
     plan: Plan,
@@ -1041,7 +1042,7 @@ mod tests {
         (PcmRate::Hz352800, Cutoff::Wide),
     ];
 
-    const DESIGNS: [Design; 2] = [Design::Default, Design::Precise];
+    const DESIGNS: [Design; 2] = [Design::Fast, Design::Precise];
 
     fn sym(op: &Op) -> &Sym {
         match op {

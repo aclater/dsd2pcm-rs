@@ -18,7 +18,7 @@ const FRAME: usize = frames::FRAME_BYTES_PER_CHANNEL;
 
 /// The filters whose frame runs must equal their whole-area conversion (pysacd's has its own
 /// tests: its dither depends on the frame index).
-const FILTERS: [Filter; 2] = [Filter::Default, Filter::Precise];
+const FILTERS: [Filter; 2] = [Filter::Fast, Filter::Precise];
 
 const ALL: [(PcmRate, Cutoff); 8] = [
     (PcmRate::Hz88200, Cutoff::Low),
@@ -74,7 +74,7 @@ fn sb_conv(rate: PcmRate, cutoff: Cutoff, ch: usize, gain_db: f64) -> sb::Conver
 }
 
 fn our_conv(rate: PcmRate, cutoff: Cutoff, ch: usize, gain_db: f64) -> Converter {
-    conv_with(Filter::Default, rate, cutoff, ch, gain_db)
+    conv_with(Filter::Fast, rate, cutoff, ch, gain_db)
 }
 
 fn conv_with(filter: Filter, rate: PcmRate, cutoff: Cutoff, ch: usize, gain_db: f64) -> Converter {
@@ -388,7 +388,7 @@ fn context_bytes() {
         let mut c = conv_with(filter, rate, cutoff, ch, 0.0);
         let ctx = c.context_bytes();
         assert!(ctx < FRAME, "{filter:?} {rate:?} {cutoff:?}: {ctx}");
-        if filter == Filter::Default {
+        if filter == Filter::Fast {
             assert_eq!(ctx, sb_conv(rate, cutoff, ch, 0.0).context_bytes());
         }
         let frame = |t: usize| a[t * FRAME * ch..][..FRAME * ch].to_vec();

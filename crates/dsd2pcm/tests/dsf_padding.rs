@@ -86,7 +86,7 @@ fn reader_masks_the_padding_bits() {
 
 #[test]
 fn padding_converts_as_silence() {
-    for filter in [Filter::Default, Filter::Precise, Filter::Pysacd] {
+    for filter in [Filter::Fast, Filter::Precise, Filter::Pysacd] {
         for (rate, cutoff) in ALL {
             let mut opts = PcmOptions::new(rate);
             opts.cutoff = cutoff;

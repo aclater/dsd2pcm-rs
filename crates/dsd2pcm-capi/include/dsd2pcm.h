@@ -75,7 +75,9 @@ template <typename T> static inline T dsd2pcm_init_() {
 // Low-pass filter: passband to 80 kHz (176 400 and 352 800 Hz only).
 #define DSD2PCM_CUTOFF_WIDE 2
 
-// Filter and quantiser: scarletbook-pcm 0.7.0's (the default).
+// Filter and quantiser: the default, which is the precise filter since 0.2.0
+// (`DSD2PCM_FILTER_PRECISE`, the same bytes). In 0.1.x it was scarletbook-pcm 0.7.0's,
+// now `DSD2PCM_FILTER_FAST`. A zero `filter` field (the `*_INIT` macros) means this.
 #define DSD2PCM_FILTER_DEFAULT 0
 
 // Filter and quantiser: pysacd's filter with its TPDF-dithered quantiser, at 88200 and
@@ -84,10 +86,16 @@ template <typename T> static inline T dsd2pcm_init_() {
 // `dsd2pcm_run.first_frame`.
 #define DSD2PCM_FILTER_PYSACD 1
 
-// Filter and quantiser: the precise filter, at every rate and cutoff, rounded as the
-// default: at least 150 dB of stopband where ultrasonic content folds into the passband,
-// at a higher CPU cost.
+// Filter and quantiser: the precise filter (the default since 0.2.0), at every rate and
+// cutoff, rounded without dither: at least 150 dB of stopband where ultrasonic content
+// folds into the passband, SINAD 142 to 145 dB with a quiet source.
 #define DSD2PCM_FILTER_PRECISE 2
+
+// Filter and quantiser: lower CPU, lower quality: scarletbook-pcm 0.7.0's filters at
+// every rate and cutoff, rounded without dither, the same bytes as scarletbook-pcm (the
+// default of 0.1.x). SINAD about 122 dB with a quiet source (116 dB with the wide cutoff),
+// at about 0.55 times the precise filter's CPU time on one core. (Since 0.2.0.)
+#define DSD2PCM_FILTER_FAST 3
 
 // The ABI version: it changes on any incompatible change to the interface. Compatible
 // changes only append fields to the structs (see `struct_size`) or add functions.
@@ -112,7 +120,7 @@ typedef int (*dsd2pcm_progress_fn)(uint64_t done, uint64_t total, void *user_dat
 
 // Settings for `dsd2pcm_convert_file`. Start from `DSD2PCM_FILE_OPTIONS_INIT` (all zeros
 // but `struct_size`) and set `rate_hz`; the other zeros are the defaults: standard cutoff,
-// default filter, 0 dB, all cores, no callback, an existing output replaced.
+// default filter (precise), 0 dB, all cores, no callback, an existing output replaced.
 typedef struct dsd2pcm_file_options {
   // Size of this struct as the caller compiled it: `sizeof(...)` (the `*_INIT` macro sets
   // it). Must be at least the 0.1.0 size; the library reads or writes only the fields it
@@ -122,7 +130,7 @@ typedef struct dsd2pcm_file_options {
   uint32_t rate_hz;
   // `DSD2PCM_CUTOFF_*`.
   uint32_t cutoff;
-  // `DSD2PCM_FILTER_*`; 0 is the default.
+  // `DSD2PCM_FILTER_*`; 0 is the default (`DSD2PCM_FILTER_PRECISE` since 0.2.0).
   uint32_t filter;
   // 0: convert on all cores; 1: on the calling thread only. Other values are reserved.
   uint32_t threads;
@@ -164,7 +172,7 @@ typedef struct dsd2pcm_file_report {
 
 // Settings for `dsd2pcm_frames_new`. Start from `DSD2PCM_FRAMES_CONFIG_INIT` and set
 // `rate_hz` and `channels`; the other zeros are the defaults: standard cutoff, default
-// filter, 0 dB.
+// filter (precise), 0 dB.
 typedef struct dsd2pcm_frames_config {
   // Size of this struct as the caller compiled it: `sizeof(...)` (the `*_INIT` macro sets
   // it). Must be at least the 0.1.0 size; the library reads or writes only the fields it
@@ -174,7 +182,7 @@ typedef struct dsd2pcm_frames_config {
   uint32_t rate_hz;
   // `DSD2PCM_CUTOFF_*`.
   uint32_t cutoff;
-  // `DSD2PCM_FILTER_*`; 0 is the default.
+  // `DSD2PCM_FILTER_*`; 0 is the default (`DSD2PCM_FILTER_PRECISE` since 0.2.0).
   uint32_t filter;
   // Channels of the frames, 1 to 6.
   uint32_t channels;
@@ -212,8 +220,8 @@ typedef struct dsd2pcm_run {
   // `after`'s length in bytes: one frame, or 0 with NULL.
   size_t after_len;
   // Index of the run's first frame in its area. `DSD2PCM_FILTER_PYSACD` seeds its
-  // dither from it (frame `first_frame + i` for the run's frame `i`); the default filter
-  // ignores it.
+  // dither from it (frame `first_frame + i` for the run's frame `i`); the other filters
+  // ignore it.
   uint64_t first_frame;
 } dsd2pcm_run;
 

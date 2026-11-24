@@ -50,8 +50,10 @@ fn run(
 fn progress_is_reported_and_output_unchanged() {
     let file = dsf(300_000);
     for (threads, filter) in [
-        (false, Filter::Default),
-        (true, Filter::Default),
+        (false, Filter::Precise),
+        (true, Filter::Precise),
+        (false, Filter::Fast),
+        (true, Filter::Fast),
         (false, Filter::Pysacd),
         (true, Filter::Pysacd),
     ] {
@@ -78,8 +80,10 @@ fn progress_is_reported_and_output_unchanged() {
 fn break_cancels() {
     let file = dsf(300_000);
     for (filter, stop) in [
-        (Filter::Default, 0usize),
-        (Filter::Default, 1),
+        (Filter::Precise, 0usize),
+        (Filter::Precise, 1),
+        (Filter::Fast, 0),
+        (Filter::Fast, 1),
         (Filter::Pysacd, 0),
         (Filter::Pysacd, 1),
     ] {

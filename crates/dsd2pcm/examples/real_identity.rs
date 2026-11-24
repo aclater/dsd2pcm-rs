@@ -6,7 +6,9 @@
 //! cargo run --release -p dsd2pcm --example real_identity -- IN.dsf|IN.dff OUT.wav RATE CUTOFF
 //! ```
 //!
-//! RATE is 88200, 176400 or 352800 and CUTOFF 30, 40 or wide (default filter, gain 0). The
+//! RATE is 88200, 176400 or 352800 and CUTOFF 30, 40 or wide; OUT was written with
+//! `--filter fast` (scarletbook-pcm's filters; the default, precise, gives other bytes) and
+//! gain 0. The
 //! input streams through in runs of frames with their neighbours, so memory stays small
 //! for files of any length. Checks, each a failure (exit status 1) when it does not hold:
 //!

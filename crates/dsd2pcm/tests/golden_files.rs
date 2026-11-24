@@ -1,9 +1,12 @@
 //! Golden hashes of whole output files: `convert_file` writes each input at every rate and
-//! cutoff (and with pysacd's filter at its rates), and the SHA-256 of every WAV file, header
-//! and samples, is pinned per input. A change to the header (chunk layout, format tag,
-//! channel mask) or to the samples fails here; output bytes change only with a major
-//! version (AGENTS.md). The hashes were computed on 0.1.2 (two updated for 0.2's channel
-//! mask, see [`GOLDEN`]) and are the same on every SIMD level and platform.
+//! cutoff with the fast filter (and with pysacd's filter at its rates), and again with the
+//! precise filter, named and as the default, and the SHA-256 of every WAV file, header and
+//! samples, is pinned per input. A change to the header (chunk layout, format tag, channel
+//! mask) or to the samples fails here; output bytes change only between releases, with the
+//! change recorded (AGENTS.md). The fast and pysacd hashes were computed on 0.1.2 (two
+//! updated for 0.2's channel mask, see [`GOLDEN`]), the precise ones on 0.2.0, and they are
+//! the same on every SIMD level (`.github/scripts/test-simd-levels.sh` runs this test at
+//! each) and platform.
 //!
 //! Inputs: the material of the sample golden tests (`identity.rs`) for 1, 2 and 6 channels,
 //! full scale (all 0xFF), DSF files of channel types 5, 6 and 7, and DSDIFF files whose
@@ -101,24 +104,37 @@ fn dff(chans: &[Vec<u8>], ids: &[&[u8; 4]]) -> Vec<u8> {
     f
 }
 
-/// Every setting a file is converted with: the default filter at each rate and cutoff,
+const RATES_CUTOFFS: [(PcmRate, Cutoff); 8] = [
+    (PcmRate::Hz88200, Cutoff::Low),
+    (PcmRate::Hz88200, Cutoff::Standard),
+    (PcmRate::Hz176400, Cutoff::Low),
+    (PcmRate::Hz176400, Cutoff::Standard),
+    (PcmRate::Hz176400, Cutoff::Wide),
+    (PcmRate::Hz352800, Cutoff::Low),
+    (PcmRate::Hz352800, Cutoff::Standard),
+    (PcmRate::Hz352800, Cutoff::Wide),
+];
+
+/// Every rate and cutoff with `filter` (`None`: the default filter, as [`PcmOptions::new`]
+/// sets it).
+fn every_rate(filter: Option<Filter>) -> Vec<PcmOptions> {
+    RATES_CUTOFFS
+        .into_iter()
+        .map(|(rate, cutoff)| {
+            let mut o = PcmOptions::new(rate);
+            o.cutoff = cutoff;
+            if let Some(f) = filter {
+                o.filter = f;
+            }
+            o
+        })
+        .collect()
+}
+
+/// The settings of [`GOLDEN`]: the fast filter (0.1.x's default) at each rate and cutoff,
 /// then pysacd's at 88.2 and 176.4 kHz.
-fn settings() -> Vec<PcmOptions> {
-    let mut v = Vec::new();
-    for (rate, cutoff) in [
-        (PcmRate::Hz88200, Cutoff::Low),
-        (PcmRate::Hz88200, Cutoff::Standard),
-        (PcmRate::Hz176400, Cutoff::Low),
-        (PcmRate::Hz176400, Cutoff::Standard),
-        (PcmRate::Hz176400, Cutoff::Wide),
-        (PcmRate::Hz352800, Cutoff::Low),
-        (PcmRate::Hz352800, Cutoff::Standard),
-        (PcmRate::Hz352800, Cutoff::Wide),
-    ] {
-        let mut o = PcmOptions::new(rate);
-        o.cutoff = cutoff;
-        v.push(o);
-    }
+fn settings_fast() -> Vec<PcmOptions> {
+    let mut v = every_rate(Some(Filter::Fast));
     for rate in [PcmRate::Hz88200, PcmRate::Hz176400] {
         let mut o = PcmOptions::new(rate);
         o.filter = Filter::Pysacd;
@@ -129,12 +145,12 @@ fn settings() -> Vec<PcmOptions> {
 
 /// SHA-256 over the whole WAV files `convert_file` writes from `input` with every setting,
 /// in order, each preceded by its length.
-fn digest(dir: &Path, name: &str, input: &[u8]) -> String {
+fn digest(dir: &Path, name: &str, input: &[u8], settings: &[PcmOptions]) -> String {
     let (inp, out) = (dir.join(name), dir.join(format!("{name}.wav")));
     std::fs::write(&inp, input).unwrap();
     let mut h = Sha256::new();
-    for opts in settings() {
-        convert_file(&inp, &out, &opts).unwrap();
+    for opts in settings {
+        convert_file(&inp, &out, opts).unwrap();
         let wav = std::fs::read(&out).unwrap();
         h.update((wav.len() as u64).to_le_bytes());
         h.update(&wav);
@@ -184,20 +200,59 @@ const GOLDEN: [&str; 11] = [
     "9c9f47f45e39a868188290ee3629602954954d87b695311db09f3f7bf68efe9a",
 ];
 
-#[test]
-fn golden_whole_files() {
-    let dir: PathBuf = Path::new(env!("CARGO_TARGET_TMPDIR")).join("golden-files");
+/// The precise filter's whole-file hashes, per input in the order of [`inputs`], every rate
+/// and cutoff (no pysacd settings), computed on 0.2.0. Type 7 and six channels give the same
+/// files, and so do type 5 and the DSDIFF speakers, as in [`GOLDEN`].
+const GOLDEN_PRECISE: [&str; 11] = [
+    "987f7dd2d3d907247d5a9aeffa6be84612a7a65a507c0097595a778d8a142bd6",
+    "78e5fd9f3b82b1411750a1466fc87ae939d5167d30414bc9235c4e67516c1aac",
+    "91fef45aa838b0b99ac567d942bae906683c4f32892a42a7553ed207862d5a3d",
+    "8cf0e9a63c33e6ed7e9b024e59f81d97ea0e3bed434c12f3c6d3abda6e258991",
+    "b2cd9aa25c19a03c2873c797859a5ccbc4914c36aff5243e279c9fe84133755a",
+    "7a7b3aa4816aec9cd5996e6f6fd154d07a7fb65185dde6c65dabe26353407fbb",
+    "26bc291b5ca41852e387a194cf48752bfa59bc9492a8b1e80bbe61c5814eaf04",
+    "0e1c7cc7097faea408c2221e255d8a7ec6a1601b735f9dcf4303a68c86000338",
+    "91fef45aa838b0b99ac567d942bae906683c4f32892a42a7553ed207862d5a3d",
+    "26bc291b5ca41852e387a194cf48752bfa59bc9492a8b1e80bbe61c5814eaf04",
+    "e3d3d2ffeb27ee54fa877ce74aab67c1d47cb6848d43c809f7798493ee3b4b88",
+];
+
+/// Hashes every input with `settings` and checks them against `golden`.
+fn check(tag: &str, settings: &[PcmOptions], golden: [&str; 11]) {
+    let dir: PathBuf = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("golden-files-{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let got: Vec<(&str, String)> = inputs()
         .into_iter()
-        .map(|(name, bytes)| (name, digest(&dir, name, &bytes)))
+        .map(|(name, bytes)| (name, digest(&dir, name, &bytes, settings)))
         .collect();
     for (name, d) in &got {
-        eprintln!("{name}: \"{d}\",");
+        eprintln!("{tag} {name}: \"{d}\",");
     }
-    for ((name, d), want) in got.iter().zip(GOLDEN) {
-        assert_eq!(d, want, "{name}: whole output files changed");
+    for ((name, d), want) in got.iter().zip(golden) {
+        assert_eq!(d, want, "{tag} {name}: whole output files changed");
     }
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// The fast and pysacd filters: the hashes of 0.1.2 (0.1.x's default filter), unchanged.
+#[test]
+fn golden_whole_files() {
+    check("fast", &settings_fast(), GOLDEN);
+}
+
+#[test]
+fn golden_whole_files_precise() {
+    check(
+        "precise",
+        &every_rate(Some(Filter::Precise)),
+        GOLDEN_PRECISE,
+    );
+}
+
+/// The default filter, as `PcmOptions::new` sets it: the precise filter since 0.2.0.
+#[test]
+fn golden_whole_files_default() {
+    assert_eq!(Filter::default(), Filter::Precise);
+    check("default", &every_rate(None), GOLDEN_PRECISE);
 }

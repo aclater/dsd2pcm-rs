@@ -81,10 +81,11 @@ of the aarch64 tool runs under qemu on a 120-second 5.1 file and is sent SIGINT,
 SIGTERM: it must exit 130 and 143, leave the existing output as it was and leave no
 temporary file. The native aarch64 CI job runs the test itself.
 
-The suite holds item 2: `tests/identity.rs` compares the output with scarletbook-pcm
-0.7.0 (a dev-dependency, run in the same test) for every rate, cutoff, gain and channel
-count, and `golden_hashes_at_every_simd_level` checks the eight golden SHA-256 hashes at
-every level the CPU has, each forced in turn. `tests/pysacd.rs` checks the `pysacd` filter
+The suite holds item 2: `tests/identity.rs` compares the output of the fast filter with
+scarletbook-pcm 0.7.0 (a dev-dependency, run in the same test) for every rate, cutoff, gain
+and channel count, and the `golden_hashes_*_at_every_simd_level` tests check the eight
+golden SHA-256 hashes of the fast, precise and default filters at every level the CPU has,
+each forced in turn. `tests/pysacd.rs` checks the `pysacd` filter
 against its reference hashes.
 
 macOS (aarch64) and Windows (x86_64), and native aarch64 Linux: the rows come from the
@@ -175,8 +176,8 @@ RTP_PAIRS=pairs.txt .github/scripts/release-test.sh corpus corpus.txt WORKDIR
 
 First a self-test: the checker passes a correct output and fails it after one flipped
 byte. Then, for every file, the release build of the `dsd2pcm` tool converts it at every
-rate and cutoff of the default filter (88.2 kHz with 30 and 40; 176.4 and 352.8 kHz with
-30, 40 and wide), and `crates/dsd2pcm/examples/real_identity.rs` checks each output:
+rate and cutoff of the fast filter (`--filter fast`, scarletbook-pcm's filters; 88.2 kHz
+with 30 and 40; 176.4 and 352.8 kHz with 30, 40 and wide), and `crates/dsd2pcm/examples/real_identity.rs` checks each output:
 
 - it reads back as a WAV: one `fmt ` chunk (24-bit, the input's channels and the rate), one
   `data` chunk of whole sample frames, the RIFF size equal to the file size;
@@ -189,8 +190,8 @@ rate and cutoff of the default filter (88.2 kHz with 30 and 40; 176.4 and 352.8 
   samples of every channel.
 
 Then the `pysacd` filter at 88.2 and 176.4 kHz (a WAV, the same bytes threaded and with
-`--single-thread`), the default settings threaded and with `--single-thread` (the same
-bytes), and each container pair (the same WAV, byte for byte).
+`--single-thread`), the default settings (the precise filter) threaded and with
+`--single-thread` (the same bytes), and each container pair (the same WAV, byte for byte).
 
 Pass: every line is `OK` or an expected refusal; the only refusal is a conversion whose
 WAV would pass 4 GiB, with exit status 1, the message "WAV output over 4 GiB" and no
@@ -319,18 +320,19 @@ cargo install --locked --git https://github.com/aclater/dsd2pcm-rs --tag v0.1.2 
 dsd-measure run suites/dsd2pcm.toml --only reference_floor levels noise alias_tones
 ```
 
-Then the null test of each filter, rate and cutoff, new against old, on the suite's
-multitone signal. Its SHA-256 must be
+Then the null test of each filter, rate and cutoff that both versions have, new against
+old, on the suite's multitone signal (`fast` is 0.1.x's default; the precise filter, the
+default from 0.2.0, has no null test until the previous release has it too). Its SHA-256 must be
 `100d1ba2cb46d98374ee5b8591b995712d12cd21c7d9370d50a1d68da3c030fc`:
 
 ```sh
 dsd-measure signals target/quality/signals --profile quick --only multitone
 sha256sum target/quality/signals/multitone.dsf
-dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old default 40 88200" --device "new default 40 88200" -o target/quality/null/default-40-88200
-dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old default 40 176400" --device "new default 40 176400" -o target/quality/null/default-40-176400
-dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old default 40 352800" --device "new default 40 352800" -o target/quality/null/default-40-352800
-dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old default wide 176400" --device "new default wide 176400" -o target/quality/null/default-wide-176400
-dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old default wide 352800" --device "new default wide 352800" -o target/quality/null/default-wide-352800
+dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old fast 40 88200" --device "new fast 40 88200" -o target/quality/null/fast-40-88200
+dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old fast 40 176400" --device "new fast 40 176400" -o target/quality/null/fast-40-176400
+dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old fast 40 352800" --device "new fast 40 352800" -o target/quality/null/fast-40-352800
+dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old fast wide 176400" --device "new fast wide 176400" -o target/quality/null/fast-wide-176400
+dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old fast wide 352800" --device "new fast wide 352800" -o target/quality/null/fast-wide-352800
 dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old pysacd 88200" --device "new pysacd 88200" -o target/quality/null/pysacd-88200
 dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old pysacd 176400" --device "new pysacd 176400" -o target/quality/null/pysacd-176400
 ```

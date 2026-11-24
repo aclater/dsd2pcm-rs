@@ -1,9 +1,9 @@
-//! Speed of the default and precise filters, in memory, on one DSF file.
+//! Speed of the fast and precise (default) filters, in memory, on one DSF file.
 //!
 //! `cargo run --release --example bench_filters -- FILE.dsf [SECONDS]`: converts the first
 //! SECONDS (default 30) of FILE with both filters at every rate and cutoff, on one thread
 //! and on all cores, and prints the speed as a multiple of real time (best of three runs)
-//! and precise's cost relative to the default (time ratio). Pin it with `taskset` to time
+//! and precise's cost relative to fast (time ratio). Pin it with `taskset` to time
 //! one kind of core; `DSD2PCM_SIMD` caps the SIMD level.
 
 use dsd2pcm::convert::dsd64_to_pcm;
@@ -47,9 +47,9 @@ fn main() {
     let dsf: Arc<[u8]> = w.into_inner().into_inner().into();
     let level = dsd2pcm::decimator::SimdLevel::available();
     println!(
-        "{path}: {ch} ch, {audio:.1} s, levels {level:?}; x real time (best of 3), ratio = precise time / default time"
+        "{path}: {ch} ch, {audio:.1} s, levels {level:?}; x real time (best of 3), ratio = precise time / fast time"
     );
-    println!("rate    cutoff    threads  default  precise  ratio");
+    println!("rate    cutoff    threads     fast  precise  ratio");
     for rate in [PcmRate::Hz88200, PcmRate::Hz176400, PcmRate::Hz352800] {
         for cutoff in [Cutoff::Low, Cutoff::Standard, Cutoff::Wide] {
             if cutoff == Cutoff::Wide && rate == PcmRate::Hz88200 {
@@ -78,7 +78,7 @@ fn main() {
                         wav.finish().unwrap();
                     })
                 };
-                let (d, p) = (run(Filter::Default), run(Filter::Precise));
+                let (d, p) = (run(Filter::Fast), run(Filter::Precise));
                 println!(
                     "{:<7} {:<9} {:<8} {:>7.1} {:>8.1} {:>6.2}",
                     rate.hz(),
