@@ -80,6 +80,11 @@ version.
 
 ### Fixed
 
+- Tests: `plans_match_reference` and `precise_plans_match_the_design` failed under Miri's
+  default floating-point model because their integer reference computed each stage's
+  shift with `log2`, which Miri perturbs; the shift now comes from the scale's exponent
+  bits. Test code only: output is unchanged, and the library's output path uses no
+  operation whose result Rust leaves unspecified ([testing](docs/testing.md#miri)).
 - Tests: the soak test failed every run of 1000 iterations at 0.2.0's code without a leak
   (the live heap rose 1.1 MiB from its 20 to 50 % window to the second half, all of it the
   kept converters' buffers growing). It now judges memory after a warm-up of two rounds of

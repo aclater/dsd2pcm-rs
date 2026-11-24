@@ -120,7 +120,12 @@ final 24-bit step.
 **No libm at run time.** The taps are committed integers. scarletbook-pcm's design code,
 which uses `cos` and `exp`, never runs in the converter, so a platform's libm cannot change
 a sample. The gain factor `db_to_linear` uses only additions, multiplications and
-divisions in a fixed order (ported unchanged): exactly 1 at 0 dB, identical everywhere.
+divisions in a fixed order (ported unchanged): exactly 1 at 0 dB, identical everywhere. Every
+other floating-point operation at conversion time is one that IEEE 754 and Rust specify
+exactly: additions, multiplications, the fused multiply-add of the AVX2 + FMA level,
+conversions between `f64`, `f32` and integers, `clamp` and `round_ties_even`. No
+transcendental function (`powf`, `powi`, `exp`, `log2`, ...) runs on the output path, so
+musl, glibc, macOS and Windows builds give the same bytes.
 
 **No dither in the default filter.** The 24-bit rounding error is far below the noise
 floor of DSD itself, so dither would only add noise. It would also need a seeded random

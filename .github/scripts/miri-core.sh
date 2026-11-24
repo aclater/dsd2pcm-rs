@@ -23,9 +23,7 @@ export MIRIFLAGS="${MIRIFLAGS:--Zmiri-env-forward=DSD2PCM_SIMD}"
 # - decimator::tests::s1_chunks_match_bytes: every stage-1 chunking of long inputs;
 # - decimator::tests::sums_are_exact: the exactness proofs over every table;
 # - decimator::tests::plans_match_reference and precise_plans_match_the_design: every
-#   plan against the integer reference, over an hour each. Under Miri's default
-#   floating-point model both also fail (docs/testing.md); with
-#   -Zmiri-deterministic-floats the first passes in 68 minutes;
+#   plan against the integer reference, over an hour each;
 # - filters::pysacd::tests::floats_match_the_reference_at_every_simd_level and
 #   render_matches_the_stream: seconds of audio through pysacd's filter.
 cargo miri test --locked -p dsd2pcm --lib -- \

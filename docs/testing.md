@@ -169,10 +169,13 @@ one core of a Ryzen AI Max+ 395:
 The core crate's part (`miri-core.sh`) took 14 minutes. Three of the tests left
 out ran in CI until 0.2.0 but take over 50 minutes each under Miri:
 `decimator::tests::plans_match_reference`, `decimator::tests::precise_plans_match_the_design`
-and `output_counts_past_32_bits_do_not_panic`. Under Miri's default floating-point model
-the two plan tests also fail; with `-Zmiri-deterministic-floats` the first passes in 68
-minutes (the cause is not yet known). All three run natively on every pull request, at
-every SIMD level.
+and `output_counts_past_32_bits_do_not_panic`. All three run natively on every pull
+request, at every SIMD level. The two plan tests also used to fail under Miri's default
+floating-point model: their integer reference took a stage's shift as `-log2(scale)`
+truncated to an integer, and Miri perturbs `log2` (Rust leaves its precision
+unspecified), so `log2(2^-52)` could give -51.99999999999998 and a shift of 51. The
+reference now reads the shift from the scale's exponent bits. The library's output path
+has no such operation ([design](design.md#arithmetic-rounding-and-dither)).
 
 ## ThreadSanitizer
 
