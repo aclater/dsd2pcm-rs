@@ -88,6 +88,13 @@ i686)
     ;;
 aarch64)
     rc=0
+    # The CLI's tests start the tool itself: the host needs binfmt_misc for aarch64, with
+    # the F flag so that a container can use it (Fedora's qemu-user-static registers it).
+    if ! grep -qx enabled /proc/sys/fs/binfmt_misc/qemu-aarch64 2>/dev/null ||
+        ! grep -q '^flags:.*F' /proc/sys/fs/binfmt_misc/qemu-aarch64; then
+        echo "aarch64 needs the host's binfmt_misc entry qemu-aarch64 with the F flag (qemu-user-static)"
+        verdict 1
+    fi
     sysroot=/usr/aarch64-redhat-linux/sys-root/fc45
     in_container "gcc gcc-aarch64-linux-gnu sysroot-aarch64-fc45-glibc qemu-user-static-aarch64 file cpio python3" \
         "# The sysroot has glibc only: add aarch64 libgcc_s, which Rust's std links.
@@ -103,11 +110,13 @@ aarch64)
          chmod +x /usr/local/bin/aarch64-cc
          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=/usr/local/bin/aarch64-cc
          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER='qemu-aarch64-static -L $sysroot'
+         # The CLI's tests start the tool as a child process, which the host kernel's
+         # binfmt_misc entry runs under qemu: QEMU_LD_PREFIX gives it the sysroot's loader.
+         export QEMU_LD_PREFIX=$sysroot
          # Under emulation, optimised, with the debug build's checks kept.
          export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true
-         # The CLI's signal test spawns the tool, which a container without binfmt_misc
-         # cannot exec under qemu-user: skipped here (native aarch64 CI runs it) and
-         # replaced by the same check run through qemu below.
+         # The CLI's signal test, which signals that child, is skipped here (native aarch64
+         # CI runs it) and replaced by the same check run through qemu below.
          .github/scripts/test-simd-levels.sh --target aarch64-unknown-linux-gnu --release -- --skip sigint_and_sigterm_leave_no_partial_output &&
          cargo build --locked -p dsd2pcm-cli --target aarch64-unknown-linux-gnu &&
          file \"\$CARGO_TARGET_DIR/aarch64-unknown-linux-gnu/debug/dsd2pcm\" | grep 'ELF 64-bit.*ARM aarch64' &&
@@ -183,7 +192,10 @@ soak)
 miri)
     rc=0
     export RUSTUP_TOOLCHAIN=$nightly CARGO_TARGET_DIR=target/rtp-miri
-    capped cargo miri test --locked -p dsd2pcm-capi || rc=1
+    # The generic kernels, as sanitizers.yml and miri-core.sh run them (Miri runs no SIMD):
+    # without them the C interface's tests run the SSE2 kernels under Miri, not the generic ones.
+    capped env DSD2PCM_SIMD=generic MIRIFLAGS=-Zmiri-env-forward=DSD2PCM_SIMD \
+        cargo miri test --locked -p dsd2pcm-capi || rc=1
     capped .github/scripts/miri-core.sh || rc=1
     verdict $rc
     ;;
