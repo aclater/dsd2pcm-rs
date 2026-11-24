@@ -1,4 +1,5 @@
-//! Speed of DSD64 to 24-bit PCM against scarletbook-pcm 0.7.0, in memory, on one DSF file.
+//! Speed of DSD64 to 24-bit PCM against scarletbook-pcm 0.7.0, in memory, on one DSF file,
+//! with `Filter::Fast` (scarletbook-pcm's filters, the same bytes), not the default filter.
 //!
 //! `cargo run --release --example bench -- FILE.dsf [SECONDS]`: converts the first
 //! SECONDS (default 60) of FILE with every rate and cutoff, single-threaded and with one
@@ -74,7 +75,7 @@ fn main() {
                     } else {
                         Threads::Single
                     })
-                    .with_filter(dsd2pcm::Filter::Default);
+                    .with_filter(dsd2pcm::Filter::Fast);
                 let r = DsfReader::new(Cursor::new(dsf.clone())).unwrap();
                 // Sized up front, as scarletbook-pcm's output buffer is.
                 let size = 68 + n * 8 / rate.decimation() as usize * ch * 3;

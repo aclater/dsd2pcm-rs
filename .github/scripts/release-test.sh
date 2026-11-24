@@ -206,7 +206,7 @@ corpus)
     rc=0
     # The checker must catch a difference: one flipped byte in a correct output fails it.
     first=$(grep -v '^#' "$list" | sed -n 1p)
-    capped "$tool" "$first" "$work/out.wav" --rate 88200 2>/dev/null
+    capped "$tool" "$first" "$work/out.wav" --rate 88200 --filter fast 2>/dev/null
     capped "$ident" "$first" "$work/out.wav" 88200 40 > /dev/null || { echo "FAIL checker on a correct output"; rc=1; }
     python3 -I -c 'import sys; f=open(sys.argv[1],"r+b"); f.seek(-100000,2); b=f.read(1); f.seek(-100000,2); f.write(bytes([b[0]^1]))' "$work/out.wav"
     if capped "$ident" "$first" "$work/out.wav" 88200 40 > "$work/selftest.txt"; then
@@ -222,7 +222,8 @@ corpus)
         for s in "${settings[@]}"; do
             read -r r c <<< "$s"
             rm -f "$out"
-            if ! capped "$tool" "$f" "$out" --rate "$r" --cutoff "$c" 2> "$work/cli.log"; then
+            # The fast filter: scarletbook-pcm's, so real_identity can compare the bytes.
+            if ! capped "$tool" "$f" "$out" --rate "$r" --cutoff "$c" --filter fast 2> "$work/cli.log"; then
                 # The one refusal the docs promise: WAV output over 4 GiB.
                 if grep -q -i '4 GiB\|too large\|too long' "$work/cli.log" && [[ ! -e "$out" ]]; then
                     echo "refused (over 4 GiB), no output: $r $c: $(tail -n 1 "$work/cli.log")"
@@ -253,13 +254,13 @@ EOF
                 rc=1
             fi
         done
-        # The default filter threaded and on one thread: the same bytes.
+        # The default filter (precise) threaded and on one thread: the same bytes.
         rm -f "$out" "$work/out1.wav"
         if capped "$tool" "$f" "$out" 2>/dev/null && capped "$tool" "$f" "$work/out1.wav" --single-thread 2>/dev/null &&
             cmp -s "$out" "$work/out1.wav"; then
-            echo "default 176400 40: threaded = single-thread"
+            echo "default (precise) 176400 40: threaded = single-thread"
         else
-            echo "FAIL default 176400 40: threaded and single-thread differ"
+            echo "FAIL default (precise) 176400 40: threaded and single-thread differ"
             rc=1
         fi
         rm -f "$out" "$work/out1.wav"

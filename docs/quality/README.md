@@ -8,8 +8,9 @@ the previous release.
 Both versions are built from source (the release candidate and the previous release's tag) and measured on one machine with
 [dsd-measure](https://github.com/dsd-toolbox/dsd-measure) 0.1.1 (commit d234b7a, pinned in
 [suites/dsd2pcm.toml](../../suites/dsd2pcm.toml)): the same synthetic DSD64 signals go
-through every filter at every rate it supports (default at 88.2, 176.4 and 352.8 kHz with
-cutoff 40, plus cutoff wide at 176.4 and 352.8 kHz; pysacd at 88.2 and 176.4 kHz), and the
+through every filter at every rate it supports (precise and fast, fast being 0.1.x's
+default, at 88.2, 176.4 and 352.8 kHz with cutoff 40, plus cutoff wide at 176.4 and
+352.8 kHz; pysacd at 88.2 and 176.4 kHz), and the
 table gives SINAD and THD+N of a 1 kHz tone at 0 dB SACD, the noise floor from 20 Hz to
 20 kHz, alias rejection (88.2 and 176.4 kHz only) and a null test of the new output against
 the old one on the suite's multitone signal. The suite is deterministic: three runs on the same

@@ -40,19 +40,23 @@ For example, 88.2 kHz with the 30 kHz filter, 3 dB quieter:
 dsd2pcm "01 - Track.dsf" "01 - Track.wav" --rate 88200 --cutoff 30 --gain -3
 ```
 
-`--filter precise` (`Filter::Precise`, `DSD2PCM_FILTER_PRECISE` in C) uses the precise
-filter: the same cutoffs, rates, exact integer arithmetic, centring and rounding as the
-default, with at least 150 dB of stopband wherever ultrasonic content would fold into the
-passband (the default: about 110 dB) and about half the passband ripple. With very quiet sources
+The filter (`--filter`) is `precise` by default (`Filter::Precise`,
+`DSD2PCM_FILTER_PRECISE` in C; `--filter default` and `DSD2PCM_FILTER_DEFAULT` name it too).
+`--filter fast` (`Filter::Fast`, `DSD2PCM_FILTER_FAST`) is lower CPU, lower quality:
+scarletbook-pcm 0.7.0's filters, the default of 0.1.x, with the same output bytes as
+scarletbook-pcm. The precise filter has the same cutoffs, rates, exact integer arithmetic,
+centring and rounding as `fast`, with at least 150 dB of stopband wherever ultrasonic
+content would fold into the passband (`fast`: about 110 dB) and about half the passband
+ripple. With very quiet sources
 it lowers the audio-band floor from about -128 dBFS to the 24-bit output's own, about
--150 dBFS. It takes about twice the CPU time of the default and its output bytes differ
+-150 dBFS. It takes about twice the CPU time of `fast` and its output bytes differ
 from scarletbook-pcm's ([PCM quality](pcm-quality.md#the-precise-filter)).
 
 `--filter pysacd` (`Filter::Pysacd` in `PcmOptions` and `frames::PcmConfig`) uses pysacd's
 filter instead: three Kaiser-windowed FIR stages in `f32` and a TPDF-dithered quantiser,
 bit-exact with pysacd's reference build on every CPU and SIMD level; 88.2 and 176.4 kHz
-only, with a fixed response (leave `--cutoff` at the default). The default filter and its
-output are unchanged. [design.md](design.md) gives the reasons for each filter.
+only, with a fixed response (leave `--cutoff` at the default). [design.md](design.md)
+gives the reasons for each filter.
 
 ## Output
 
@@ -75,9 +79,9 @@ samples, with K at most `ceil(context_bytes / k) + 1` (`k` input bytes per outpu
 
 | Filter | Rate | Cutoff | K at most |
 |---|---|---|---|
-| default | 88.2 kHz | 30 / 40 | 46 / 36 |
-| default | 176.4 kHz | 30 / 40 / wide | 91 / 71 / 62 |
-| default | 352.8 kHz | 30 / 40 / wide | 196 / 156 / 67 |
+| fast | 88.2 kHz | 30 / 40 | 46 / 36 |
+| fast | 176.4 kHz | 30 / 40 / wide | 91 / 71 / 62 |
+| fast | 352.8 kHz | 30 / 40 / wide | 196 / 156 / 67 |
 | precise | 88.2 kHz | 30 / 40 | 83 / 64 |
 | precise | 176.4 kHz | 30 / 40 / wide | 164 / 126 / 113 |
 | precise | 352.8 kHz | 30 / 40 / wide | 350 / 274 / 119 |

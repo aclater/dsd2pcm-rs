@@ -1,5 +1,6 @@
 //! Multithreaded frame-run conversion as a file system with pooled converters drives it,
-//! against scarletbook-pcm 0.7.0, in memory: the wall time of one whole area.
+//! against scarletbook-pcm 0.7.0, in memory: the wall time of one whole area. dsd2pcm runs
+//! `Filter::Fast` (scarletbook-pcm's filters, the same bytes), not the default filter.
 //!
 //! `cargo run --release --example threads -- FILE.dsf CRATE MODE [THREADS] [RATE] [CUTOFF] [REPEAT]`
 //!
@@ -21,7 +22,7 @@
 use dsd2pcm::dsf::DsfReader;
 use dsd2pcm::frames::{self, Converter, PcmConfig, PcmOut, Run};
 use dsd2pcm::io::DsdRead;
-use dsd2pcm::{Cutoff, PcmRate};
+use dsd2pcm::{Cutoff, Filter, PcmRate};
 use scarletbook_pcm as sb;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -39,7 +40,8 @@ impl Conv {
     fn new(ours: bool, rate: PcmRate, cutoff: Cutoff, ch: usize) -> Conv {
         if ours {
             return Conv::Ours(Box::new(
-                Converter::new(PcmConfig::new(rate, cutoff, ch as u8)).unwrap(),
+                Converter::new(PcmConfig::new(rate, cutoff, ch as u8).with_filter(Filter::Fast))
+                    .unwrap(),
             ));
         }
         let sc = match cutoff {
@@ -124,7 +126,7 @@ fn main() {
     drop(chans);
     let list: Vec<Arc<[u8]>> = (0..repeat).flat_map(|_| list.iter().cloned()).collect();
     let frames = list.len();
-    let spf = Converter::new(PcmConfig::new(rate, cutoff, ch as u8))
+    let spf = Converter::new(PcmConfig::new(rate, cutoff, ch as u8).with_filter(Filter::Fast))
         .unwrap()
         .samples_per_frame();
     let fb = spf * ch * 3;

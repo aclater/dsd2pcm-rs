@@ -141,3 +141,63 @@ fn non_utf8_arguments() {
     assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));
     std::fs::remove_dir_all(&d).unwrap();
 }
+
+/// `--filter`: no option, `precise` and `default` give the precise filter's bytes, `fast` the
+/// library's `Filter::Fast` (scarletbook-pcm's) and other bytes; each is what the library
+/// writes with that filter. An unknown name lists the accepted ones.
+#[test]
+fn filter_names() {
+    use dsd2pcm::{convert_file, Filter, PcmOptions, PcmRate};
+    let d = dir("filter");
+    // Material the filters tell apart: a pseudo-random bitstream, not the idle pattern.
+    let inp = d.join("in.dsf");
+    small_dsf(&inp);
+    let mut f = std::fs::read(&inp).unwrap();
+    let mut s = 0x9e37_79b9_7f4a_7c15u64;
+    for b in &mut f[92..] {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        *b = s as u8;
+    }
+    std::fs::write(&inp, f).unwrap();
+    let cli = |name: &str, extra: &[&str]| {
+        let mut a = os(&["in.dsf", name, "--rate", "88200", "--single-thread"]);
+        a.extend(os(extra));
+        let o = run(&d, &a);
+        assert_eq!(o.status.code(), Some(0), "{extra:?}: {}", stderr(&o));
+        std::fs::read(d.join(name)).unwrap()
+    };
+    let lib = |filter: Filter| {
+        let mut o = PcmOptions::new(PcmRate::Hz88200);
+        o.filter = filter;
+        let out = d.join(format!("lib-{filter:?}.wav"));
+        convert_file(&inp, &out, &o).unwrap();
+        std::fs::read(out).unwrap()
+    };
+    let none = cli("none.wav", &[]);
+    let precise = lib(Filter::Precise);
+    let fast = lib(Filter::Fast);
+    assert!(
+        precise != fast,
+        "the test input does not tell the filters apart"
+    );
+    assert!(none == precise, "no --filter: not the precise filter");
+    assert!(cli("p.wav", &["--filter", "precise"]) == precise);
+    assert!(cli("d.wav", &["--filter", "default"]) == precise);
+    assert!(cli("f.wav", &["--filter", "fast"]) == fast);
+    assert!(cli("y.wav", &["--filter", "pysacd"]) == lib(Filter::Pysacd));
+    let o = run(&d, &os(&["in.dsf", "x.wav", "--filter", "scarletbook"]));
+    assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
+    assert!(
+        stderr(&o).contains("filter \"scarletbook\": precise, fast or pysacd"),
+        "{}",
+        stderr(&o)
+    );
+    // The help names the trade-off of `fast`.
+    let o = run(&d, &os(&["--help"]));
+    let help = String::from_utf8_lossy(&o.stdout);
+    assert!(help.contains("--filter precise|fast|pysacd"), "{help}");
+    assert!(help.contains("lower CPU, lower quality"), "{help}");
+    std::fs::remove_dir_all(&d).unwrap();
+}

@@ -272,7 +272,11 @@ impl dsd2pcm::io::DsdRead for Dsd128Source {
 
 #[test]
 fn dsd128_input_is_refused_by_every_filter() {
-    for filter in [dsd2pcm::Filter::Default, dsd2pcm::Filter::Pysacd] {
+    for filter in [
+        dsd2pcm::Filter::Precise,
+        dsd2pcm::Filter::Fast,
+        dsd2pcm::Filter::Pysacd,
+    ] {
         let mut wav = dsd2pcm::wav::WavWriter::new(
             std::io::Cursor::new(Vec::new()),
             dsd2pcm::wav::WavFormat::I24,
@@ -439,7 +443,11 @@ impl DsdRead for HugeShort {
 
 #[test]
 fn output_counts_past_32_bits_do_not_panic() {
-    for filter in [dsd2pcm::Filter::Default, dsd2pcm::Filter::Pysacd] {
+    for filter in [
+        dsd2pcm::Filter::Precise,
+        dsd2pcm::Filter::Fast,
+        dsd2pcm::Filter::Pysacd,
+    ] {
         let mut wav = WavWriter::new(Cursor::new(Vec::new()), WavFormat::I24, 1, 88_200).unwrap();
         let mut opts = dsd2pcm::PcmOptions::new(dsd2pcm::PcmRate::Hz88200);
         opts.filter = filter;

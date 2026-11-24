@@ -7,7 +7,9 @@
  * whole-file conversion with progress and cancel; the frame-run converter on the whole area
  * (no neighbours) gives the WAV file's samples; contiguous and per-frame buffers and runs
  * with neighbours give the same bytes; the same with pysacd's filter, whose dither
- * depends on first_frame; error codes and messages for bad arguments.
+ * depends on first_frame; every DSD2PCM_FILTER_* constant: its value, and that 0 (the
+ * default) gives the precise filter's bytes and FAST other ones, in both interfaces; error
+ * codes and messages for bad arguments.
  *
  * Usage: smoke [DIR] (a writable directory for the test files; default $TMPDIR or /tmp).
  */
@@ -22,6 +24,12 @@
 #define FRAME (CH * DSD2PCM_FRAME_BYTES_PER_CHANNEL)
 
 static int failures;
+
+/* The filter constants keep their values (ABI version 1; FAST is new in 0.2.0). */
+typedef char filter_default_is_0[DSD2PCM_FILTER_DEFAULT == 0 ? 1 : -1];
+typedef char filter_pysacd_is_1[DSD2PCM_FILTER_PYSACD == 1 ? 1 : -1];
+typedef char filter_precise_is_2[DSD2PCM_FILTER_PRECISE == 2 ? 1 : -1];
+typedef char filter_fast_is_3[DSD2PCM_FILTER_FAST == 3 ? 1 : -1];
 
 #define CHECK(cond)                                                                        \
     do {                                                                                   \
@@ -268,6 +276,63 @@ int main(int argc, char **argv) {
         free(ppart);
         free(ppcm);
         free(pwav);
+    }
+
+    /* Every filter constant. The WAV above was written with filter 0, the default: the
+     * precise filter since 0.2.0, so DSD2PCM_FILTER_PRECISE gives the same bytes and
+     * DSD2PCM_FILTER_FAST (scarletbook-pcm's filters) other ones; the frame-run converter
+     * gives each file's bytes. 4 is not a filter. */
+    {
+        const uint32_t filters[] = {DSD2PCM_FILTER_DEFAULT, DSD2PCM_FILTER_PRECISE, DSD2PCM_FILTER_FAST};
+        unsigned char *fast_wav = NULL;
+        for (size_t k = 0; k < sizeof filters / sizeof filters[0]; k++) {
+            dsd2pcm_file_options fo = DSD2PCM_FILE_OPTIONS_INIT;
+            fo.rate_hz = 176400;
+            fo.gain_db = 6.0;
+            fo.threads = 1;
+            fo.filter = filters[k];
+            CHECK(dsd2pcm_convert_file(dsf, wav, &fo, NULL) == DSD2PCM_OK);
+            size_t flen = 0;
+            unsigned char *fwav = read_wav_data(wav, &flen);
+            CHECK(fwav != NULL && flen == wav_len);
+            if (fwav && flen == wav_len) {
+                if (filters[k] == DSD2PCM_FILTER_FAST) {
+                    CHECK(memcmp(fwav, wav_data, wav_len) != 0);
+                } else {
+                    CHECK(memcmp(fwav, wav_data, wav_len) == 0);
+                }
+            }
+            dsd2pcm_frames_config fc = DSD2PCM_FRAMES_CONFIG_INIT;
+            fc.rate_hz = 176400;
+            fc.channels = CH;
+            fc.gain_db = 6.0;
+            fc.filter = filters[k];
+            dsd2pcm_frames *fconv = NULL;
+            CHECK(dsd2pcm_frames_new(&fc, &fconv) == DSD2PCM_OK);
+            unsigned char *fpcm = malloc(out_len);
+            CHECK(dsd2pcm_frames_convert(fconv, &run, DSD2PCM_FORMAT_S24LE, fpcm, out_len, NULL, 0,
+                                         NULL) == DSD2PCM_OK);
+            CHECK(fwav && flen == out_len && memcmp(fpcm, fwav, out_len) == 0);
+            dsd2pcm_frames_free(fconv);
+            free(fpcm);
+            if (filters[k] == DSD2PCM_FILTER_FAST) {
+                fast_wav = fwav;
+            } else {
+                free(fwav);
+            }
+        }
+        CHECK(fast_wav != NULL);
+        free(fast_wav);
+        dsd2pcm_file_options fo = DSD2PCM_FILE_OPTIONS_INIT;
+        fo.rate_hz = 176400;
+        fo.filter = 4;
+        CHECK(dsd2pcm_convert_file(dsf, wav, &fo, NULL) == DSD2PCM_E_INVALID_ARGUMENT);
+        dsd2pcm_frames_config fc = DSD2PCM_FRAMES_CONFIG_INIT;
+        fc.rate_hz = 176400;
+        fc.channels = CH;
+        fc.filter = 4;
+        dsd2pcm_frames *fnone = NULL;
+        CHECK(dsd2pcm_frames_new(&fc, &fnone) == DSD2PCM_E_INVALID_ARGUMENT && fnone == NULL);
     }
 
     /* Errors: NULLs, bad lengths, overlap; nothing written on an error. */

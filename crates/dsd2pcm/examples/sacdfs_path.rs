@@ -1,5 +1,6 @@
 //! Frame-run conversion as a FUSE-style WAV reader drives it, against scarletbook-pcm 0.7.0,
-//! single-threaded, in memory.
+//! single-threaded, in memory. dsd2pcm runs `Filter::Fast` (scarletbook-pcm's filters, the
+//! same bytes), not the default filter.
 //!
 //! `cargo run --release --example sacdfs_path -- FILE.dsf [SECONDS] [all]`: reads the first
 //! SECONDS (default 30) of FILE as Super Audio CD frames (channels interleaved byte by byte,
@@ -20,7 +21,7 @@
 use dsd2pcm::dsf::DsfReader;
 use dsd2pcm::frames::{self, Converter, PcmConfig, PcmOut, Run};
 use dsd2pcm::io::DsdRead;
-use dsd2pcm::{Cutoff, PcmRate};
+use dsd2pcm::{Cutoff, Filter, PcmRate};
 use scarletbook_pcm as sb;
 use std::time::Instant;
 
@@ -82,7 +83,10 @@ fn main() {
     const POOLED: usize = usize::MAX;
     for &(rate, cutoff) in configs {
         let mut ours: Vec<Converter> = (0..POOL)
-            .map(|_| Converter::new(PcmConfig::new(rate, cutoff, ch as u8)).unwrap())
+            .map(|_| {
+                Converter::new(PcmConfig::new(rate, cutoff, ch as u8).with_filter(Filter::Fast))
+                    .unwrap()
+            })
             .collect();
         let sr = sb::PcmRate::from_hz(rate.hz()).unwrap();
         let sc = match cutoff {

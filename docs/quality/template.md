@@ -8,20 +8,29 @@ repeatability (any change of 0.01 dB or more; a null that is no longer identical
 
 | Filter | Cutoff | Rate (kHz) | Version | SINAD (dB) | THD+N (dB) | Noise, 20 Hz-20 kHz (dBFS) | Alias rejection (dB) | Null vs previous |
 |---|---|---:|---|---:|---:|---:|---:|---|
-| default | 40 | 88.2 | W.W.W | | | | | baseline |
-| default | 40 | 88.2 | X.Y.Z | | | | | |
-| default | 40 | 176.4 | W.W.W | | | | | baseline |
-| default | 40 | 176.4 | X.Y.Z | | | | | |
-| default | 40 | 352.8 | W.W.W | | | | not measurable | baseline |
-| default | 40 | 352.8 | X.Y.Z | | | | not measurable | |
-| default | wide | 176.4 | W.W.W | | | | | baseline |
-| default | wide | 176.4 | X.Y.Z | | | | | |
-| default | wide | 352.8 | W.W.W | | | | not measurable | baseline |
-| default | wide | 352.8 | X.Y.Z | | | | not measurable | |
+| fast | 40 | 88.2 | W.W.W | | | | | baseline |
+| fast | 40 | 88.2 | X.Y.Z | | | | | |
+| fast | 40 | 176.4 | W.W.W | | | | | baseline |
+| fast | 40 | 176.4 | X.Y.Z | | | | | |
+| fast | 40 | 352.8 | W.W.W | | | | not measurable | baseline |
+| fast | 40 | 352.8 | X.Y.Z | | | | not measurable | |
+| fast | wide | 176.4 | W.W.W | | | | | baseline |
+| fast | wide | 176.4 | X.Y.Z | | | | | |
+| fast | wide | 352.8 | W.W.W | | | | not measurable | baseline |
+| fast | wide | 352.8 | X.Y.Z | | | | not measurable | |
 | pysacd | fixed | 88.2 | W.W.W | | | | | baseline |
 | pysacd | fixed | 88.2 | X.Y.Z | | | | | |
 | pysacd | fixed | 176.4 | W.W.W | | | | | baseline |
 | pysacd | fixed | 176.4 | X.Y.Z | | | | | |
+| precise | 40 | 88.2 | X.Y.Z | | | | | first release: no baseline |
+| precise | 40 | 176.4 | X.Y.Z | | | | | first release: no baseline |
+| precise | 40 | 352.8 | X.Y.Z | | | | not measurable | first release: no baseline |
+| precise | wide | 176.4 | X.Y.Z | | | | | first release: no baseline |
+| precise | wide | 352.8 | X.Y.Z | | | | not measurable | first release: no baseline |
+
+`fast` is the default filter of 0.1.x; from 0.2.0 the default is `precise`. Once the
+previous release has the precise filter, add a W.W.W row before each precise row and its
+null.
 
 CONCLUSION: one sentence, for example "Every figure is unchanged and every null is
 identical: X.Y.Z converts exactly as W.W.W did."

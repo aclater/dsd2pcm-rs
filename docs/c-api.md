@@ -41,15 +41,18 @@
 - Zero fields are the defaults, apart from the rate (and channel count): cutoff
   `DSD2PCM_CUTOFF_STANDARD`, filter `DSD2PCM_FILTER_DEFAULT`, 0 dB, all cores, no
   callback. Integer selectors (cutoff, filter, format, threads) are checked, never trusted.
-- `filter` selects the filter and quantiser: 0 is the default (scarletbook-pcm 0.7.0's
-  samples). `DSD2PCM_FILTER_PYSACD` (1) is pysacd's filter with its dithered quantiser
+- `filter` selects the filter and quantiser: 0 (`DSD2PCM_FILTER_DEFAULT`) is the default,
+  the precise filter since 0.2.0 (0.1.x: scarletbook-pcm 0.7.0's samples, now
+  `DSD2PCM_FILTER_FAST`). `DSD2PCM_FILTER_PRECISE` (2) is the precise filter
+  (`Filter::Precise`): every rate and cutoff, rounded without dither, with stopbands of
+  150 dB and more ([PCM quality](pcm-quality.md#the-precise-filter)).
+  `DSD2PCM_FILTER_FAST` (3, since 0.2.0) is lower CPU, lower quality: scarletbook-pcm
+  0.7.0's filters and samples (`Filter::Fast`), at about 0.55 times the precise filter's
+  CPU time. `DSD2PCM_FILTER_PYSACD` (1) is pysacd's filter with its dithered quantiser
   (`Filter::Pysacd`): 88200 and 176400 Hz, standard cutoff only. Its dither is seeded per
   frame from the frame's index in the area: whole files count from their first frame, frame
   runs from `dsd2pcm_run.first_frame` (the index of the run's first frame; a run with no
-  frame before it starts the area). The default filter ignores `first_frame`.
-  `DSD2PCM_FILTER_PRECISE` (2) is the precise filter (`Filter::Precise`): every rate and
-  cutoff, rounded as the default, with stopbands of 150 dB and more at about twice the CPU
-  time ([PCM quality](pcm-quality.md#the-precise-filter)); it ignores `first_frame` too.
+  frame before it starts the area). The other filters ignore `first_frame`.
 
 ## Whole files
 

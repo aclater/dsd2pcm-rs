@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Super Audio CD frame runs to 24-bit PCM, with the interface and the output bytes of
-//! scarletbook-pcm 0.7.0's `Converter::convert`.
+//! Super Audio CD frame runs to 24-bit PCM, with the interface of scarletbook-pcm 0.7.0's
+//! `Converter::convert`, and its output bytes with [`crate::Filter::Fast`].
 //!
 //! Portions Copyright (c) 2026 The scarletbook-rs authors, MIT OR Apache-2.0 (see
 //! PROVENANCE.md): the public types and their semantics (`Converter`, `Run`, `FrameRun`,
@@ -18,7 +18,8 @@
 //! conversion of the whole area, and so does any run of frames with its two neighbours,
 //! whatever the run length or buffer layout. A neighbour of `None` marks the edge of the
 //! area: the input beyond it is the idle pattern (0x69). The samples are those of
-//! scarletbook-pcm 0.7.0 and of [`crate::convert::dsd64_to_pcm`].
+//! [`crate::convert::dsd64_to_pcm`] with the same filter, and with [`crate::Filter::Fast`]
+//! those of scarletbook-pcm 0.7.0.
 //!
 //! ```
 //! use dsd2pcm::frames::{Converter, PcmConfig, PcmOut, Run, FRAME_BYTES_PER_CHANNEL};
@@ -122,8 +123,8 @@ pub struct PcmConfig {
     pub channels: u8,
     /// The gain; [`Gain::UNITY`] by default.
     pub gain: Gain,
-    /// The filter and quantiser; [`Filter::Default`] (scarletbook-pcm's) by default
-    /// ([`Filter::Precise`] has the same interface and frame independence). With
+    /// The filter and quantiser; [`Filter::Precise`] by default ([`Filter::Fast`],
+    /// scarletbook-pcm's, has the same interface and frame independence). With
     /// [`Filter::Pysacd`] the output also depends on each run's position in the area
     /// ([`Run::at_frame`]).
     pub filter: Filter,
@@ -137,7 +138,7 @@ impl PcmConfig {
             cutoff,
             channels,
             gain: Gain::UNITY,
-            filter: Filter::Default,
+            filter: Filter::default(),
         }
     }
 

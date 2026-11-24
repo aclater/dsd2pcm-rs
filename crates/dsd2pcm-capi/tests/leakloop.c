@@ -320,7 +320,7 @@ int main(int argc, char **argv) {
     for (int it = 0; it < iterations; it++) {
         for (int r = 0; r < 3; r++)
             for (uint32_t cutoff = 0; cutoff <= 2; cutoff++)
-                for (uint32_t filter = 0; filter <= 1; filter++) {
+                for (uint32_t filter = 0; filter <= DSD2PCM_FILTER_FAST; filter++) {
                     uint32_t ch = 1 + (uint32_t)(it + r + (int)cutoff) % DSD2PCM_MAX_CHANNELS;
                     frames_cycle(rates[r], cutoff, filter, ch, gains[(it + r) % 3], area);
                 }

@@ -1,5 +1,6 @@
-//! DSD64 to 24-bit PCM (WAV), sample-identical to scarletbook-pcm 0.7.0 by default, or with
-//! pysacd's filter ([`Filter::Pysacd`]).
+//! DSD64 to 24-bit PCM (WAV) with the precise filter by default ([`Filter::Precise`]),
+//! sample-identical to scarletbook-pcm 0.7.0 with [`Filter::Fast`], or with pysacd's filter
+//! ([`Filter::Pysacd`]).
 //!
 
 use crate::decimator::{self, Cutoff, PcmRate, Plan, Scratch};
@@ -32,19 +33,20 @@ pub struct PcmOptions {
     /// The threads to convert on; [`Threads::All`] by default. The output is the same
     /// with any setting.
     pub threads: Threads,
-    /// The filter and quantiser; [`Filter::Default`] is scarletbook-pcm's.
+    /// The filter and quantiser: [`Filter::Precise`] by default; [`Filter::Fast`] is
+    /// scarletbook-pcm's.
     pub filter: Filter,
 }
 
 impl PcmOptions {
-    /// Standard cutoff, unity gain, the default filter, all cores.
+    /// Standard cutoff, unity gain, the default filter ([`Filter::Precise`]), all cores.
     pub fn new(rate: PcmRate) -> PcmOptions {
         PcmOptions {
             rate,
             cutoff: Cutoff::Standard,
             gain_db: 0.0,
             threads: Threads::All,
-            filter: Filter::Default,
+            filter: Filter::default(),
         }
     }
 
@@ -520,8 +522,9 @@ pub fn check_options(opts: &PcmOptions) -> Result<()> {
     }
 }
 
-/// Converts DSD64 to 24-bit PCM, sample-identical to scarletbook-pcm 0.7.0 (or with
-/// [`Filter::Pysacd`], to pysacd's reference), into `w`. `w` is not finished.
+/// Converts DSD64 to 24-bit PCM with `opts.filter` into `w` (sample-identical to
+/// scarletbook-pcm 0.7.0 with [`Filter::Fast`], to pysacd's reference with
+/// [`Filter::Pysacd`]). `w` is not finished.
 ///
 /// Every output sample depends only on a fixed window of input bytes, so each block of
 /// input is cut into pieces (per channel and per range of outputs) that run on all cores;

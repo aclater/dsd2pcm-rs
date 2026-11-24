@@ -67,17 +67,24 @@ pub const DSD2PCM_CUTOFF_LOW: u32 = 1;
 /// Low-pass filter: passband to 80 kHz (176 400 and 352 800 Hz only).
 pub const DSD2PCM_CUTOFF_WIDE: u32 = 2;
 
-/// Filter and quantiser: scarletbook-pcm 0.7.0's (the default).
+/// Filter and quantiser: the default, which is the precise filter since 0.2.0
+/// (`DSD2PCM_FILTER_PRECISE`, the same bytes). In 0.1.x it was scarletbook-pcm 0.7.0's,
+/// now `DSD2PCM_FILTER_FAST`. A zero `filter` field (the `*_INIT` macros) means this.
 pub const DSD2PCM_FILTER_DEFAULT: u32 = 0;
 /// Filter and quantiser: pysacd's filter with its TPDF-dithered quantiser, at 88200 and
 /// 176400 Hz with the standard cutoff. The dither is seeded per Super Audio CD frame from
 /// its index in the area: files count from their start, frame runs from
 /// `dsd2pcm_run.first_frame`.
 pub const DSD2PCM_FILTER_PYSACD: u32 = 1;
-/// Filter and quantiser: the precise filter, at every rate and cutoff, rounded as the
-/// default: at least 150 dB of stopband where ultrasonic content folds into the passband,
-/// at a higher CPU cost.
+/// Filter and quantiser: the precise filter (the default since 0.2.0), at every rate and
+/// cutoff, rounded without dither: at least 150 dB of stopband where ultrasonic content
+/// folds into the passband, SINAD 142 to 145 dB with a quiet source.
 pub const DSD2PCM_FILTER_PRECISE: u32 = 2;
+/// Filter and quantiser: lower CPU, lower quality: scarletbook-pcm 0.7.0's filters at
+/// every rate and cutoff, rounded without dither, the same bytes as scarletbook-pcm (the
+/// default of 0.1.x). SINAD about 122 dB with a quiet source (116 dB with the wide cutoff),
+/// at about 0.55 times the precise filter's CPU time on one core. (Since 0.2.0.)
+pub const DSD2PCM_FILTER_FAST: u32 = 3;
 
 /// The ABI version: it changes on any incompatible change to the interface. Compatible
 /// changes only append fields to the structs (see `struct_size`) or add functions.
@@ -100,7 +107,7 @@ pub type dsd2pcm_progress_fn =
 
 /// Settings for `dsd2pcm_convert_file`. Start from `DSD2PCM_FILE_OPTIONS_INIT` (all zeros
 /// but `struct_size`) and set `rate_hz`; the other zeros are the defaults: standard cutoff,
-/// default filter, 0 dB, all cores, no callback, an existing output replaced.
+/// default filter (precise), 0 dB, all cores, no callback, an existing output replaced.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct dsd2pcm_file_options {
@@ -112,7 +119,7 @@ pub struct dsd2pcm_file_options {
     pub rate_hz: u32,
     /// `DSD2PCM_CUTOFF_*`.
     pub cutoff: u32,
-    /// `DSD2PCM_FILTER_*`; 0 is the default.
+    /// `DSD2PCM_FILTER_*`; 0 is the default (`DSD2PCM_FILTER_PRECISE` since 0.2.0).
     pub filter: u32,
     /// 0: convert on all cores; 1: on the calling thread only; n > 1: on at most n threads
     /// (the calling one included, at most 256). The output is the same with any value.
@@ -158,7 +165,7 @@ pub struct dsd2pcm_file_report {
 
 /// Settings for `dsd2pcm_frames_new`. Start from `DSD2PCM_FRAMES_CONFIG_INIT` and set
 /// `rate_hz` and `channels`; the other zeros are the defaults: standard cutoff, default
-/// filter, 0 dB.
+/// filter (precise), 0 dB.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct dsd2pcm_frames_config {
@@ -170,7 +177,7 @@ pub struct dsd2pcm_frames_config {
     pub rate_hz: u32,
     /// `DSD2PCM_CUTOFF_*`.
     pub cutoff: u32,
-    /// `DSD2PCM_FILTER_*`; 0 is the default.
+    /// `DSD2PCM_FILTER_*`; 0 is the default (`DSD2PCM_FILTER_PRECISE` since 0.2.0).
     pub filter: u32,
     /// Channels of the frames, 1 to 6.
     pub channels: u32,
@@ -210,8 +217,8 @@ pub struct dsd2pcm_run {
     /// `after`'s length in bytes: one frame, or 0 with NULL.
     pub after_len: usize,
     /// Index of the run's first frame in its area. `DSD2PCM_FILTER_PYSACD` seeds its
-    /// dither from it (frame `first_frame + i` for the run's frame `i`); the default filter
-    /// ignores it.
+    /// dither from it (frame `first_frame + i` for the run's frame `i`); the other filters
+    /// ignore it.
     pub first_frame: u64,
 }
 
@@ -429,10 +436,11 @@ pub(crate) fn cutoff(c: u32) -> Result<Cutoff, Fail> {
 
 pub(crate) fn filter(f: u32) -> Result<Filter, Fail> {
     match f {
-        DSD2PCM_FILTER_DEFAULT => Ok(Filter::Default),
+        DSD2PCM_FILTER_DEFAULT => Ok(Filter::default()),
         DSD2PCM_FILTER_PYSACD => Ok(Filter::Pysacd),
         DSD2PCM_FILTER_PRECISE => Ok(Filter::Precise),
-        _ => Err(invalid(format!("filter {f}: 0, 1 or 2"))),
+        DSD2PCM_FILTER_FAST => Ok(Filter::Fast),
+        _ => Err(invalid(format!("filter {f}: 0, 1, 2 or 3"))),
     }
 }
 

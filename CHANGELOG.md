@@ -70,14 +70,18 @@ Each with what to change in a caller. The C interface is unchanged (ABI 1, addit
   library's objects are marked for the CET shadow stack.
   [c-api.md](docs/c-api.md#binary-releases) explains how to embed the static library in a
   shared library with its symbols hidden.
-- New opt-in filter `precise` (`--filter precise`, `Filter::Precise`,
-  `DSD2PCM_FILTER_PRECISE`): every rate and cutoff, exact integer arithmetic like the
-  default, at least 150 dB of stopband wherever ultrasonic content folds into the passband
+- New filter `precise` (`--filter precise`, `Filter::Precise`,
+  `DSD2PCM_FILTER_PRECISE`), the default since this release (see Changed): every rate and
+  cutoff, exact integer arithmetic like scarletbook-pcm's filters, at least 150 dB of stopband wherever ultrasonic content folds into the passband
   (the default: about 110 dB) and about half the passband ripple. With a very quiet DSD64
   source the audio-band floor falls from -128 dBFS (SINAD 122 dB) to the 24-bit output's,
   about -150 dBFS (SINAD 142 to 145 dB); it takes about twice the CPU time
   ([PCM quality](docs/pcm-quality.md#the-precise-filter)). Its taps come from
-  `tools/filters/design_precise.py`. The default filter and its output are unchanged.
+  `tools/filters/design_precise.py`.
+- Tests: golden SHA-256 hashes of the precise filter, named and as the default, at every
+  SIMD level, for the sample tests (`tests/identity.rs`) and the whole output files
+  (`tests/golden_files.rs`); the fast filter's and pysacd's golden hashes are unchanged.
+  The C tests check every `DSD2PCM_FILTER_*` value and what each selects.
 - Docs: [PCM quality](docs/pcm-quality.md), the measured audio quality of every filter and
   rate (frequency response, aliasing, ringing, noise, ultrasonic noise, headroom, an
   RMAA-style summary; the pysacd preset, scarletbook-pcm 0.7.0 and the foobar2000 SACD
@@ -101,6 +105,28 @@ Each with what to change in a caller. The C interface is unchanged (ABI 1, addit
 
 ### Changed
 
+- **The default filter is now `precise`; 0.1.x's default stays available as `fast`.**
+  A conversion with default settings gives other bytes than 0.1.x: SINAD with a very quiet
+  DSD64 source rises from about 122 dB to 142 to 145 dB (116 to 144 dB with `wide`), at
+  about 1.8 times the CPU time on one core (1.5 to 2.3 times;
+  [PCM quality](docs/pcm-quality.md#the-precise-filter),
+  [performance](docs/performance.md#the-precise-filter)). `fast` (scarletbook-pcm 0.7.0's
+  filters) is lower CPU, lower quality, and gives the bytes of 0.1.x's default and of
+  scarletbook-pcm 0.7.0, unchanged.
+  - Rust (breaking): `Filter::Default` is removed; `Filter::Fast` is that filter, and
+    `Filter::Precise` is now `Filter::default()`, so `PcmOptions::new` and
+    `frames::PcmConfig::new` select it. Code that named `Filter::Default` no longer
+    compiles: use `Filter::Fast` to keep its output. The variants name the filters, not
+    which one is the default, so a later change of default renames nothing.
+    `decimator::Decimator` keeps scarletbook-pcm's filters.
+  - Command line: `--filter precise|fast|pysacd`, default `precise`. `--filter default` is
+    still accepted and means precise, as `DSD2PCM_FILTER_DEFAULT` does, so 0.1.x scripts
+    keep running; add `--filter fast` for 0.1.x's bytes. The help gives each filter's
+    trade-off.
+  - C interface (ABI version 1, additions only): new `DSD2PCM_FILTER_FAST` (3).
+    `DSD2PCM_FILTER_DEFAULT` keeps its value, 0, and now selects the precise filter, so
+    zero-initialised options (the `*_INIT` macros) do too; the other constants and every
+    struct are unchanged.
 - Output: DSD to WAV conversion writes the channel mask of the input's layout (DSF channel
   type, DSDIFF channel IDs) instead of the one of its channel count. The WAV header changes
   only where the two differ: a DSF of type 5 (FL FR C LFE) was labelled quad (FL FR BL BR),
@@ -155,6 +181,11 @@ Each with what to change in a caller. The C interface is unchanged (ABI 1, addit
   least the calling one, with the same output; before, it panicked (in the C interface,
   `DSD2PCM_E_INTERNAL`). The calling thread now converts too, so a conversion starts one
   thread fewer for the same parallelism ([design](docs/design.md#frame-runs-threading-and-sharing)).
+- `frames::Converter` with the precise filter: at 176.4 kHz on the avx2fma level, a long
+  run after a short run with neighbours grew a buffer, so a call after the first could
+  allocate (one reallocation per converter). The buffer the short runs keep is now sized
+  for the long ones too. Output bytes unchanged; `tests/frames_alloc.rs` now checks every
+  filter at every SIMD level.
 
 ## 0.1.2 - 2026-11-23
 
