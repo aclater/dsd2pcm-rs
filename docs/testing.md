@@ -206,8 +206,8 @@ Standard library and crates are rebuilt instrumented, so the scoped worker threa
 whole-file path, their atomics and mutexes, and the C interface's busy-handle checks are all
 seen. Before 0.1.2 on nightly-2026-11-01: no reports; frames 6 tests, progress 3, the soak
 test 100 iterations (728 conversions, 65 threaded), the C interface's 19 tests. At 0.2.0, with the
-commands above: no reports; frames 7 tests, progress 3, the soak test 100 iterations, the
-C interface's 23 tests.
+commands above: no reports; frames 7 tests, progress 4, the soak test 100 iterations, the
+C interface's 24 tests.
 
 ## Valgrind
 
