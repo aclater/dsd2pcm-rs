@@ -9,7 +9,9 @@ and can be reproduced with the commands at the end.
 ## Summary
 
 From 0.2.0 the default filter is `precise`. `fast` is scarletbook-pcm 0.7.0's filter (the
-default up to 0.1.2): byte-identical with scarletbook-pcm, lower CPU time and lower quality.
+default up to 0.1.2): byte-identical with scarletbook-pcm, lower CPU time and lower measured
+quality (SINAD 122.0 to 122.1 dB against 141.8 to 144.9 dB with a very quiet source; stopband
+109.7 to 111.1 dB against 157.8 dB).
 The two side by side, from the [precise filter](#the-precise-filter) section below:
 
 | | `precise` (default) | `fast` |
@@ -25,7 +27,8 @@ The two side by side, from the [precise filter](#the-precise-filter) section bel
 
 Measured with (this table): dsd2pcm at commit `e5871b4` for `precise` and `fast`,
 and the scripts in [tools/quality](../tools/quality/README.md) at the same commit
-(dsd-measure is not used on this page; it runs the [release comparison](quality/README.md));
+(dsd-measure is not used on this page, except in the pysacd preset's arithmetic table under
+[comparisons](#comparisons); it runs the [release comparison](quality/README.md));
 the full set of versions and the host CPU is under [reproducing](#reproducing-the-measurements).
 CPU time: Intel Core i9-13900H.
 
@@ -59,7 +62,7 @@ At every rate and filter:
 
 With the 5th-order test signals the `fast` figures are limited mostly by the test signal:
 THD+N, noise and dynamic range are within 0.1 to 0.6 dB of what the DSD itself contains,
-except the wide filter's in-band noise (3 dB higher). With a quieter source `fast`'s own
+except the wide filter's in-band noise (3.7 dB higher unweighted, 3.0 dB A-weighted). With a quieter source `fast`'s own
 floor sets the limit ([filter floor](#filter-floor-with-very-quiet-sources)). The `fast`
 filter figures match the published response of scarletbook-pcm 0.7.0 exactly.
 
@@ -84,7 +87,7 @@ converter, this page says so.
 Measured with, unless a section says otherwise: dsd2pcm `fast` at commit `172eb97`, the
 scripts in tools/quality at that commit, on Linux x86_64 with an AMD Ryzen AI MAX+ 395
 (the full list is under [reproducing](#reproducing-the-measurements)); dsd-measure is not used
-on this page.
+on this page, except in the pysacd preset's arithmetic table under [comparisons](#comparisons).
 
 **The test signals.** The set follows what reviewers publish, so results can be compared
 like for like. The method follows the DSD-to-PCM comparison of
@@ -118,8 +121,9 @@ Archimago's single tone, not a two-tone composite; and dsd2pcm converts DSD64 on
   +3.5 dB SACD, past the +3.1 dB SACD peak level (Schreier and Temes, *Understanding
   Delta-Sigma Data Converters*, 2005, chapters 4.3 and 4.4). SACD encoders are of this
   class, some with look-ahead (E. Janssen, *Look-ahead sigma-delta modulation and its
-  application to Super Audio CD*, TU Eindhoven, 2010). This one is plain and deterministic,
-  and noisier than a good mastering encoder: about -106 dB THD+N at 0 dB SACD. Its in-band
+  application to Super Audio CD*, TU Eindhoven, 2010). This one is plain and deterministic:
+  about -106 dB THD+N at 0 dB SACD. A better modulator gives less distortion and
+  noise (SoX-DSD's 8th-order CLANS, measured [below](#rmaa-style-summary)). Its in-band
   noise depends on the level: -122.5 dBFS on modulated silence, about -112 dBFS beside a
   0 dB SACD tone. On silence it sits close to a limit cycle, with a strong idle tone at a
   quarter of the DSD rate (705.6 kHz); fed exact zero, a plain modulator falls into a limit
@@ -364,7 +368,8 @@ specification.
   Relative to 0 dB SACD that is a noise level of -117.8 dB(A), and the dynamic range by an
   AES17-style method (a -60 dB SACD tone; [deviations](#aes17-style-not-aes17)) is
   107.0 dB(A), against 107.1 dB(A) in the source. A
-  good SACD master has a lower floor than this test modulator; the converter's own floor is
+  quieter source has a lower floor (the 8th-order source of the filter-floor test: -152.9 dBFS
+  of noise and distortion beside its 1 kHz tone); the converter's own floor is
   about -128 dBFS ([filter floor](#filter-floor-with-very-quiet-sources)) and the rounding's
   -153 dBFS.
 - **24-bit rounding is 30 dB below this test signal's noise.** The rounding to 24 bits adds
@@ -436,13 +441,20 @@ the DSD64 versions of the 24/88.2 test signals. Measured with: dsd2pcm `fast` at
 | pysacd preset 88.2 kHz | -116.8 | 107.1 | 0.00022 | -106.1 | 0.00056 | 0.00089 | -159.0 | -0.001, +0.002 |
 | pysacd preset 176.4 kHz | -116.8 | 107.0 | 0.00022 | -106.1 | 0.00058 | 0.00083 | -159.1 | -0.001, +0.002 |
 
-- **Every dsd2pcm row is within 0.4 dB of the source row**, except the wide filter's noise
-  (see [filter floor](#filter-floor-with-very-quiet-sources)). The numbers describe the test
+- **Against the source row**, on the 30 and 40 kHz rows: noise level, dynamic range, THD,
+  THD+N and IMD+N SMPTE are within 0.4 dB; IMD CCIF is 0.1 to 1.1 dB off (0.00073 to
+  0.00089 % against 0.00083 %) and crosstalk 0.3 to 1.0 dB (-161.0 to -162.3 against
+  -162.0 dB). The wide rows: noise level 3.0 dB higher (see
+  [filter floor](#filter-floor-with-very-quiet-sources)), THD+N 0.5 and 0.6 dB higher,
+  dynamic range, THD and IMD+N SMPTE within 0.4 dB, IMD CCIF 0.2 and 1.2 dB off (0.00085 and
+  0.00072 %), crosstalk 2.7 and 2.3 dB higher (-159.3 and -159.7 dB). The pysacd preset rows: noise level
+  1.4 dB higher, IMD CCIF 0.6 and 0.0 dB off, crosstalk 3.0 and 2.9 dB higher, the rest within
+  0.4 dB. The numbers describe the test
   modulator; with it, `fast`'s own floor stays below the source's noise. With a quieter
   source it does not (same section).
 - **Crosstalk** reads the silent channel's own noise in one FFT bin: the converter has no
   path between channels.
-- These differences of 0.4 dB or less are on figures 100 dB or more below a 0 dB SACD tone.
+- These differences are on figures 100 dB or more below a 0 dB SACD tone.
 
 **With a better modulator.** SoX-DSD's 8th-order CLANS modulator with trellis search makes
 DSD64 with less distortion and noise than the reference modulator, and dsd2pcm passes that on: the 32-tone
@@ -615,7 +627,7 @@ with the `loud_alias` figures, as "Folding tones"):
 | ffmpeg, 176.4 kHz (float, resampled) | 138.9 | -145.0 | -122.5 | 122.0 (170 kHz) | – | peaks of -52 dBFS |
 
 - **The precise filter removes the filter floor.** SINAD with the quiet source rises from
-  122 dB to 142 to 145 dB (from 116 to 144 dB with `wide`), and every tone that folds onto
+  122 dB to 142 to 145 dB (with `wide`, from 116 dB to 144 to 145 dB), and every tone that folds onto
   the audio band is 152 dB or more down (118 to 122 dB with `fast`).
 - **The tone figures for precise are lower bounds.** Each reading is the tone's level over
   what the output shows at the alias frequency, and with the precise filter that is mostly
@@ -629,7 +641,7 @@ with the `loud_alias` figures, as "Folding tones"):
 - **What is left is the 24-bit output, not the filter.** The same taps in floating point
   give 146.7 dB, the source's own 146.9 dB. The 24-bit rounding adds -152.7 dBFS in
   20 Hz-20 kHz at 176.4 kHz (-149.7 at 88.2, -155.7 at 352.8 kHz), and the source's -152.9
-  plus that is -149.8, -148.2 and -151.1 dBFS: within 0.4 dB of what was measured. The
+  plus that is -149.8, -148.0 and -151.1 dBFS: within 0.4 dB of what was measured. The
   rounding between stages (on the 2^26 grid) adds less than that.
 - **ffmpeg** reaches the source's figure at 352.8 kHz because its output is floating point
   with no word length, and its rejection of what folds onto the audio band (152.5 to
@@ -744,8 +756,10 @@ and 176.4 kHz. Since 0.2.0 it computes in 64-bit floating point, where pysacd co
   builds differ by CPU.
 
 **Its arithmetic.** In 32-bit floating point, summed strictly in tap order (dsd2pcm 0.1.x),
-the filter loses SINAD at high levels. Measured with dsd-measure 0.1.1 (quick profile, 1 kHz
-at 0 dB SACD, three dither draws each, spread at most 0.05 dB):
+the filter loses SINAD at high levels. Measured with dsd-measure 0.1.1, every row (quick
+profile, 1 kHz at 0 dB SACD, three dither draws each, spread at most 0.05 dB). The
+[release comparison](quality/0.2.0.md), with dsd-measure 0.1.2, gives the same 0.2.0 and
+precise figures, and 127.26 / 127.89 dB for 0.1.2's 32-bit path:
 
 | | 88.2 kHz | 176.4 kHz |
 |---|---:|---:|
@@ -874,7 +888,7 @@ What the numbers say:
   its stopband only around 60 kHz, see the noise plot) and then go deeper; the 30 kHz one
   droops by 0.3 dB at 20 kHz.
 - **DSD silence is not digital zero.** A file of DSD silence (`0x69`) gets a short
-  transient in its first samples (up to -22 dBFS, depending on the mode: a click), and the
+  transient in its first samples (peaks up to -22.0 dBFS, depending on the mode), and the
   Direct mode leaves a floor of about -117 dBFS on it. dsd2pcm treats the input as continuing with DSD
   silence before its first byte, so its first samples are exact zero.
 - **The alignment varies from file to file.** Against the DSD timeline (dsd2pcm's output is
@@ -960,7 +974,8 @@ this page were made with:
 - scarletbook-pcm 0.7.0 from crates.io (`tools/quality/sbpcm`);
 - Python 3.15.2 with numpy 2.5.5, scipy 1.18.1 and matplotlib 3.11.2
   ([requirements.txt](../tools/quality/requirements.txt));
-- no dsd-measure: every figure on this page is from tools/quality;
+- no dsd-measure: every figure on this page is from tools/quality, except the pysacd
+  preset's arithmetic table under [comparisons](#comparisons) (dsd-measure 0.1.1);
 - SoX-DSD at commit `0be259e` of [mansr/sox](https://github.com/mansr/sox), built with
   CMake, for the three signals that have a SoX-DSD version: build it and replace `--no-sox`
   with `--sox` and the path of its `sox` program.
