@@ -40,6 +40,22 @@ This writes a 176.4 kHz, 24-bit WAV and prints the duration, the speed and the n
 clipped samples. With Rust installed, `cargo install dsd2pcm-cli` installs the same tool.
 Options: [docs/options.md](docs/options.md); more in the [user guide](docs/user-guide.md).
 
+### Windows
+
+On Windows 10 or 11, x86_64, in PowerShell, with the same DSF file in the current folder:
+
+<!-- docs-run: skip="Windows" -->
+```powershell
+Invoke-WebRequest https://github.com/dsd-toolbox/dsd2pcm-rs/releases/download/v0.1.2/dsd2pcm-0.1.2-x86_64-windows.zip -OutFile dsd2pcm-0.1.2-x86_64-windows.zip
+Expand-Archive dsd2pcm-0.1.2-x86_64-windows.zip -DestinationPath .
+.\dsd2pcm-0.1.2-x86_64-windows\dsd2pcm.exe "01 - Track.dsf" "01 - Track.wav"
+```
+
+The archive is also on the [release page](https://github.com/dsd-toolbox/dsd2pcm-rs/releases/tag/v0.1.2).
+`dsd2pcm.exe` is not code-signed, so Windows SmartScreen may warn when it first runs; choose
+**More info**, then **Run anyway**. The [user guide](docs/user-guide.md#windows) covers the
+`PATH`, quoting and double-clicking.
+
 ## Documentation
 
 The [documentation index](docs/README.md) lists every page.

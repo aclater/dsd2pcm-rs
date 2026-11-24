@@ -211,6 +211,77 @@ A project that depends on the crate gets the best speed with the build settings 
 [options.md](options.md#build-settings-for-consumers). The API reference is on
 [docs.rs](https://docs.rs/dsd2pcm); the C library is described in [c-api.md](c-api.md).
 
+## Windows
+
+The tool runs on Windows 10 and 11, x86_64, from PowerShell or Windows Terminal. The
+[Quick start](../README.md#windows) downloads and runs it in one folder.
+
+### Install
+
+Unzip the release archive to a folder of your choice, for example `C:\Tools`:
+
+<!-- docs-run: skip="Windows" -->
+```powershell
+Expand-Archive dsd2pcm-0.1.2-x86_64-windows.zip -DestinationPath C:\Tools
+```
+
+To run it as `dsd2pcm` from any folder, add its folder to your user `PATH` (no
+administrator rights needed), then open a new PowerShell window:
+
+<!-- docs-run: skip="Windows" -->
+```powershell
+[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";C:\Tools\dsd2pcm-0.1.2-x86_64-windows", "User")
+```
+
+Each release unzips to a folder named after its version; after an update, change the `PATH`
+entry to the new folder (**Settings**, **System**, **About**, **Advanced system settings**,
+**Environment Variables**). `dsd2pcm.exe` is not code-signed, so Windows SmartScreen may
+warn when it first runs; choose **More info**, then **Run anyway**.
+
+### File names with spaces
+
+Put each file name with spaces in quotes. In double quotes PowerShell expands `$` and the
+backtick, so a name that contains either goes in single quotes:
+
+<!-- docs-run: skip="Windows" -->
+```powershell
+dsd2pcm "01 - Track.dsf" "01 - Track.wav"
+dsd2pcm 'Live at $Venue.dsf' 'Live at $Venue.wav'
+```
+
+To run the tool by a quoted path, put the call operator `&` first:
+
+<!-- docs-run: skip="Windows" -->
+```powershell
+& "C:\Tools\dsd2pcm-0.1.2-x86_64-windows\dsd2pcm.exe" "01 - Track.dsf" "01 - Track.wav"
+```
+
+Tab completion adds the quotes, and the `&`, by itself.
+
+### Double-click and drag-and-drop
+
+`dsd2pcm.exe` is a command-line tool, not a window application. Explorer gives a
+double-clicked console program a console window of its own, which closes when the program
+ends. Started that way with no arguments, the tool (from 0.2.0) prints this and waits for
+Enter before the window closes:
+
+```text
+dsd2pcm is a command-line tool. Open PowerShell or Terminal, then run: dsd2pcm IN.dsf OUT.wav (dsd2pcm --help for options).
+
+Press Enter to close this window.
+```
+
+Dropping files onto `dsd2pcm.exe` does not convert them. The tool needs an input and an
+output name; Explorer passes only the files dropped, in an order you do not choose, and the
+window closes as soon as the tool ends, before its message can be read. Run it from
+PowerShell instead.
+
+### The C library
+
+The C library for Windows is a separate archive, `libdsd2pcm-0.1.2-x86_64-windows.zip` for
+MSVC (and, from 0.2.0, an archive for MinGW-w64 gcc): see
+[C interface](c-api.md#binary-releases).
+
 ## Limits
 
 Limits of this version: DSD64 input only for PCM output; WAV output up to 4 GiB.
