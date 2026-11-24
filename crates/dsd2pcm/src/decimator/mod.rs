@@ -1205,7 +1205,9 @@ mod tests {
                 .collect();
         }
         let s = sym(&plan.ops[l - 1]);
-        let q = (-s.scale.log2()) as u32;
+        // From the bits, not `log2`: Rust does not specify `log2`'s precision, and Miri
+        // perturbs it (log2 of 2^-52 gave -51.99999999999998, truncated to 51).
+        let q = exact::shift(s.scale);
         let h = |j: i64| s.full[j.unsigned_abs() as usize] as i128;
         let m = s.half_len() as i64;
         match &plan.ops[l - 1] {
