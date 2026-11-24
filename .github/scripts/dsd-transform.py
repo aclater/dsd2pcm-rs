@@ -1,6 +1,8 @@
 """Release test files (docs/release-test-plan.md), made from real DSF and DFF files:
 the same audio in the other container, and DSF copies whose sample count is not a
-multiple of 8. Writes only OUT; the input is opened read-only.
+multiple of 8. Writes only OUT; the input is opened read-only. OUT is written to a
+temporary file beside it and renamed into place at the end, so a failure leaves no partial
+OUT, and an OUT that is IN (the same path, or a hard or symbolic link to it) is refused.
 
     python3 -I .github/scripts/dsd-transform.py dsf2dff IN.dsf OUT.dff
     python3 -I .github/scripts/dsd-transform.py dff2dsf IN.dff OUT.dsf
@@ -11,11 +13,16 @@ multiple of 8. Writes only OUT; the input is opened read-only.
 channel ends in DROP padding bits, sets those bits to zero (the case that clicked before
 0.1.2), and with IDLE_BYTES first overwrites each channel's last IDLE_BYTES bytes with
 the idle pattern 0x69 (a silent end). `head` copies the first SECONDS (an excerpt for
-slow tools such as valgrind). DSD64 only. Standard library only.
+slow tools such as valgrind). DSD64 only. Every command streams; memory stays small
+whatever the file's length. Standard library only.
 """
 
+import contextlib
+import os
+import signal
 import struct
 import sys
+import tempfile
 
 BLOCK = 4096
 REV = bytes(int(f"{i:08b}"[::-1], 2) for i in range(256))
@@ -26,6 +33,35 @@ DFF_IDS = {
     6: [b"MLFT", b"MRGT", b"C   ", b"LFE ", b"LS  ", b"RS  "],
 }
 DSF_TYPE = {1: 1, 2: 2, 5: 6, 6: 7}
+CHUNK = 1 << 20  # bytes per read when copying
+
+
+def same_file(src, dst):
+    """True when DST names the file SRC names: the same path, or a hard or symbolic link."""
+    try:
+        a, b = os.stat(src), os.stat(dst)
+    except FileNotFoundError:
+        return False
+    return (a.st_dev, a.st_ino) == (b.st_dev, b.st_ino)
+
+
+@contextlib.contextmanager
+def output(src, dst):
+    """A new file beside DST, renamed to DST when the block ends normally and removed
+    otherwise (an exception, sys.exit, Ctrl-C or SIGTERM)."""
+    if same_file(src, dst):
+        sys.exit(f"refusing to write {dst}: it is the input")
+    fd, tmp = tempfile.mkstemp(prefix=".dsd-transform-", suffix=".tmp", dir=os.path.dirname(os.path.abspath(dst)))
+    try:
+        with os.fdopen(fd, "wb") as o:
+            yield o
+        if same_file(src, dst):  # checked again: DST may have changed meanwhile
+            sys.exit(f"refusing to write {dst}: it is the input")
+        os.replace(tmp, dst)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp)
+        raise
 
 
 def read_dsf(f):
@@ -63,7 +99,7 @@ def dsf2dff(src, dst):
         body = b"FVER" + struct.pack(">QI", 4, 0x01050000)
         body += b"PROP" + struct.pack(">Q", len(prop)) + prop
         body += b"DSD " + struct.pack(">Q", n * ch)
-        with open(dst, "wb") as o:
+        with output(src, dst) as o:
             o.write(b"FRM8" + struct.pack(">Q", 4 + len(body) + n * ch) + b"DSD " + body)
             for chans in dsf_blocks(f, ch, n):
                 out = bytearray(len(chans[0]) * ch)
@@ -103,7 +139,7 @@ def dff2dsf(src, dst):
         ch, off, n = read_dff(f)
         groups = -(-n // BLOCK)
         data = groups * BLOCK * ch
-        with open(dst, "wb") as o:
+        with output(src, dst) as o:
             o.write(b"DSD " + struct.pack("<QQQ", 28, 92 + data, 0))
             o.write(b"fmt " + struct.pack("<QIIIIIIQII", 52, 1, 0, DSF_TYPE[ch], ch, 2822400, 1, n * 8, BLOCK, 0))
             o.write(b"data" + struct.pack("<Q", 12 + data))
@@ -124,25 +160,46 @@ def odd(src, dst, drop, idle_bytes):
         ch, samples = read_dsf(f)
         if samples % 8:
             sys.exit("odd: the input's sample count is already not a multiple of 8")
-        data = bytearray(f.read())  # header was read; the rest is the data chunk body
-    n = samples // 8
-    new = samples - drop
-    head = bytearray(open(src, "rb").read(92))
-    struct.pack_into("<Q", head, 64, new)
-
-    def at(c, i):  # offset in `data` of byte i of channel c
-        return (i // BLOCK) * BLOCK * ch + c * BLOCK + i % BLOCK
-
-    idle = REV[0x69]  # 0x69 as stored LSB first
-    for c in range(ch):
-        for i in range(max(0, n - idle_bytes), n):
-            data[at(c, i)] = idle
-        # The last byte keeps 8 - DROP samples (low bits, LSB first); its top DROP bits
-        # are padding: zero them.
-        data[at(c, n - 1)] &= (1 << (8 - drop)) - 1
-    with open(dst, "wb") as o:
-        o.write(head)
-        o.write(data)
+        n = samples // 8
+        f.seek(0)
+        head = bytearray(f.read(92))
+        struct.pack_into("<Q", head, 64, samples - drop)
+        idle = REV[0x69]  # 0x69 as stored LSB first
+        idle_from = max(0, n - idle_bytes)
+        group = BLOCK * ch
+        # The rest (the data chunk's body and anything after it) is copied in whole block
+        # groups; only bytes in channel byte range [idle_from, n) change.
+        per_read = max(1, CHUNK // group) * group
+        with output(src, dst) as o:
+            o.write(head)
+            pos = 0  # offset in the data after the 92-byte header
+            while True:
+                buf = f.read(per_read)
+                if not buf:
+                    break
+                buf = bytearray(buf)
+                for g in range(pos // group, -(-(pos + len(buf)) // group)):
+                    lo, hi = max(idle_from, g * BLOCK), min(n, (g + 1) * BLOCK)
+                    last = g * BLOCK <= n - 1 < (g + 1) * BLOCK
+                    for c in range(ch):
+                        # Byte i of channel c is at g * group + c * BLOCK + i % BLOCK.
+                        start = g * group + c * BLOCK - pos
+                        if lo < hi:
+                            a, b = start + lo % BLOCK, start + (hi - 1) % BLOCK + 1
+                            if b > len(buf):
+                                sys.exit("odd: the data chunk is shorter than its header says")
+                            buf[a:b] = bytes([idle]) * (b - a)
+                        if last:
+                            # The last byte keeps 8 - DROP samples (low bits, LSB first);
+                            # its top DROP bits are padding: zero them.
+                            i = start + (n - 1) % BLOCK
+                            if i >= len(buf):
+                                sys.exit("odd: the data chunk is shorter than its header says")
+                            buf[i] &= (1 << (8 - drop)) - 1
+                o.write(buf)
+                pos += len(buf)
+            if pos < -(-n // BLOCK) * group:
+                sys.exit("odd: the data chunk is shorter than its header says")
 
 
 def head(src, dst, seconds):
@@ -151,7 +208,7 @@ def head(src, dst, seconds):
         n = min(samples // 8, int(seconds * 2822400) // 8)
         groups = -(-n // BLOCK)
         data = groups * BLOCK * ch
-        with open(dst, "wb") as o:
+        with output(src, dst) as o:
             o.write(b"DSD " + struct.pack("<QQQ", 28, 92 + data, 0))
             o.write(b"fmt " + struct.pack("<QIIIIIIQII", 52, 1, 0, DSF_TYPE[ch], ch, 2822400, 1, n * 8, BLOCK, 0))
             o.write(b"data" + struct.pack("<Q", 12 + data))
@@ -161,6 +218,8 @@ def head(src, dst, seconds):
 
 
 def main():
+    # SIGTERM ends like Ctrl-C: through `output`, which removes its temporary file.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     a = sys.argv[1:]
     if len(a) == 3 and a[0] == "dsf2dff":
         dsf2dff(a[1], a[2])

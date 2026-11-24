@@ -49,8 +49,11 @@ git checkout BRANCH
 git rev-parse HEAD
 ```
 
-The containers (items 1, 8) use `registry.fedoraproject.org/fedora:45` and the host's
-rustup and cargo homes; `FEDORA_IMAGE` names another image.
+The containers (items 1, 8) use `registry.fedoraproject.org/fedora:45`, pinned by digest in
+the script (`FEDORA_IMAGE` names another image). They see the host's rustup home and only
+the `registry/`, `git/` and `bin/` directories of its cargo home, all read-only, so a cargo
+configuration or credentials file there stays out of the container. The script runs
+`cargo fetch --locked` on the host first, and cargo runs offline inside.
 
 ## 1 and 2. Test suite on every platform; golden hashes and identity
 
@@ -100,7 +103,8 @@ Builds the targets with the pinned nightly, makes the seed corpora
 `dff_read`, `wav_read`, `flac`, `open_buffered`, `round_trip`) at the same time, one
 process each (no `-fork`), each from a copy of its seeds, with `-max_len=32768
 -rss_limit_mb=2048 -malloc_limit_mb=2048 -timeout=10`, under a 3 GiB cap per target. Logs:
-`target/rtp-fuzz-logs/TARGET.log`.
+`target/rtp-fuzz-logs/TARGET.log`. Each fuzzer runs in its own process group; if the
+script ends early (an error, Ctrl-C or SIGTERM), it stops those groups, and only those.
 
 Pass: every target runs the full 30 minutes with no crash, leak, timeout or memory-limit
 finding. A finding is a FAIL: its input is in `fuzz/artifacts/TARGET/`.
@@ -154,6 +158,10 @@ that the set has:
   python3 -I .github/scripts/dsd-transform.py odd IN.dsf OUT.dsf 3
   python3 -I .github/scripts/dsd-transform.py odd IN.dsf OUT.dsf 5 9408
   ```
+
+  The script streams, so its memory stays small for any file length. It refuses an OUT
+  that is IN (the same path, or a hard or symbolic link to it), and writes OUT through a
+  temporary file beside it, so a failure or interruption leaves no partial OUT.
 
 List the inputs one per line in a file, the container pairs (a rip and the copy made from
 it, `A B` per line) in another, and run:
@@ -253,7 +261,9 @@ Record each command and its result.
 .github/scripts/release-test.sh safety
 ```
 
-With the release build of the tool:
+Its files, a 635 MB input among them, go in a new directory under `target/` (or under the
+directory given as `safety WORKDIR`), on disk rather than in `TMPDIR`, which is often a
+RAM-backed tmpfs; the directory is removed at the end. With the release build of the tool:
 
 - an output that is a hard link to the input, the input's own path, or a symbolic link to
   it is refused with exit status 1 and the input is unchanged;

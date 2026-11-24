@@ -16,13 +16,19 @@
 #   quickstart            8: the README's Quick start in a fresh Fedora container, with the
 #                         tool built from this tree in place of the download
 #   docs                  9: the docs checks and the docs' commands
-#   safety                10: the file-safety regression checks
+#   safety [WORKDIR]      10: the file-safety regression checks, with their files (a 635 MB
+#                         input among them) on disk under WORKDIR (default target/), removed
+#                         at the end
 #
 # Every item prints PASS or FAIL as its last line and exits non-zero on a failure. Nothing
 # here takes a benchmark lock: no item is timed. Each heavy step runs under
 # `systemd-run --user --scope -p MemoryMax=...` (RTP_MEM, default 8G) at nice 19, with
-# RTP_JOBS build jobs and CPUs (default 8). Containers use FEDORA_IMAGE (default
-# registry.fedoraproject.org/fedora:45) and the host's rustup and cargo homes.
+# RTP_JOBS build jobs and CPUs (default 8). Containers use FEDORA_IMAGE (default: Fedora 45,
+# pinned by digest), the host's rustup home and the host cargo home's registry/, git/ and
+# bin/, all read-only; the crates are fetched on the host first.
+# The checks below are code in single quotes, expanded later on purpose (by `check`'s eval
+# or inside the container), and the variables they read are set outside those quotes.
+# shellcheck disable=SC2016
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
@@ -31,7 +37,9 @@ item=${1:-}
 shift || true
 mem=${RTP_MEM:-8G}
 jobs=${RTP_JOBS:-8}
-image=${FEDORA_IMAGE:-registry.fedoraproject.org/fedora:45}
+# registry.fedoraproject.org/fedora:45 as of 2026-11-14. To move it: podman pull the tag,
+# then take the digest from `podman image inspect --format '{{.Digest}}'`.
+image=${FEDORA_IMAGE:-registry.fedoraproject.org/fedora@sha256:16c7dea99459518e12818f307fd1e434c73dcd89900e60402673606cb54a1c46}
 nightly=${RTP_NIGHTLY:-nightly-2026-11-01}
 export CARGO_BUILD_JOBS=$jobs RUST_TEST_THREADS=$jobs
 rustup_home=${RUSTUP_HOME:-$HOME/.rustup}
@@ -46,13 +54,20 @@ capped() {
 verdict() { if [[ $1 == 0 ]]; then echo "PASS $item"; else echo "FAIL $item"; fi; exit "$1"; }
 
 # A command in a fresh Fedora container with the tree at /src, the host's toolchains, and
-# PACKAGES installed first.
+# PACKAGES installed first. The container sees only the cargo home's registry/, git/ and
+# bin/, read-only (not its config or credentials), with every crate fetched on the host
+# beforehand and cargo offline inside; its own CARGO_HOME is the container's /cargo, and
+# it builds into target/rtp-ITEM.
 in_container() {
-    local packages=$1
+    local packages=$1 mounts=() sub
     shift
+    cargo fetch --locked
+    for sub in registry git bin; do
+        [[ -d "$cargo_home/$sub" ]] && mounts+=(-v "$cargo_home/$sub:/cargo/$sub:ro")
+    done
     capped podman run --rm --security-opt label=disable --cpus "$jobs" \
-        -v "$root:/src" -v "$rustup_home:/rustup" -v "$cargo_home:/cargo" \
-        -e RUSTUP_HOME=/rustup -e CARGO_HOME=/cargo -e PATH=/cargo/bin:/usr/bin:/bin \
+        -v "$root:/src" -v "$rustup_home:/rustup:ro" "${mounts[@]}" \
+        -e RUSTUP_HOME=/rustup -e CARGO_HOME=/cargo -e CARGO_NET_OFFLINE=true -e PATH=/cargo/bin:/usr/bin:/bin \
         -e CARGO_BUILD_JOBS="$jobs" -e RUST_TEST_THREADS="$jobs" -e CARGO_TARGET_DIR="/src/target/rtp-$item" -w /src "$image" \
         bash -euo pipefail -c "for try in 1 2 3; do dnf -y -q --setopt=install_weak_deps=False install $packages > /tmp/dnf.log 2>&1 && break; cat /tmp/dnf.log; [[ \$try == 3 ]] && exit 1; sleep 30; done; $*"
 }
@@ -116,13 +131,29 @@ fuzz)
     capped cargo run --release --locked --bin make_seeds
     mapfile -t targets < <(cargo fuzz list | while read -r t; do [[ -f fuzz_targets/$t.rs ]] && echo "$t"; done)
     mkdir -p "$root/target/rtp-fuzz-logs"
+    # Each fuzzer runs in its own process group (setsid: its PID is the group's ID), so
+    # stopping it also stops the fuzz binary cargo-fuzz started. If this script ends
+    # early (an error, Ctrl-C, SIGTERM), the trap stops the groups recorded here, and
+    # only those.
     pids=()
+    # shellcheck disable=SC2329 # called by the traps
+    stop_fuzzers() {
+        local p
+        for p in "${pids[@]}"; do
+            [[ -n "$p" ]] && kill -TERM -- "-$p" 2>/dev/null
+        done
+        return 0
+    }
+    trap stop_fuzzers EXIT
+    trap 'stop_fuzzers; trap - EXIT; exit 130' INT
+    trap 'stop_fuzzers; trap - EXIT; exit 143' TERM
     for t in "${targets[@]}"; do
         mkdir -p "corpus/$t"
         work=$(mktemp -d "$root/target/rtp-fuzz-corpus-$t.XXXX")
         cp -r "corpus/$t/." "$work/"
-        # One process per target (no -fork), each under its own memory cap.
-        RTP_MEM=3G capped cargo fuzz run -O "$t" "$work" -- -max_total_time="$seconds" \
+        # One process per target (no -fork), each under its own 3 GiB cap.
+        setsid nice -n 19 systemd-run --user --scope -q -p MemoryMax=3G -p MemorySwapMax=0 \
+            -p CPUQuota="$((jobs * 100))%" cargo fuzz run -O "$t" "$work" -- -max_total_time="$seconds" \
             -max_len=32768 -rss_limit_mb=2048 -malloc_limit_mb=2048 -timeout=10 \
             -print_final_stats=1 > "$root/target/rtp-fuzz-logs/$t.log" 2>&1 &
         pids+=("$!")
@@ -130,7 +161,10 @@ fuzz)
     rc=0
     for i in "${!targets[@]}"; do
         t=${targets[$i]}
-        if wait "${pids[$i]}"; then
+        st=0
+        wait "${pids[$i]}" || st=$?
+        pids[i]=""  # reaped: its ID may be reused, so the trap must not signal it
+        if [[ $st == 0 ]]; then
             echo "$t: no failures in $seconds s, $(grep -m1 -o 'stat::number_of_executed_units: [0-9]*' "$root/target/rtp-fuzz-logs/$t.log")"
         else
             echo "$t: FAILED (log target/rtp-fuzz-logs/$t.log, input in fuzz/artifacts/$t/)"
@@ -279,14 +313,18 @@ safety)
     export CARGO_TARGET_DIR=$root/target/rtp-safety
     capped cargo build --release --locked -p dsd2pcm-cli
     tool=$CARGO_TARGET_DIR/release/dsd2pcm
-    d=$(mktemp -d)
-    trap 'rm -rf "$d"' EXIT
+    # On disk, not in TMPDIR (often a RAM-backed tmpfs): the 635 MB input below.
+    base=${1:-$root/target}
+    mkdir -p "$base"
+    d=$(mktemp -d "$base/rtp-safety.XXXXXX")
+    trap 'chmod -R u+w "$d" 2>/dev/null; rm -rf "$d"' EXIT
     rc=0
     check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; rc=1; fi; }
     python3 -I .github/scripts/make-test-dsf.py "$d/in.dsf"
     printf 'precious' > "$d/keep.wav"
     # 1. Output is a hard link to the input: refused, input unchanged.
     ln "$d/in.dsf" "$d/link.wav"
+    # shellcheck disable=SC2034 # read by the checks' eval
     sum=$(sha256sum < "$d/in.dsf")
     check "hard link to the input refused (exit 1)" '"$tool" "$d/in.dsf" "$d/link.wav" 2>/dev/null; [[ $? -eq 1 ]]'
     check "input unchanged after the hard-link refusal" '[[ "$(sha256sum < "$d/in.dsf")" == "$sum" ]]'
@@ -327,7 +365,8 @@ EOF
         alive=no; kill -0 "$pid" 2>/dev/null && alive=yes
         kill "-$1" "$pid" 2>/dev/null || true
         [[ -n "${3:-}" ]] && kill "-$1" "$pid" 2>/dev/null
-        local t0=$(date +%s%N)
+        local t0
+        t0=$(date +%s%N)
         wait "$pid" && st=0 || st=$?
         waited=$(( ($(date +%s%N) - t0) / 1000000 ))
         echo "$1: running when signalled: $alive; exit $st after $waited ms: $(tail -n 1 "$d/sig.log")"
@@ -372,6 +411,7 @@ EOF
     chmod 755 "$d/rodir"
     printf 'old' > "$d/mode.wav"; chmod 640 "$d/mode.wav"
     check "replacing an output keeps its permissions (0640)" '"$tool" "$d/in.dsf" "$d/mode.wav" 2>/dev/null && [[ $(stat -c %a "$d/mode.wav") == 640 ]] && [[ $(head -c 4 "$d/mode.wav") == RIFF ]]'
+    # shellcheck disable=SC2034 # read by the check's eval
     long=$(printf 'L%.0s' $(seq 1 251)).wav
     check "an output name of 255 bytes works" '"$tool" "$d/in.dsf" "$d/$long" 2>/dev/null && [[ $(head -c 4 "$d/$long") == RIFF ]]'
     check "no temporary file left by the path checks" '[[ -z "$(find "$d" -name ".*.tmp")" ]]'
@@ -410,7 +450,7 @@ EOF
     verdict $rc
     ;;
 *)
-    sed -n '2,/^set -euo/p' "$0" | sed '$d'
+    sed -n '2,${/^# The checks below/q;p}' "$0"
     exit 2
     ;;
 esac
