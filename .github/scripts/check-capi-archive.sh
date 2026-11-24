@@ -15,8 +15,9 @@
 #   fails if the static library is not position-independent (-z text), and that shared
 #   library must export the user's function and nothing of libdsd2pcm.a. A program linked
 #   against it runs.
-# - the static library holds no claxon symbols (check-capi-no-claxon.sh; the shared library
-#   is stripped in releases, so its symbol table is checked in CI instead).
+# - the static library holds no claxon symbols (check-capi-no-claxon.sh, after its tests,
+#   check-capi-no-claxon-test.sh, on Linux and macOS; the shared library is stripped in
+#   releases, so its symbol table is checked in CI instead).
 set -euo pipefail
 # Pipelines end in `grep PATTERN >/dev/null`, not `grep -q`: grep -q stops at the first
 # match, and the writer's SIGPIPE would then fail the pipeline under pipefail.
@@ -147,5 +148,8 @@ grep -qx minimal_main <<< "$exports" || { echo "::error::$lib does not export mi
 # shellcheck disable=SC2086
 $cc -o "$work/embedded" "$work/main.c" -L"$work" -lembed "${erpath[@]}"
 "$work/embedded"
+# The claxon check's own tests first, with this platform's compiler, ar and nm, so that it
+# can pass neither on a planted claxon symbol nor on an archive nm cannot read.
+case "$os" in Linux | Darwin) CC=$cc "$(dirname "$0")/check-capi-no-claxon-test.sh" ;; esac
 "$(dirname "$0")/check-capi-no-claxon.sh" "$dir/lib/libdsd2pcm.a"
 echo "C library archive: shared, static and embedded programs built and ran; no claxon code"

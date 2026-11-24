@@ -54,7 +54,8 @@ under its ABI-versioned name (`libdsd2pcm.so.1` with a `libdsd2pcm.so` link, SON
 [docs/c-api.md](c-api.md#binary-releases) and the licences. The C library holds no
 third-party code: it is built without the `flac` feature, and
 `.github/scripts/check-capi-no-claxon.sh` checks the static library of every archive but the
-MSVC one for claxon symbols with `nm` (in `check-capi-archive.sh`). The command-line tool
+MSVC one for claxon symbols with `nm` (in `check-capi-archive.sh`, after its own tests on
+Linux and macOS). The command-line tool
 has eight platforms and the C library nine: the MinGW-w64 build is the C library only (the MSVC
 `dsd2pcm.exe` serves Windows). `dsd2pcm-0.1.2-src.tar.gz` is
 `git archive --format=tar --prefix=dsd2pcm-0.1.2/ v0.1.2 | gzip -n -9`: the files carry the

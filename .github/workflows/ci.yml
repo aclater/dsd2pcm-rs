@@ -294,14 +294,18 @@ jobs:
       - name: No claxon in the C library (.github/scripts/check-capi-no-claxon.sh)
         if: hashFiles('crates/dsd2pcm-capi/Cargo.toml') != ''
         run: |
+          .github/scripts/check-capi-no-claxon-test.sh
           .github/scripts/check-capi-no-claxon.sh target/release/libdsd2pcm.a target/release/libdsd2pcm.so
           cargo build --locked --release -p dsd2pcm-capi --features flac --target-dir target/with-flac
-          # It must fail for the right reason: claxon symbols, not an unreadable or stripped file.
-          if out=$(.github/scripts/check-capi-no-claxon.sh target/with-flac/release/libdsd2pcm.a 2>&1); then
+          # It must fail for the right reason: claxon symbols (status 1), not an unreadable or
+          # stripped file (status 2).
+          rc=0
+          out=$(.github/scripts/check-capi-no-claxon.sh target/with-flac/release/libdsd2pcm.a 2>&1) || rc=$?
+          if [[ $rc -eq 0 ]]; then
             echo "::error::the check passed a library built with the flac feature"; exit 1
           fi
-          if ! grep -q 'claxon symbols' <<< "$out"; then
+          if [[ $rc -ne 1 ]] || ! grep 'claxon symbols' <<< "$out" > /dev/null; then
             printf '%s\n' "$out"
-            echo "::error::the check failed on the flac build for another reason"; exit 1
+            echo "::error::the check failed on the flac build for another reason (status $rc)"; exit 1
           fi
           echo "the check catches a library built with the flac feature"
