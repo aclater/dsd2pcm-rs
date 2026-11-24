@@ -62,7 +62,7 @@ configuration or credentials file there stays out of the container. The script r
 
 ## 1 and 2. Test suite on every platform; golden hashes and identity
 
-<!-- docs-run: skip="release test on the test machine: needs a checkout, Rust toolchains for three targets and podman" -->
+<!-- docs-run: skip="release-test.sh runs each step under systemd-run --user (memory caps), which the docs-run container does not have; it also starts its own podman containers" -->
 ```sh
 .github/scripts/release-test.sh simd
 .github/scripts/release-test.sh i686
@@ -100,7 +100,7 @@ and the three CI jobs are green on the candidate's head.
 
 ## 3. Fuzzing
 
-<!-- docs-run: skip="release test: needs a checkout, nightly Rust and cargo-fuzz; fuzzes for 1800 seconds" -->
+<!-- docs-run: skip="release-test.sh runs each step under systemd-run --user (memory caps), which the docs-run container does not have; it fuzzes for 1800 seconds by design" -->
 ```sh
 .github/scripts/release-test.sh fuzz 1800
 ```
@@ -118,7 +118,7 @@ finding. A finding is a FAIL: its input is in `fuzz/artifacts/TARGET/`.
 
 ## 4. Leak soak
 
-<!-- docs-run: skip="release test: needs a checkout and Rust; runs for an hour" -->
+<!-- docs-run: skip="release-test.sh runs each step under systemd-run --user (memory caps), which the docs-run container does not have; the soak runs for an hour by design" -->
 ```sh
 .github/scripts/release-test.sh soak 3600
 ```
@@ -132,7 +132,7 @@ live-heap and resident-set figures it prints.
 
 ## 5. Miri
 
-<!-- docs-run: skip="release test: needs a checkout and nightly Rust with Miri" -->
+<!-- docs-run: skip="release-test.sh runs each step under systemd-run --user (memory caps), which the docs-run container does not have" -->
 ```sh
 .github/scripts/release-test.sh miri
 ```
@@ -154,7 +154,7 @@ that the set has:
 - files that end in a partial 4704-byte frame;
 - 5.1 DFF files (made from 5.1 DSF rips when there are none) and a DSF made from a DFF rip:
 
-  <!-- docs-run: skip="needs a checkout and real DSD rips (IN.dsf, IN.dff) of the tester" -->
+  <!-- docs-run: skip="needs real DSD rips (IN.dsf, IN.dff) of the tester" -->
   ```sh
   python3 -I .github/scripts/dsd-transform.py dsf2dff IN.dsf OUT.dff
   python3 -I .github/scripts/dsd-transform.py dff2dsf IN.dff OUT.dsf
@@ -164,7 +164,7 @@ that the set has:
   rips has one), stereo and 5.1, with 1, 3, 5 and 7 padding bits set to zero, two of
   them with a silent end (the last two frames of each channel set to the idle pattern):
 
-  <!-- docs-run: skip="needs a checkout and real DSD rips (IN.dsf) of the tester" -->
+  <!-- docs-run: skip="needs real DSD rips (IN.dsf) of the tester" -->
   ```sh
   python3 -I .github/scripts/dsd-transform.py odd IN.dsf OUT.dsf 3
   python3 -I .github/scripts/dsd-transform.py odd IN.dsf OUT.dsf 5 9408
@@ -177,7 +177,7 @@ that the set has:
 List the inputs one per line in a file, the container pairs (a rip and the copy made from
 it, `A B` per line) in another, and run:
 
-<!-- docs-run: skip="needs a checkout, Rust and the corpus of real DSD rips listed in corpus.txt" -->
+<!-- docs-run: skip="needs the corpus of real DSD rips listed in corpus.txt" -->
 ```sh
 RTP_PAIRS=pairs.txt .github/scripts/release-test.sh corpus corpus.txt WORKDIR
 ```
@@ -208,7 +208,7 @@ silent-end copies end in zeros.
 
 ## 7. C interface under the sanitizers
 
-<!-- docs-run: skip="release test: needs a checkout, Rust, clang and the sanitizers" -->
+<!-- docs-run: skip="release-test.sh runs each step under systemd-run --user (memory caps), which the docs-run container does not have" -->
 ```sh
 .github/scripts/release-test.sh capi
 ```
@@ -224,7 +224,7 @@ passed under the sanitizers, no leaks".
 
 ## 8. README Quick start in a fresh container
 
-<!-- docs-run: skip="release test: needs a checkout, Rust and podman (it runs its own containers)" -->
+<!-- docs-run: skip="release-test.sh runs each step under systemd-run --user (memory caps), which the docs-run container does not have; it also starts its own podman container" -->
 ```sh
 .github/scripts/release-test.sh quickstart
 ```
@@ -240,7 +240,7 @@ Pass: the commands succeed and `01 - Track.wav` is a 176.4 kHz, 24-bit WAV.
 
 After the release, the same check runs with the real download (the `curl` line too):
 
-<!-- docs-run: skip="needs a checkout; the README Quick start itself is a docs-run block" -->
+<!-- docs-run: checkout=1 image=fedora-net timeout=7200 setup="dnf -y -q --setopt=install_weak_deps=False install gcc gcc-c++ git-core python3 gawk pipx && .github/scripts/rust-setup.sh 1.100.0 && mkdir -p ~/.local && ln -s ~/.cargo/bin ~/.local/bin && curl -sSfL -o /tmp/lychee.tar.gz https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-unknown-linux-gnu.tar.gz && echo '1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a  /tmp/lychee.tar.gz' | sha256sum -c && tar -C /tmp -xzf /tmp/lychee.tar.gz && cp /tmp/lychee-x86_64-unknown-linux-gnu/lychee ~/.cargo/bin/" -->
 ```sh
 .github/scripts/readme-quick-start.sh
 ```
@@ -251,7 +251,7 @@ must print "Quick start: OK".
 
 ## 9. Docs
 
-<!-- docs-run: skip="release test: needs a checkout and lychee" -->
+<!-- docs-run: checkout=1 -->
 ```sh
 .github/scripts/release-test.sh docs
 ```
@@ -273,7 +273,7 @@ Record each command and its result.
 
 ## 10. File safety
 
-<!-- docs-run: skip="release test: needs a checkout and Rust" -->
+<!-- docs-run: skip="release-test.sh runs each step under systemd-run --user (memory caps), which the docs-run container does not have" -->
 ```sh
 .github/scripts/release-test.sh safety
 ```
@@ -320,7 +320,7 @@ a later release, change the two tags and the file name.
 Install the pinned measurement suite and build the two versions under `target/quality/`
 (the candidate from its branch, the previous release from its tag):
 
-<!-- docs-run: skip="needs a checkout, Rust and pipx; builds the candidate and the previous release" -->
+<!-- docs-run: checkout=1 -->
 ```sh
 pipx install git+https://github.com/dsd-toolbox/dsd-measure@d234b7a8233ccfe391776e7c6425cbf8643c47e3
 dsd-measure --version
@@ -332,7 +332,7 @@ cargo install --locked --git https://github.com/dsd-toolbox/dsd2pcm-rs --tag v0.
 
 `dsd-measure --version` must print `0.1.1`. Measure both, from the repository root:
 
-<!-- docs-run: skip="needs a checkout, dsd-measure and the two builds from the block above" -->
+<!-- docs-run: checkout=1 -->
 ```sh
 dsd-measure run suites/dsd2pcm.toml --only reference_floor levels noise alias_tones
 ```
@@ -341,7 +341,7 @@ Then the null test of each filter, rate and cutoff, new against old, on the suit
 multitone signal. Its SHA-256 must be
 `100d1ba2cb46d98374ee5b8591b995712d12cd21c7d9370d50a1d68da3c030fc`:
 
-<!-- docs-run: skip="needs a checkout, dsd-measure and the two builds from the block above" -->
+<!-- docs-run: checkout=1 -->
 ```sh
 dsd-measure signals target/quality/signals --profile quick --only multitone
 sha256sum target/quality/signals/multitone.dsf

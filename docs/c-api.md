@@ -222,7 +222,7 @@ cargo build --release --locked -p dsd2pcm-capi
 A minimal program, `crates/dsd2pcm-capi/tests/minimal.c`, converts one stereo frame of
 DSD silence. To build and run it on Linux, from the repository root:
 
-<!-- docs-run: skip="needs a checkout of this repository and a Rust toolchain; docs-run containers hold only the published release" -->
+<!-- docs-run: checkout=1 image=fedora-net timeout=3600 setup="dnf -y -q --setopt=install_weak_deps=False install gcc gcc-c++ git-core && .github/scripts/rust-setup.sh 1.100.0 clippy,rustfmt && mkdir -p ~/.local && ln -s ~/.cargo/bin ~/.local/bin" expect="2352 samples per channel, first byte 0" -->
 ```sh
 cargo build --release -p dsd2pcm-capi
 cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c target/release/libdsd2pcm.a -lpthread -ldl -lm -o minimal
@@ -232,7 +232,7 @@ cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c t
 It prints `dsd2pcm 0.1.2: 2352 samples per channel, first byte 0`. To link the shared
 library instead (its SONAME is `libdsd2pcm.so.1`, so it needs that name at run time):
 
-<!-- docs-run: skip="needs a checkout of this repository and a Rust toolchain; docs-run containers hold only the published release" -->
+<!-- docs-run: checkout=1 expect="2352 samples per channel, first byte 0" -->
 ```sh
 ln -sf libdsd2pcm.so target/release/libdsd2pcm.so.1
 cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c -L target/release -ldsd2pcm -o minimal

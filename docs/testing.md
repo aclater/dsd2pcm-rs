@@ -40,7 +40,7 @@ It asserts, after a warm-up (the first 20 % of iterations):
 - on Linux, after every threaded conversion the thread count (`/proc/self/task`) is back
   at its value before the run.
 
-<!-- docs-run: skip="needs a checkout and Rust; the soak runs for 1000 iterations or an hour" -->
+<!-- docs-run: skip="the second command soaks for 3600 seconds by design (DSD2PCM_SOAK_SECONDS=3600)" -->
 ```sh
 DSD2PCM_SOAK_ITERATIONS=1000 cargo test --release -p dsd2pcm --test soak -- --ignored --nocapture
 DSD2PCM_SOAK_SECONDS=3600 cargo test --release -p dsd2pcm --test soak -- --ignored --nocapture
@@ -85,7 +85,7 @@ with clang's AddressSanitizer, LeakSanitizer and UndefinedBehaviorSanitizer and 
 iterations with `detect_leaks=1`: one block left allocated fails it. Without a sanitizer it
 also checks the resident set levels off. Locally:
 
-<!-- docs-run: skip="needs a checkout, Rust, cbindgen and clang with AddressSanitizer" -->
+<!-- docs-run: checkout=1 image=fedora-net timeout=7200 setup="dnf -y -q --setopt=install_weak_deps=False install gcc gcc-c++ git-core clang compiler-rt diffutils python3 binutils && .github/scripts/rust-setup.sh 1.100.0 && mkdir -p ~/.local && ln -s ~/.cargo/bin ~/.local/bin && cargo install --locked cbindgen --version 0.29.4" -->
 ```sh
 CBINDGEN=cbindgen crates/dsd2pcm-capi/check.sh          # LEAKLOOP_ITERATIONS=100 by default
 ASAN_CC=clang .github/scripts/capi-check.sh crates/dsd2pcm-capi
@@ -93,7 +93,7 @@ ASAN_CC=clang .github/scripts/capi-check.sh crates/dsd2pcm-capi
 
 ## Miri
 
-<!-- docs-run: skip="needs a checkout and nightly Rust with Miri" -->
+<!-- docs-run: skip="Miri ran over 11 minutes at 1.5 CPUs without finishing; the sanitizers workflow runs Miri weekly" -->
 ```sh
 rustup toolchain install nightly-2026-11-01 --component miri,rust-src
 cargo +nightly-2026-11-01 miri test -p dsd2pcm-capi
@@ -121,7 +121,7 @@ and 12 for the core crate on a Ryzen AI Max+ 395 (one core each):
 
 ## ThreadSanitizer
 
-<!-- docs-run: skip="needs a checkout and nightly Rust with rust-src (ThreadSanitizer)" -->
+<!-- docs-run: skip="ThreadSanitizer ran over 9 minutes at 1.5 CPUs without finishing; the sanitizers workflow runs it weekly" -->
 ```sh
 export CARGO_PROFILE_DEV_OPT_LEVEL=2
 RUSTFLAGS=-Zsanitizer=thread DSD2PCM_SOAK_ITERATIONS=100 DSD2PCM_SOAK_RSS_REPORT_ONLY=1 DSD2PCM_SOAK_HEAP_REPORT_ONLY=1 \

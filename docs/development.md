@@ -17,7 +17,7 @@ dev-dependency scarletbook-pcm 0.7.0 uses edition 2024 (rust-version 1.85).
 with 1.85.
 Locally:
 
-<!-- docs-run: skip="needs a checkout of this repository and a Rust toolchain; docs-run containers hold only the published release" -->
+<!-- docs-run: checkout=1 image=fedora-net timeout=7200 setup="dnf -y -q --setopt=install_weak_deps=False install gcc gcc-c++ git-core && .github/scripts/rust-setup.sh 1.100.0 clippy,rustfmt && mkdir -p ~/.local && ln -s ~/.cargo/bin ~/.local/bin" -->
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -36,7 +36,10 @@ disagree (`python3 -I .github/scripts/check-doc-versions.py`). It also runs the 
 [DSD Toolbox docs tools](https://github.com/dsd-toolbox/dsd-toolbox/blob/main/docs/docs-tooling.md),
 pinned to one commit, with the settings in `.docs.toml`: the docs lint, the link check of
 every Markdown file, the facts regions, on pull requests a docs change with every code
-change, and weekly the marked command blocks against the published release. The
+change, and weekly the marked command blocks (against the published release, or in a copy
+of the commit for build and test commands) and a refresh of the facts regions, pushed to the
+branch `docs/facts-update` for a pull request. Every command block is marked to run or
+skipped with a reason. The
 `docs-audit` workflow runs after each release ([releasing](release.md#after-the-release-run-the-docs-audit)).
 
 ## See also

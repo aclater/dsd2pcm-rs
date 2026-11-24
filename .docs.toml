@@ -16,10 +16,6 @@ release_files = ["docs/release.md"]
 # "RightMark Audio Analyzer" is a product name (docs/pcm-quality.md).
 allow_words = ["analyzer"]
 
-[[lint.ignore]]
-path = "docs/user-guide.md"
-rule = "date-format"
-reason = "bit-depth lists such as 16/24/32-bit match the d/m/y date pattern; the page has no dates"
 
 [touched]
 # Code, options and behaviour: the crates (sources, C header, manifests), the measurement suite
