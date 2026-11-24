@@ -6,7 +6,7 @@ use dsd2pcm::convert::{check_options, dsd64_to_pcm};
 use dsd2pcm::dsf::{DsfReader, DsfWriter};
 use dsd2pcm::io::{DsdRead, DsdWrite};
 use dsd2pcm::wav::{WavFormat, WavWriter};
-use dsd2pcm::{Cutoff, Filter, PcmOptions, PcmRate};
+use dsd2pcm::{Cutoff, Filter, PcmOptions, PcmRate, Threads};
 use std::io::Cursor;
 
 const ALL: [(PcmRate, Cutoff); 8] = [
@@ -91,7 +91,7 @@ fn padding_converts_as_silence() {
             let mut opts = PcmOptions::new(rate);
             opts.cutoff = cutoff;
             opts.filter = filter;
-            opts.threads = false;
+            opts.threads = Threads::Single;
             if check_options(&opts).is_err() {
                 continue;
             }

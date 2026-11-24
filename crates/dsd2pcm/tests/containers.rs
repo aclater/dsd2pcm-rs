@@ -104,7 +104,7 @@ fn dff_rejects_dst() {
     let at = f.windows(4).position(|w| w == b"CMPR").unwrap() + 12;
     f[at..at + 4].copy_from_slice(b"DST ");
     match DffReader::new(Cursor::new(f)) {
-        Err(Error::Unsupported(m)) => assert!(m.contains("DST")),
+        Err(Error::Unsupported(m)) => assert!(m.message().contains("DST")),
         other => panic!("expected DST rejection, got {other:?}"),
     }
 }
@@ -133,6 +133,7 @@ fn wav_round_trip_formats() {
                     }
                     WavFormat::F32 => raw.extend_from_slice(&(v as f32).to_le_bytes()),
                     WavFormat::F64 => raw.extend_from_slice(&v.to_le_bytes()),
+                    f => unreachable!("format {f:?}"),
                 }
             }
         }
@@ -226,11 +227,7 @@ struct ShortSource(bool);
 
 impl dsd2pcm::io::DsdRead for ShortSource {
     fn info(&self) -> dsd2pcm::io::DsdInfo {
-        dsd2pcm::io::DsdInfo {
-            channels: 2,
-            sample_rate: 2_822_400,
-            samples: 2_822_400 * 3600,
-        }
+        dsd2pcm::io::DsdInfo::new(2, 2_822_400, 2_822_400 * 3600)
     }
     fn read_bytes(&mut self, _max: usize, out: &mut [Vec<u8>]) -> dsd2pcm::Result<usize> {
         if std::mem::replace(&mut self.0, true) {
@@ -263,11 +260,7 @@ struct Dsd128Source;
 
 impl dsd2pcm::io::DsdRead for Dsd128Source {
     fn info(&self) -> dsd2pcm::io::DsdInfo {
-        dsd2pcm::io::DsdInfo {
-            channels: 2,
-            sample_rate: 5_644_800,
-            samples: 5_644_800,
-        }
+        dsd2pcm::io::DsdInfo::new(2, 5_644_800, 5_644_800)
     }
     fn read_bytes(&mut self, _max: usize, out: &mut [Vec<u8>]) -> dsd2pcm::Result<usize> {
         for o in out.iter_mut() {
@@ -433,11 +426,7 @@ struct HugeShort(bool);
 
 impl DsdRead for HugeShort {
     fn info(&self) -> dsd2pcm::io::DsdInfo {
-        dsd2pcm::io::DsdInfo {
-            channels: 1,
-            sample_rate: 2_822_400,
-            samples: 1 << 37,
-        }
+        dsd2pcm::io::DsdInfo::new(1, 2_822_400, 1 << 37)
     }
     fn read_bytes(&mut self, _max: usize, out: &mut [Vec<u8>]) -> dsd2pcm::Result<usize> {
         if std::mem::replace(&mut self.0, true) {

@@ -31,8 +31,11 @@ pub mod wav;
 
 pub use convert::{
     convert_file, convert_file_to, convert_file_with, open_input, Input, OutputOptions, PcmOptions,
-    Progress, ProgressHook, Report,
+    Progress, ProgressHook, Report, Threads,
 };
 pub use decimator::{Cutoff, PcmRate};
-pub use error::{Error, Result};
+pub use error::{
+    ArgumentError, ArgumentKind, Error, FormatError, FormatErrorKind, Result, UnsupportedError,
+    UnsupportedKind,
+};
 pub use filters::Filter;

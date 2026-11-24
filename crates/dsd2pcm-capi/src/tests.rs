@@ -259,7 +259,15 @@ fn convert_file_rejects_nulls_and_bad_values() {
         }),
         DSD2PCM_OK
     );
-    assert_eq!(mutate(&|x| x.threads = 2), DSD2PCM_E_INVALID_ARGUMENT);
+    // Any thread count gives the same bytes (counts above 256 run on 256 threads).
+    let threads_out = |t: u32| {
+        assert_eq!(mutate(&|x| x.threads = t), DSD2PCM_OK, "{}", last_error());
+        std::fs::read(d.path("out.wav")).unwrap()
+    };
+    let one = threads_out(1);
+    for t in [0, 2, 3, u32::MAX] {
+        assert!(threads_out(t) == one, "threads {t}");
+    }
     assert_eq!(mutate(&|x| x.gain_db = 25.0), DSD2PCM_E_INVALID_ARGUMENT);
     assert_eq!(
         mutate(&|x| x.gain_db = f64::NAN),
@@ -1090,17 +1098,14 @@ struct Newer<T> {
     extra: u64,
 }
 
-fn newer<T: Versioned>(mut known: T) -> Newer<T> {
+fn newer<T: Versioned>(mut known: T, extra: u64) -> Newer<T> {
     known.set_struct_size(size_of::<Newer<T>>() as u32);
-    Newer {
-        known,
-        extra: 0xDEAD_BEEF,
-    }
+    Newer { known, extra }
 }
 
-/// `struct_size` below the 0.1.0 size is refused for every struct, before anything is read
-/// or written; a larger one (a newer header) is accepted, and only our fields are read or
-/// written.
+/// `struct_size` below the 0.1.0 size or above `MAX_STRUCT_SIZE` is refused for every
+/// struct, before anything is read or written; a larger one (a newer header) is accepted
+/// when the input struct's bytes past ours are 0, and only our fields are read or written.
 #[test]
 fn struct_size_is_checked() {
     let cfg = frames_cfg(176_400, 1);
@@ -1123,10 +1128,16 @@ fn struct_size_is_checked() {
             )
         }
     };
-    fn too_small<T>(k: usize) -> u32 {
-        [0, 4, size_of::<T>() as u32 - 1][k]
+    fn too_small<T: Versioned>(k: usize) -> u32 {
+        [
+            0,
+            4,
+            T::V1_SIZE as u32 - 1,
+            MAX_STRUCT_SIZE as u32 + 1,
+            u32::MAX,
+        ][k]
     }
-    for k in 0..3 {
+    for k in 0..5 {
         let r = dsd2pcm_run {
             struct_size: too_small::<dsd2pcm_run>(k),
             ..run
@@ -1155,9 +1166,16 @@ fn struct_size_is_checked() {
         );
         assert!(hh.is_null());
     }
-    // Newer, larger structs.
-    let r = newer(run);
-    let mut st = newer(stats_init());
+    // Newer, larger structs: an input struct's unknown bytes must be 0.
+    let bad = newer(run, 1 << 40);
+    let mut st = newer(stats_init(), 0xDEAD_BEEF);
+    assert_eq!(
+        convert(&bad.known, &mut st.known, &mut out),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    assert!(last_error().contains("is not 0"), "{}", last_error());
+    assert_eq!(st.known.channels, 0, "nothing written");
+    let r = newer(run, 0);
     assert_eq!(
         convert(&r.known, &mut st.known, &mut out),
         DSD2PCM_OK,
@@ -1170,8 +1188,15 @@ fn struct_size_is_checked() {
         size_of::<Newer<dsd2pcm_stats>>()
     );
     assert_eq!(st.known.channels, 1);
-    let c = newer(cfg);
     let mut hh = null_mut();
+    let c = newer(cfg, 1);
+    // SAFETY (test): valid pointers.
+    assert_eq!(
+        unsafe { dsd2pcm_frames_new(&c.known, &mut hh) },
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    assert!(hh.is_null());
+    let c = newer(cfg, 0);
     // SAFETY (test): valid pointers.
     assert_eq!(unsafe { dsd2pcm_frames_new(&c.known, &mut hh) }, DSD2PCM_OK);
     // SAFETY (test): live handles.
@@ -1205,8 +1230,11 @@ fn struct_size_is_checked_for_files() {
     assert_eq!(call(&good, &mut rep), DSD2PCM_E_INVALID_ARGUMENT);
     assert_eq!(rep.out_samples, 5, "nothing written");
     assert!(!out.exists(), "refused before converting");
-    let o = newer(good);
-    let mut rep = newer(report_init());
+    let bad = newer(good, 1);
+    let mut rep = newer(report_init(), 0xDEAD_BEEF);
+    assert_eq!(call(&bad.known, &mut rep.known), DSD2PCM_E_INVALID_ARGUMENT);
+    assert!(!out.exists(), "refused before converting");
+    let o = newer(good, 0);
     assert_eq!(
         call(&o.known, &mut rep.known),
         DSD2PCM_OK,
@@ -1308,12 +1336,26 @@ fn versioned_structs_old_and_new_callers() {
             b: 5,
             appended: 6,
         },
-        extra: 0xDEAD_BEEF,
+        extra: 0,
     };
     let p = (&mut new as *mut Newest).cast::<LaterStruct>();
     // SAFETY (test): `p` is readable for its struct_size bytes.
     let v = unsafe { read_struct(p.cast_const(), "new") }.ok().unwrap();
     assert_eq!((v.a, v.b, v.appended), (4, 5, 6));
+    // A field we do not know, set: refused, whichever of its bytes is set.
+    for byte in 0..8 {
+        new.extra = 1 << (8 * byte);
+        // SAFETY (test): as above.
+        let e = unsafe { read_struct(p.cast_const(), "new") }.err().unwrap();
+        assert_eq!(e.0, DSD2PCM_E_INVALID_ARGUMENT);
+        assert!(
+            e.1.contains(&format!("byte {} is not 0", 24 + byte)),
+            "{}",
+            e.1
+        );
+    }
+    // An output struct's unknown bytes are the caller's: left alone.
+    new.extra = 0xDEAD_BEEF;
     // SAFETY (test): as above.
     let n = unsafe { out_struct(p, "new") }.ok().unwrap().unwrap();
     assert_eq!(n, size_of::<LaterStruct>());

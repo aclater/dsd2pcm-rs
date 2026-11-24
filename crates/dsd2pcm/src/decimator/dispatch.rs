@@ -28,6 +28,7 @@ use super::lanes;
 /// A SIMD level of the kernels. Every level gives the same output bytes.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub enum SimdLevel {
     /// The kernels as compiled.
     Generic,

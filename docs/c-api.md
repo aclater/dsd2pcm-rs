@@ -61,7 +61,8 @@ int dsd2pcm_convert_file(const char *input_path, const char *output_path,
 
 Converts a DSF or DFF file (DSD64) to a 24-bit WAV file. `options` holds the rate (88200,
 176400, 352800), cutoff, filter, gain (-120 to +24 dB), `threads` (0: all cores, 1: the
-calling thread only), `no_clobber` (0: replace an existing output, 1: refuse it; since
+calling thread only, n: at most n threads, up to 256; values above 1 since 0.2.0; the
+output is the same with any value), `no_clobber` (0: replace an existing output, 1: refuse it; since
 0.1.3) and an optional progress callback:
 
 ```c
@@ -171,10 +172,21 @@ Both run without arguments.
   changed function signature, a changed meaning of a value.
 - Compatible changes only append: new fields go at the end of a struct, new functions,
   constants and status codes are added. Zero in a new field means the old behaviour.
-- `struct_size` makes this work both ways. The library refuses a size below the struct's
-  0.1.0 size (`DSD2PCM_E_INVALID_ARGUMENT`, before reading or writing anything), reads only
-  the fields it knows from a larger struct (a newer header), and writes only
-  `min(struct_size, its size)` bytes of an output struct.
+- `struct_size` makes this work both ways. The library never reads or writes a byte past
+  the caller's `struct_size`, and checks everything before reading or writing a field:
+  - below the struct's 0.1.0 size, or above 4096: refused (`DSD2PCM_E_INVALID_ARGUMENT`);
+  - from the 0.1.0 size up to the library's own size (an older or the same header): the
+    caller's bytes are read, and the fields the caller's struct lacks are taken as 0;
+  - larger than the library's own size (a newer header): for a struct the library reads
+    (options, config, run), the bytes past its own size must all be 0, since a set field
+    the library does not know asks for something it cannot do; one non-zero byte refuses
+    the call (`DSD2PCM_E_INVALID_ARGUMENT`, naming the byte). For an output struct
+    (report, stats), the library writes its own fields and leaves the rest as they are.
+- The library's own size is `sizeof` the struct in its header, padding included. A field
+  appended later starts at or after that size on every target (an explicit `uint32_t`
+  reserved field fills a gap first if needed), so an older library always sees a new
+  field in the bytes it checks for 0. The padding at the end of a struct is never read as
+  a field: a caller that copies a struct can leave anything there.
 - 0.1.0 sizes, fixed for ABI 1 whatever fields are appended later (checked when the
   library is built, and by its tests):
 
@@ -192,6 +204,11 @@ Both run without arguments.
   the struct 56 bytes on 64-bit targets, 40 on i686 Linux and 48 on other 32-bit targets.
   The status code `DSD2PCM_E_EXISTS` (9) is new in 0.1.3; the library returns it only
   when `no_clobber` is set.
+- `tests/struct_size.c` checks this from C, under AddressSanitizer and
+  UndefinedBehaviorSanitizer too: a `dsd2pcm_file_options` of the 0.1.0 size (a heap block
+  of exactly that size, and one followed by a set `no_clobber` that must not be read), of
+  the current size, larger with the extra bytes 0 and larger with one of them set, and
+  the same for the other structs.
 
 ## Building from source
 
@@ -369,7 +386,8 @@ environment variable; install it with `cargo install cbindgen`), then builds and
 `tests/*.c` and `examples/convert.c` under gcc and clang with `-Wall -Wextra -Werror`,
 compiles the header and its init macros as C++11, checks that the static library holds no
 claxon symbols (`.github/scripts/check-capi-no-claxon.sh`, which lists the symbol table with
-`nm`, so a stripped library fails instead of passing unchecked), and runs the smoke test and the leak loop
+`nm`, so a stripped library fails instead of passing unchecked), and runs the smoke test,
+the `struct_size` test (`tests/struct_size.c`) and the leak loop
 (`tests/leakloop.c`: create, convert and free on every path, many times over) under clang's
 AddressSanitizer, LeakSanitizer and UndefinedBehaviorSanitizer (`ASAN=0` skips that). CI
 does the same in the C library job, runs the claxon check on both libraries, and checks that

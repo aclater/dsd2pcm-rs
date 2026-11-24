@@ -4,7 +4,7 @@ use dsd2pcm::convert::dsd64_to_pcm;
 use dsd2pcm::dsf::{DsfReader, DsfWriter};
 use dsd2pcm::io::DsdWrite;
 use dsd2pcm::wav::{WavFormat, WavWriter};
-use dsd2pcm::{Cutoff, PcmOptions, PcmRate};
+use dsd2pcm::{Cutoff, PcmOptions, PcmRate, Threads};
 use std::io::Cursor;
 
 const FRAME: usize = 4704;
@@ -68,6 +68,7 @@ fn theirs(chans: &[Vec<u8>], rate: PcmRate, cutoff: Cutoff, gain_db: f64) -> (Ve
         Cutoff::Standard => sb::Cutoff::Standard,
         Cutoff::Low => sb::Cutoff::Low,
         Cutoff::Wide => sb::Cutoff::Wide,
+        c => unreachable!("cutoff {c:?}"),
     };
     let cfg =
         sb::PcmConfig::new(rate, cutoff, ch as u8).with_gain(sb::Gain::from_db(gain_db).unwrap());
@@ -100,13 +101,11 @@ fn identical_to_scarletbook_pcm() {
                 continue;
             }
             for gain_db in [0.0, -3.0, 6.0] {
-                let opts = PcmOptions {
-                    rate,
-                    cutoff,
-                    gain_db,
-                    threads: true,
-                    filter: dsd2pcm::Filter::Default,
-                };
+                let opts = PcmOptions::new(rate)
+                    .with_cutoff(cutoff)
+                    .with_gain_db(gain_db)
+                    .with_threads(Threads::All)
+                    .with_filter(dsd2pcm::Filter::Default);
                 let (a, ca) = ours(&chans, &opts);
                 let (b, cb) = theirs(&chans, rate, cutoff, gain_db);
                 assert_eq!(a.len(), b.len(), "{rate:?} {cutoff:?} {gain_db}");
@@ -125,13 +124,15 @@ fn identical_to_scarletbook_pcm() {
 fn identical_mono_and_six_channels() {
     for ch in [1usize, 6] {
         let chans = material(ch, 3, 0xfeed_beef ^ ch as u64);
-        let opts = PcmOptions {
-            rate: PcmRate::Hz176400,
-            cutoff: Cutoff::Standard,
-            gain_db: 0.0,
-            threads: ch > 1,
-            filter: dsd2pcm::Filter::Default,
-        };
+        let opts = PcmOptions::new(PcmRate::Hz176400)
+            .with_cutoff(Cutoff::Standard)
+            .with_gain_db(0.0)
+            .with_threads(if ch > 1 {
+                Threads::All
+            } else {
+                Threads::Single
+            })
+            .with_filter(dsd2pcm::Filter::Default);
         let (a, _) = ours(&chans, &opts);
         let (b, _) = theirs(&chans, PcmRate::Hz176400, Cutoff::Standard, 0.0);
         assert!(a == b, "{ch} channels differ");
@@ -163,14 +164,17 @@ fn digest(rate: PcmRate, cutoff: Cutoff, filter: dsd2pcm::Filter) -> String {
         ];
         for chans in &inputs {
             for gain_db in [0.0, -3.0, 7.5] {
-                let opts = PcmOptions {
-                    rate,
-                    cutoff,
-                    gain_db,
-                    // Both the threaded and the single-thread driver.
-                    threads: gain_db != -3.0,
-                    filter,
+                // Both the threaded and the single-thread driver.
+                let threads = if gain_db != -3.0 {
+                    Threads::All
+                } else {
+                    Threads::Single
                 };
+                let opts = PcmOptions::new(rate)
+                    .with_cutoff(cutoff)
+                    .with_gain_db(gain_db)
+                    .with_threads(threads)
+                    .with_filter(filter);
                 let (bytes, clipped) = ours(chans, &opts);
                 if filter == dsd2pcm::Filter::Default {
                     // The hashed output is scarletbook-pcm's.
@@ -270,13 +274,11 @@ fn identical_on_real_file() {
             if cutoff == Cutoff::Wide && rate == PcmRate::Hz88200 {
                 continue;
             }
-            let opts = PcmOptions {
-                rate,
-                cutoff,
-                gain_db: 0.0,
-                threads: true,
-                filter: dsd2pcm::Filter::Default,
-            };
+            let opts = PcmOptions::new(rate)
+                .with_cutoff(cutoff)
+                .with_gain_db(0.0)
+                .with_threads(Threads::All)
+                .with_filter(dsd2pcm::Filter::Default);
             let (a, _) = ours(&chans, &opts);
             let (b, _) = theirs(&chans, rate, cutoff, 0.0);
             assert!(a == b, "real file differs: {rate:?} {cutoff:?}");

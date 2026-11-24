@@ -46,6 +46,7 @@ impl Conv {
             Cutoff::Standard => sb::Cutoff::Standard,
             Cutoff::Low => sb::Cutoff::Low,
             Cutoff::Wide => sb::Cutoff::Wide,
+            c => unreachable!("cutoff {c:?}"),
         };
         let sr = sb::PcmRate::from_hz(rate.hz()).unwrap();
         Conv::Sb(Box::new(

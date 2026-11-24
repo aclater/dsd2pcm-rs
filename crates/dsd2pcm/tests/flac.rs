@@ -159,7 +159,7 @@ fn unknown_length_without_frames_is_an_error() {
     f.truncate(frames_at(&f));
     let e = FlacReader::new(Cursor::new(f)).unwrap_err();
     assert!(
-        matches!(e, Error::Format(ref m) if m.contains("no audio frames")),
+        matches!(e, Error::Format(ref m) if m.message().contains("no audio frames")),
         "{e}"
     );
 }
@@ -177,7 +177,7 @@ fn short_stream_is_an_error() {
     let mut r = FlacReader::new(Cursor::new(g)).unwrap();
     let e = read_all(&mut r, 1 << 20).unwrap_err();
     assert!(
-        matches!(e, Error::Format(ref m) if m.contains("ended after 4100 of 5000")),
+        matches!(e, Error::Format(ref m) if m.message().contains("ended after 4100 of 5000")),
         "{e}"
     );
     // Declared shorter: the rest is ignored.
@@ -200,7 +200,7 @@ fn rejects_unsupported_streams() {
     f[SI + 12] = (f[SI + 12] & 0xF1) | (6 << 1);
     let e = FlacReader::new(Cursor::new(f)).unwrap_err();
     assert!(
-        matches!(e, Error::Format(ref m) if m.contains("channel count 7")),
+        matches!(e, Error::Format(ref m) if m.message().contains("channel count 7")),
         "{e}"
     );
     // A frame with a channel count other than STREAMINFO's.
@@ -218,7 +218,7 @@ fn rejects_unsupported_streams() {
     assert_eq!(r.bits_per_sample(), 16);
     let e = read_all(&mut r, 100).unwrap_err();
     assert!(
-        matches!(e, Error::Format(ref m) if m.contains("bit depth")),
+        matches!(e, Error::Format(ref m) if m.message().contains("bit depth")),
         "{e}"
     );
 }

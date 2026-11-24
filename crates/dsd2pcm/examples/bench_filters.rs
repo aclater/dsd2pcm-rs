@@ -10,7 +10,7 @@ use dsd2pcm::convert::dsd64_to_pcm;
 use dsd2pcm::dsf::{DsfReader, DsfWriter};
 use dsd2pcm::io::{DsdRead, DsdWrite};
 use dsd2pcm::wav::{WavFormat, WavWriter};
-use dsd2pcm::{Cutoff, Filter, PcmOptions, PcmRate};
+use dsd2pcm::{Cutoff, Filter, PcmOptions, PcmRate, Threads};
 use std::io::Cursor;
 use std::sync::Arc;
 use std::time::Instant;
@@ -57,13 +57,15 @@ fn main() {
             }
             for threads in [false, true] {
                 let run = |filter| {
-                    let opts = PcmOptions {
-                        rate,
-                        cutoff,
-                        gain_db: 0.0,
-                        threads,
-                        filter,
-                    };
+                    let opts = PcmOptions::new(rate)
+                        .with_cutoff(cutoff)
+                        .with_gain_db(0.0)
+                        .with_threads(if threads {
+                            Threads::All
+                        } else {
+                            Threads::Single
+                        })
+                        .with_filter(filter);
                     let size = 68 + n * 8 / rate.decimation() as usize * ch * 3;
                     best(|| {
                         let r = DsfReader::new(Cursor::new(dsf.clone())).unwrap();

@@ -6,7 +6,9 @@ use dsd2pcm::convert::{dsd64_to_pcm, dsd64_to_pcm_with};
 use dsd2pcm::dsf::{DsfReader, DsfWriter};
 use dsd2pcm::io::DsdWrite;
 use dsd2pcm::wav::{WavFormat, WavWriter};
-use dsd2pcm::{convert_file, convert_file_with, Error, Filter, PcmOptions, PcmRate, Progress};
+use dsd2pcm::{
+    convert_file, convert_file_with, Error, Filter, PcmOptions, PcmRate, Progress, Threads,
+};
 use std::io::Cursor;
 use std::ops::ControlFlow;
 
@@ -56,7 +58,11 @@ fn progress_is_reported_and_output_unchanged() {
         (true, Filter::Pysacd),
     ] {
         let mut opts = PcmOptions::new(PcmRate::Hz176400);
-        opts.threads = threads;
+        opts.threads = if threads {
+            Threads::All
+        } else {
+            Threads::Single
+        };
         opts.filter = filter;
         let plain = run(&file, &opts, None).unwrap();
         let mut seen = Vec::new();
@@ -71,6 +77,29 @@ fn progress_is_reported_and_output_unchanged() {
         assert_eq!(*seen.last().unwrap(), (total, total));
         assert!(seen.len() >= 3, "{filter:?} {seen:?}");
         assert!(seen.windows(2).all(|w| w[0].0 < w[1].0 && w[1].1 == total));
+    }
+}
+
+/// Every thread setting gives the same bytes, with every filter: all cores, one thread,
+/// counts of 2, 3 and 7, and a count above `Threads::MAX` (capped).
+#[test]
+fn thread_counts_give_the_same_bytes() {
+    use std::num::NonZeroUsize;
+    let file = dsf(300_000);
+    for filter in [Filter::Default, Filter::Precise, Filter::Pysacd] {
+        let opts = PcmOptions::new(PcmRate::Hz176400).with_filter(filter);
+        let one = run(&file, &opts.with_threads(Threads::Single), None).unwrap();
+        for t in [
+            Threads::All,
+            Threads::Count(NonZeroUsize::MIN),
+            Threads::Count(NonZeroUsize::new(2).unwrap()),
+            Threads::Count(NonZeroUsize::new(3).unwrap()),
+            Threads::Count(NonZeroUsize::new(7).unwrap()),
+            Threads::Count(NonZeroUsize::new(Threads::MAX + 1).unwrap()),
+        ] {
+            let got = run(&file, &opts.with_threads(t), None).unwrap();
+            assert!(got == one, "{filter:?} {t:?}");
+        }
     }
 }
 

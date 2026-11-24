@@ -21,6 +21,7 @@ use dsd::{Cutoff, Error, Filter, PcmRate};
 use std::any::Any;
 use std::cell::RefCell;
 use std::ffi::{c_char, c_int, c_void, CString};
+use std::num::NonZeroUsize;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Mutex;
 
@@ -113,7 +114,9 @@ pub struct dsd2pcm_file_options {
     pub cutoff: u32,
     /// `DSD2PCM_FILTER_*`; 0 is the default.
     pub filter: u32,
-    /// 0: convert on all cores; 1: on the calling thread only. Other values are reserved.
+    /// 0: convert on all cores; 1: on the calling thread only; n > 1: on at most n threads
+    /// (the calling one included, at most 256). The output is the same with any value.
+    /// Values above 1 were refused before 0.2.0.
     pub threads: u32,
     /// Gain in dB, -120 to +24.
     pub gain_db: f64,
@@ -326,11 +329,15 @@ const _: () = assert!(
         == <dsd2pcm_file_options as Versioned>::V1_SIZE
 );
 
-/// Checks a caller's `struct_size`.
+/// The largest `struct_size` accepted: far above any struct's size, it bounds the bytes
+/// checked past ours and catches a `struct_size` that was never set.
+pub(crate) const MAX_STRUCT_SIZE: usize = 4096;
+
+/// Checks a caller's `struct_size`: from the 0.1.0 size to [`MAX_STRUCT_SIZE`].
 pub(crate) fn check_struct_size<T: Versioned>(size: u32, what: &str) -> Result<(), Fail> {
-    if (size as usize) < T::V1_SIZE {
+    if (size as usize) < T::V1_SIZE || size as usize > MAX_STRUCT_SIZE {
         return Err(invalid(format!(
-            "{what}->struct_size {size}: {} needs at least {} (use {}_INIT)",
+            "{what}->struct_size {size}: {} needs {} to {MAX_STRUCT_SIZE} (use {}_INIT)",
             T::NAME,
             T::V1_SIZE,
             T::NAME.to_uppercase()
@@ -436,9 +443,10 @@ pub(crate) fn file_options(
     opts.cutoff = cutoff(o.cutoff)?;
     opts.filter = filter(o.filter)?;
     opts.threads = match o.threads {
-        0 => true,
-        1 => false,
-        t => return Err(invalid(format!("threads {t}: 0 (all cores) or 1"))),
+        0 => dsd::Threads::All,
+        1 => dsd::Threads::Single,
+        // Above `Threads::MAX` the library uses `MAX`; a 32-bit count always fits.
+        t => dsd::Threads::Count(NonZeroUsize::new(t as usize).expect("t > 1")),
     };
     opts.gain_db = o.gain_db;
     dsd::convert::check_options(&opts)?;

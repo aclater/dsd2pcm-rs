@@ -26,7 +26,7 @@ pub(crate) use dispatch::Isa;
 #[doc(hidden)]
 pub use dispatch::{with_simd_level, SimdLevel};
 
-use crate::error::{Error, Result};
+use crate::error::{ArgumentKind, Error, Result};
 
 /// The idle pattern of Super Audio CD: DSD silence, and the input beyond the ends.
 pub const IDLE: u8 = 0x69;
@@ -36,6 +36,7 @@ pub const DSD64_RATE: u32 = 2_822_400;
 
 /// PCM output rate of the ported converter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum PcmRate {
     /// 88 200 Hz.
     Hz88200,
@@ -68,6 +69,7 @@ impl PcmRate {
 
 /// Low-pass filter choice.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Cutoff {
     /// Passband to 40 kHz, stopband from 48 kHz.
     #[default]
@@ -502,8 +504,9 @@ impl Plan {
 
     pub(crate) fn with_design(rate: PcmRate, cutoff: Cutoff, design: Design) -> Result<Plan> {
         if (cutoff, rate) == (Cutoff::Wide, PcmRate::Hz88200) {
-            return Err(Error::InvalidArgument(
-                "the wide filter is not available at 88.2 kHz".into(),
+            return Err(Error::invalid(
+                ArgumentKind::Filter,
+                "the wide filter is not available at 88.2 kHz",
             ));
         }
         let isa = Isa::current();

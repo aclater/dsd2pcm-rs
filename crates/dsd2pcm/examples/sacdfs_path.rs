@@ -89,6 +89,7 @@ fn main() {
             Cutoff::Standard => sb::Cutoff::Standard,
             Cutoff::Low => sb::Cutoff::Low,
             Cutoff::Wide => sb::Cutoff::Wide,
+            c => unreachable!("cutoff {c:?}"),
         };
         let mut theirs: Vec<sb::Converter> = (0..POOL)
             .map(|_| sb::Converter::new(sb::PcmConfig::new(sr, sc, ch as u8)).unwrap())

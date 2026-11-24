@@ -10,7 +10,7 @@ use dsd2pcm::dsf::{DsfReader, DsfWriter};
 use dsd2pcm::frames::{self, Converter, FrameRun, Gain, PcmConfig, PcmOut, Run};
 use dsd2pcm::io::DsdWrite;
 use dsd2pcm::wav::{WavFormat, WavWriter};
-use dsd2pcm::{Cutoff, Filter, PcmOptions, PcmRate};
+use dsd2pcm::{Cutoff, Filter, PcmOptions, PcmRate, Threads};
 use scarletbook_pcm as sb;
 use std::io::Cursor;
 
@@ -67,6 +67,7 @@ fn sb_conv(rate: PcmRate, cutoff: Cutoff, ch: usize, gain_db: f64) -> sb::Conver
         Cutoff::Standard => sb::Cutoff::Standard,
         Cutoff::Low => sb::Cutoff::Low,
         Cutoff::Wide => sb::Cutoff::Wide,
+        c => unreachable!("cutoff {c:?}"),
     };
     let cfg =
         sb::PcmConfig::new(rate, cutoff, ch as u8).with_gain(sb::Gain::from_db(gain_db).unwrap());
@@ -283,13 +284,11 @@ fn whole_file(
         rate.hz(),
     )
     .unwrap();
-    let opts = PcmOptions {
-        rate,
-        cutoff,
-        gain_db,
-        threads: false,
-        filter,
-    };
+    let opts = PcmOptions::new(rate)
+        .with_cutoff(cutoff)
+        .with_gain_db(gain_db)
+        .with_threads(Threads::Single)
+        .with_filter(filter);
     dsd64_to_pcm(Box::new(r), &mut wav, &opts).unwrap();
     wav.finish().unwrap();
     let off = wav.data_offset() as usize;

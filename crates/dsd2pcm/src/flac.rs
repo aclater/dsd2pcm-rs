@@ -26,7 +26,9 @@
 //! bytes than the buffer holds: claxon's byte reader indexes its buffer unchecked with the
 //! count `read` returns, so a `Read` implementation that over-reports must not reach it.
 
-use crate::error::{format_err, unsupported, Error, Result};
+use crate::error::{
+    format_err, unsupported, ArgumentKind, Error, FormatErrorKind, Result, UnsupportedKind,
+};
 use crate::io::{read_exact_arr, seek_to, PcmInfo, PcmRead};
 use std::io::{Chain, Cursor, Read, Seek, SeekFrom, Take};
 
@@ -97,8 +99,12 @@ impl<R: Read + Seek> std::fmt::Debug for FlacReader<R> {
 fn map_err(e: claxon::Error) -> Error {
     match e {
         claxon::Error::IoError(e) => Error::from(e),
-        claxon::Error::FormatError(m) => Error::Format(format!("FLAC: {m}")),
-        claxon::Error::Unsupported(m) => Error::Unsupported(format!("FLAC: {m}")),
+        claxon::Error::FormatError(m) => {
+            Error::format(FormatErrorKind::Malformed, format!("FLAC: {m}"))
+        }
+        claxon::Error::Unsupported(m) => {
+            Error::unsupported(UnsupportedKind::Encoding, format!("FLAC: {m}"))
+        }
     }
 }
 
@@ -174,7 +180,10 @@ fn parse_container<R: Read + Seek>(
     let mut tags = 0;
     loop {
         if pos + 4 > file_len {
-            return format_err("not a FLAC file (no 'fLaC' marker)");
+            return format_err(
+                FormatErrorKind::NotRecognised,
+                "not a FLAC file (no 'fLaC' marker)",
+            );
         }
         let magic: [u8; 4] = read_exact_arr(r)?;
         if &magic == b"fLaC" {
@@ -182,19 +191,25 @@ fn parse_container<R: Read + Seek>(
             break;
         }
         if &magic[..3] != b"ID3" || tags == MAX_ID3_TAGS {
-            return format_err("not a FLAC file (no 'fLaC' marker)");
+            return format_err(
+                FormatErrorKind::NotRecognised,
+                "not a FLAC file (no 'fLaC' marker)",
+            );
         }
         // ID3v2 header: "ID3", version (2), flags, size (4 syncsafe bytes).
         let h: [u8; 6] = read_exact_arr(r)?;
         let sz = &h[2..6];
         if sz.iter().any(|&b| b & 0x80 != 0) {
-            return format_err("ID3v2 tag size is invalid");
+            return format_err(FormatErrorKind::Malformed, "ID3v2 tag size is invalid");
         }
         let size = sz.iter().fold(0u64, |a, &b| (a << 7) | u64::from(b));
         let footer = if h[1] & 0x10 != 0 { 10 } else { 0 };
         pos += 10 + size + footer;
         if pos > file_len {
-            return format_err("ID3v2 tag runs past the end of the file");
+            return format_err(
+                FormatErrorKind::Truncated,
+                "ID3v2 tag runs past the end of the file",
+            );
         }
         seek_to(r, pos)?;
         tags += 1;
@@ -204,10 +219,13 @@ fn parse_container<R: Read + Seek>(
     let mut comments_seen = false;
     for n in 0.. {
         if n == MAX_METADATA_BLOCKS {
-            return format_err("FLAC file has too many metadata blocks");
+            return format_err(
+                FormatErrorKind::LimitExceeded,
+                "FLAC file has too many metadata blocks",
+            );
         }
         if pos + 4 > file_len {
-            return format_err("FLAC metadata is truncated");
+            return format_err(FormatErrorKind::Truncated, "FLAC metadata is truncated");
         }
         let h: [u8; 4] = read_exact_arr(r)?;
         let last = h[0] & 0x80 != 0;
@@ -215,18 +233,39 @@ fn parse_container<R: Read + Seek>(
         let len = u64::from(u32::from_be_bytes([0, h[1], h[2], h[3]]));
         pos += 4;
         if pos + len > file_len {
-            return format_err("FLAC metadata block runs past the end of the file");
+            return format_err(
+                FormatErrorKind::Truncated,
+                "FLAC metadata block runs past the end of the file",
+            );
         }
         match (n, kind) {
             (0, 0) => {
                 if len != 34 {
-                    return format_err("FLAC STREAMINFO block size is not 34");
+                    return format_err(
+                        FormatErrorKind::Malformed,
+                        "FLAC STREAMINFO block size is not 34",
+                    );
                 }
                 streaminfo = Some(read_exact_arr::<34, _>(r)?);
             }
-            (0, _) => return format_err("FLAC file does not start with STREAMINFO"),
-            (_, 0) => return format_err("FLAC file has a second STREAMINFO block"),
-            (_, 127) => return format_err("FLAC metadata block type 127 is invalid"),
+            (0, _) => {
+                return format_err(
+                    FormatErrorKind::Malformed,
+                    "FLAC file does not start with STREAMINFO",
+                )
+            }
+            (_, 0) => {
+                return format_err(
+                    FormatErrorKind::Malformed,
+                    "FLAC file has a second STREAMINFO block",
+                )
+            }
+            (_, 127) => {
+                return format_err(
+                    FormatErrorKind::Malformed,
+                    "FLAC metadata block type 127 is invalid",
+                )
+            }
             // Only the first Vorbis comment block (FLAC allows one).
             (_, 4) if !comments_seen => {
                 comments_seen = true;
@@ -244,7 +283,10 @@ fn parse_container<R: Read + Seek>(
     }
     match streaminfo {
         Some(s) => Ok((pos, s, mask)),
-        None => format_err("FLAC file has no STREAMINFO block"),
+        None => format_err(
+            FormatErrorKind::Malformed,
+            "FLAC file has no STREAMINFO block",
+        ),
     }
 }
 
@@ -307,17 +349,26 @@ fn next_block<R: Read + Seek>(
         return Ok(None);
     };
     if block.channels() != u32::from(channels) {
-        return format_err("FLAC frame channel count differs from STREAMINFO");
+        return format_err(
+            FormatErrorKind::Malformed,
+            "FLAC frame channel count differs from STREAMINFO",
+        );
     }
     let len = block.duration() as usize;
     let buf = block.into_buffer();
     let lo = -(1i32 << (bits - 1));
     let hi = (1i32 << (bits - 1)) - 1;
     if buf.len() != len * usize::from(channels) {
-        return format_err("FLAC frame size is inconsistent");
+        return format_err(
+            FormatErrorKind::Malformed,
+            "FLAC frame size is inconsistent",
+        );
     }
     if buf.iter().any(|&v| v < lo || v > hi) {
-        return format_err("FLAC sample outside the STREAMINFO bit depth");
+        return format_err(
+            FormatErrorKind::Malformed,
+            "FLAC sample outside the STREAMINFO bit depth",
+        );
     }
     Ok(Some((buf, len)))
 }
@@ -333,11 +384,17 @@ impl<R: Read + Seek> FlacReader<R> {
         let mut flac = open_frames(r, &si, frames_at, file_len)?;
         let s = flac.streaminfo();
         if !(1..=6).contains(&s.channels) {
-            return format_err(format!("FLAC channel count {} is not 1..6", s.channels));
+            return format_err(
+                FormatErrorKind::Malformed,
+                format!("FLAC channel count {} is not 1..6", s.channels),
+            );
         }
         let bits = s.bits_per_sample;
         if ![8, 12, 16, 20, 24].contains(&bits) {
-            return unsupported(format!("FLAC with {bits} bits per sample"));
+            return unsupported(
+                UnsupportedKind::Encoding,
+                format!("FLAC with {bits} bits per sample"),
+            );
         }
         let channels = s.channels as u16;
         let frames = match s.samples {
@@ -359,7 +416,10 @@ impl<R: Read + Seek> FlacReader<R> {
                     }
                 };
                 if n == 0 {
-                    return format_err("FLAC stream has no audio frames");
+                    return format_err(
+                        FormatErrorKind::Malformed,
+                        "FLAC stream has no audio frames",
+                    );
                 }
                 flac = open_frames(r, &si, frames_at, end)?;
                 n
@@ -395,6 +455,8 @@ impl<R: Read + Seek> FlacReader<R> {
     }
 }
 
+impl<R: Read + Seek> crate::io::sealed::Sealed for FlacReader<R> {}
+
 impl<R: Read + Seek> PcmRead for FlacReader<R> {
     fn info(&self) -> PcmInfo {
         self.info
@@ -403,8 +465,9 @@ impl<R: Read + Seek> PcmRead for FlacReader<R> {
     fn read_frames(&mut self, max_frames: usize, out: &mut [Vec<f64>]) -> Result<usize> {
         let ch = usize::from(self.info.channels);
         if out.len() != ch {
-            return Err(Error::InvalidArgument(
-                "output channel count mismatch".into(),
+            return Err(Error::invalid(
+                ArgumentKind::Buffer,
+                "output channel count mismatch",
             ));
         }
         let want = (max_frames.clamp(1, MAX_CHUNK) as u64).min(self.remaining) as usize;
@@ -420,11 +483,14 @@ impl<R: Read + Seek> PcmRead for FlacReader<R> {
                         self.pend_pos = 0;
                     }
                     None => {
-                        return format_err(format!(
-                            "FLAC stream ended after {} of {} frames",
-                            self.info.frames - self.remaining + done as u64,
-                            self.info.frames
-                        ))
+                        return format_err(
+                            FormatErrorKind::Truncated,
+                            format!(
+                                "FLAC stream ended after {} of {} frames",
+                                self.info.frames - self.remaining + done as u64,
+                                self.info.frames
+                            ),
+                        )
                     }
                 }
                 continue;

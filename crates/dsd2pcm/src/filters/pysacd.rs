@@ -34,7 +34,7 @@
 use super::pysacd_taps as taps;
 use crate::convert::{report, run_pieces, PcmOptions, ProgressHook, Report};
 use crate::decimator::{self, Cutoff, Isa, PcmRate, IDLE};
-use crate::error::{Error, Result};
+use crate::error::{ArgumentKind, Error, FormatErrorKind, Result, UnsupportedKind};
 use crate::frames::{self, ConvertStats, PcmOut, Run, FRAME_BYTES_PER_CHANNEL};
 use crate::io::DsdRead;
 use crate::wav::WavWriter;
@@ -75,14 +75,16 @@ impl Pysacd {
             PcmRate::Hz88200 => true,
             PcmRate::Hz176400 => false,
             PcmRate::Hz352800 => {
-                return Err(Error::InvalidArgument(
-                    "the pysacd filter has 88.2 and 176.4 kHz only".into(),
+                return Err(Error::invalid(
+                    ArgumentKind::Filter,
+                    "the pysacd filter has 88.2 and 176.4 kHz only",
                 ))
             }
         };
         if cutoff != Cutoff::Standard {
-            return Err(Error::InvalidArgument(
-                "the pysacd filter has a fixed response: leave the cutoff at the default".into(),
+            return Err(Error::invalid(
+                ArgumentKind::Filter,
+                "the pysacd filter has a fixed response: leave the cutoff at the default",
             ));
         }
         let h1 = taps::H1.map(f64::from_bits);
@@ -423,14 +425,13 @@ pub(crate) fn dsd64_to_pcm<W: Write + Seek>(
     let info = r.info();
     let ch = usize::from(info.channels);
     if !(1..=6).contains(&ch) {
-        return Err(Error::Unsupported(format!("{ch} channels")));
+        return Err(Error::unsupported(
+            UnsupportedKind::Channels,
+            format!("{ch} channels"),
+        ));
     }
     let n_out = decimator::output_len(info.samples, opts.rate);
-    let workers = if opts.threads {
-        std::thread::available_parallelism().map_or(1, |n| n.get())
-    } else {
-        1
-    };
+    let workers = opts.threads.workers();
     let mut scratch: Vec<Scratch> = (0..workers).map(|_| Scratch::default()).collect();
     let mut clipped = vec![0u64; ch];
     let mut bufs = vec![Vec::new(); ch];
@@ -449,10 +450,13 @@ pub(crate) fn dsd64_to_pcm<W: Write + Seek>(
         };
         let end = byte_start + bufs[0].len() as i64;
         if got == 0 && !eof && (end as u64).saturating_mul(8) < info.samples {
-            return Err(Error::Format(format!(
-                "input ended after {end} of {} bytes per channel",
-                info.samples.div_ceil(8)
-            )));
+            return Err(Error::format(
+                FormatErrorKind::Truncated,
+                format!(
+                    "input ended after {end} of {} bytes per channel",
+                    info.samples.div_ceil(8)
+                ),
+            ));
         }
         eof |= got == 0;
         let ready = if eof {
@@ -464,8 +468,12 @@ pub(crate) fn dsd64_to_pcm<W: Write + Seek>(
         if stop <= done {
             continue;
         }
-        let keep = usize::try_from(stop - done)
-            .map_err(|_| Error::Format("input too long for this platform".into()))?;
+        let keep = usize::try_from(stop - done).map_err(|_| {
+            Error::format(
+                FormatErrorKind::LimitExceeded,
+                "input too long for this platform",
+            )
+        })?;
         bytes.resize(keep * ch * 3, 0);
         let mut items = Vec::new();
         let mut rest = &mut bytes[..];
