@@ -338,8 +338,8 @@ the DSD64 versions of the 24/88.2 test signals.
 | dsd2pcm 352.8 kHz, 30 kHz | -117.8 | 107.0 | 0.00023 | -106.0 | 0.00059 | 0.00073 | -161.0 | -0.003, +0.002 |
 | dsd2pcm 352.8 kHz, 40 kHz | -117.8 | 107.0 | 0.00023 | -106.0 | 0.00059 | 0.00073 | -161.3 | -0.002, +0.003 |
 | dsd2pcm 352.8 kHz, wide | -115.2 | 106.9 | 0.00023 | -105.6 | 0.00059 | 0.00072 | -159.7 | -0.003, +0.001 |
-| pysacd preset 88.2 kHz | -116.8 | 107.1 | 0.00022 | -106.1 | 0.00056 | 0.00089 | -158.8 | -0.001, +0.002 |
-| pysacd preset 176.4 kHz | -116.8 | 107.0 | 0.00022 | -106.1 | 0.00057 | 0.00083 | -159.1 | -0.001, +0.002 |
+| pysacd preset 88.2 kHz | -116.8 | 107.1 | 0.00022 | -106.1 | 0.00056 | 0.00089 | -159.0 | -0.001, +0.002 |
+| pysacd preset 176.4 kHz | -116.8 | 107.0 | 0.00022 | -106.1 | 0.00058 | 0.00083 | -159.1 | -0.001, +0.002 |
 
 - **Every dsd2pcm row is within 0.4 dB of the source row**, except the wide filter's noise
   (explained under [bandwidth](#bandwidth-and-ultrasonic-noise)). The numbers describe the
@@ -399,7 +399,7 @@ bitstream, is -146.9 dB, a residual of -152.9 dBFS.
 | The source itself (bitstream) | 146.9 dB | -152.9 | -163.5 |
 | dsd2pcm, 30 or 40 kHz filter, any rate | 122.0 to 122.1 dB | -128.1 to -128.2 | -146 to -154 |
 | dsd2pcm, wide filter (176.4 or 352.8 kHz) | 116.1 dB | -122.1 | -139 to -143 |
-| pysacd preset, 88.2 / 176.4 kHz | 127.3 / 127.8 dB | -133.3 / -133.9 | -151 to -152 |
+| pysacd preset, 88.2 / 176.4 kHz | 127.9 / 128.1 dB | -134.0 / -134.1 | -152 to -154 |
 | The same taps in 64-bit floating point, no rounding, no word length (176.4 kHz: 30, 40, wide, pysacd) | 122.1, 122.1, 116.1, 128.3 dB | -128.2, -128.2, -122.1, -134.3 | -142 to -152 |
 
 (scarletbook-pcm 0.7.0 gives the same samples as dsd2pcm here too.)
@@ -832,6 +832,10 @@ venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/t
 venv/bin/python tools/quality/plot.py --filters out/filters.json --results out/results.json --curves out/curves.json --out docs/assets/quality
 venv/bin/python tools/quality/report.py --filters out/filters.json --results out/results.json
 ```
+
+The pysacd preset's rows were measured again for 0.2.0 (its `f64` arithmetic) with the
+same scripts and signals, the pysacd decoder only (`decode.py ... --decoders pysacd`), at
+commit 4504b6e; the 0.1.x build gave the old rows again.
 
 The [precise filter](#the-precise-filter)'s figures were made with the same tools, ffmpeg 9.0.2 (Fedora 45) and only the signals they
 use:
