@@ -46,6 +46,7 @@ Other platforms and options: [docs/usage.md](docs/usage.md).
 - [Usage](docs/usage.md): formats, rates, filters, options, the library interface
 - [C interface](docs/c-api.md): the C library, its ABI and binary releases
 - [Performance](docs/performance.md): speed against scarletbook-pcm 0.7.0, including the gaps
+- [Release quality comparison](docs/quality/README.md): each release measured against the previous one
 - [Design](docs/design.md): how the conversion works and why its output is exact
 - [Changelog](CHANGELOG.md) · [Plan](docs/plan.md)
 - [Development](docs/development.md) · [Fuzzing](docs/fuzzing.md) · [Testing for long-lived processes](docs/testing.md) · [Releases](docs/release.md)

@@ -1,0 +1,29 @@
+[dsd2pcm-rs](../../README.md) › [Documentation](../../README.md#documentation) › Release quality comparison
+
+# Release quality comparison
+
+Every release from 0.1.3 on publishes `docs/quality/<version>.md`, which measures it against
+the previous release.
+
+Both versions are built from source (the release candidate and the previous release's tag) and measured on one machine with
+[dsd-measure](https://github.com/dsd-toolbox/dsd-measure) 0.1.1 (commit d234b7a, pinned in
+[suites/dsd2pcm.toml](../../suites/dsd2pcm.toml)): the same synthetic DSD64 signals go
+through every filter at every rate it supports (default at 88.2, 176.4 and 352.8 kHz with
+cutoff 40, plus cutoff wide at 176.4 and 352.8 kHz; pysacd at 88.2 and 176.4 kHz), and the
+table gives SINAD and THD+N of a 1 kHz tone at 0 dB SACD, the noise floor from 20 Hz to
+20 kHz, alias rejection (88.2 and 176.4 kHz only) and a null test of the new output against
+the old one on the suite's multitone signal. The suite is deterministic: three runs on the same
+two builds gave the same figures to the last digit, two of them byte-identical result files
+(2026-11-24), so a change of 0.01 dB or more, or a
+null that is no longer identical, is a real change and is flagged, and a regression blocks the
+release unless it is explained and accepted. The exact commands are in the
+[release test plan item](release-test-plan-item.md), the page layout in the
+[template](template.md).
+
+## See also
+
+- [Template](template.md)
+- [Release test plan item](release-test-plan-item.md)
+- [Usage](../usage.md): the filters, rates and cutoffs
+
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).
