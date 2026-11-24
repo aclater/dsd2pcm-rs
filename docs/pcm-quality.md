@@ -748,10 +748,32 @@ FIR with each of the four filter files it ships (30, 40, 50 and 60 kHz, 641 taps
 default mode also at 176.4 kHz. The 32-bit and 64-bit float variants measured the same
 except where noted, so the tables show one of each.
 
-Measured with: the plug-in's output files analysed by tools/quality as committed in `cd25bca`
-beside dsd2pcm `fast` (samples equal to scarletbook-pcm 0.7.0's at every commit); dsd-measure
-not used. The analysis ran on the host under [reproducing](#reproducing-the-measurements);
-the CPU of the Windows virtual machine's host was not recorded.
+**The re-run of 2026-11-24.** Three settings were converted again with the same plug-in,
+foobar2000 and settings: Multistage (32fp) at 352.8 and 176.4 kHz and Direct (32fp, 30kHz
+lowpass) at 352.8 kHz. The inputs were the same test files, regenerated with the same
+tools, and the SHA-256 of every input and output is published in
+[docs/quality/data](quality/data/README.md). The rows of those three settings below are the
+re-run's. Every figure in them equals the first run's at the precision shown, except one.
+The DSD-silence transient of Multistage (32fp) at 352.8 kHz reads -26.7 dBFS in the re-run
+and -37.3 dBFS in the first run; the re-run's file carries it at its start and its end.
+
+Against the first run only part can be checked. The first run kept the first 64 bits of one
+file's SHA-256 per setting (`sine1k_0-p88-dsd64-ref.wav`) and each folder's byte total. Its
+other outputs and its inputs' SHA-256 were not kept. The byte totals match for all three
+settings. The file matches for Multistage (32fp) at 176.4 kHz and for Direct, but not for
+Multistage (32fp) at 352.8 kHz. Two conversions of that setting in the re-run gave
+byte-identical outputs for all 72 files, so the plug-in reproduces itself. Why the first
+run's file differs is not known, and whether the first run's other outputs match the
+re-run's cannot be shown. The other ten settings' rows, and the two charts below, are from
+the first run (2026-11-23), whose outputs were not retained.
+
+Measured with: the re-run's outputs (three settings) analysed by tools/quality at dsd2pcm
+commit `e6ba8ba`, beside dsd2pcm `fast` built from that commit (samples equal to
+scarletbook-pcm 0.7.0's); the first run's rows by tools/quality at `cd25bca`, whose analysis
+of these signals is the same. foo_input_sacd 2.0.27 (download SHA-256 `196f0c89…`, installed
+`foo_input_sacd.dll` `ba9567c8…`) in foobar2000 2.26.3 x64. Python 3.15.2 with numpy 2.5.5
+and scipy 1.18.1. The analysis ran on an AMD Ryzen AI MAX+ 395; the CPU of the Windows
+virtual machine's host was not recorded. dsd-measure was not used.
 
 **Levels match.** At volume 0 dB the plug-in maps 100 % modulation to full scale, as
 dsd2pcm does: 0 dB SACD reads -6.02 dBFS in both, so no level correction was applied. Its
@@ -776,7 +798,7 @@ DAC).
 |---|---:|---:|---:|---:|---|---:|
 | dsd2pcm 352.8 kHz, 40 kHz | -6.02 | -121.9 | -70.2 | -2.09 | exact zero | 0.261 |
 | dsd2pcm 352.8 kHz, wide | -6.02 | -118.8 | -50.2 | -1.68 | exact zero | 0.130 |
-| Multistage (32fp), 352.8 kHz (default mode) | -6.02 | -122.5 | -35.1 | -0.87 | not zero: up to -37.3 dBFS | 0.011 |
+| Multistage (32fp), 352.8 kHz (default mode) | -6.02 | -122.5 | -35.1 | -0.87 | not zero: up to -26.7 dBFS | 0.011 |
 | Multistage (32fp), 176.4 kHz | -6.02 | -122.5 | -49.9 | -2.10 | not zero: up to -24.5 dBFS | 0.074 |
 | Multistage (64fp), 352.8 kHz | -6.02 | -122.5 | -35.1 | -0.87 | not zero: up to -26.7 dBFS | 0.011 |
 | Direct (32fp, 30kHz lowpass) | -6.02 | -118.8 | -91.9 | -2.92 | not zero: up to -22.0 dBFS | 0.088 |
@@ -815,11 +837,15 @@ What the numbers say:
   Direct mode leaves a floor of about -117 dBFS on it. dsd2pcm treats the input as continuing with DSD
   silence before its first byte, so its first samples are exact zero.
 - **The alignment varies from file to file.** Against the DSD timeline (dsd2pcm's output is
-  centred on it by design), the plug-in's output is 0 to 1 samples late on some files and
-  40 to 41 samples later (about 116 µs at 352.8 kHz, 227 µs at 176.4 kHz) on others, in
-  every mode, with the file length unchanged; we did not find what decides it. Both
-  channels move together (no offset between them), but files converted from the same DSD
-  do not line up sample for sample.
+  centred on it by design), the plug-in's output is 0 to 1 samples late on some files. On
+  the same 8 of the 19 files checked it is later: by 40 to 41 samples (about 116 µs at
+  352.8 kHz, 227 µs at 176.4 kHz) with Direct, Installable FIR and Multistage at 176.4 kHz,
+  and by 5 samples (14 µs) with Multistage at 352.8 kHz, in both the re-run (32fp) and the
+  first run (64fp). The file length is unchanged; we did not find what decides it. The
+  first run's Multistage (32fp) folder at 352.8 kHz showed no such shift on any file (its
+  analysis of 2026-11-23; the files were not kept), which fits its one compared file
+  differing from the re-run's. Both channels move together (no offset between them), but
+  files converted from the same DSD do not line up sample for sample.
 - **Higher DSD rates:** the plug-in's DSD128 and DSD256 outputs carry 18.8 and 19.5 dB
   less in-band noise than DSD64 (below), within 3 dB of their sources; dsd2pcm does not
   convert those rates yet.
@@ -947,7 +973,9 @@ three commercial DSD64 tracks, which are not distributed.
 
 The foobar2000 rows come from WAVs made on Windows as described under
 [comparisons](#comparisons) and copied to `out/dec/foobar/<mode>-<rate>/` before
-`analyse.py`; without them those rows and two charts are left out.
+`analyse.py`; without them those rows and two charts are left out. The SHA-256 of the
+re-run's inputs and outputs are in [docs/quality/data](quality/data/README.md); check a
+new conversion against them with `sha256sum -c` before analysing it.
 
 The inputs are generated, not downloaded; with the same versions the DSD files, the
 decoded WAVs and the numbers are identical on every run. Without SoX-DSD the multitone and

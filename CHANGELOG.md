@@ -9,6 +9,13 @@ with its measured effect. Releases up to 0.1.2 keep their behaviour as released.
 
 ## Unreleased
 
+- Docs: [PCM quality](docs/pcm-quality.md#comparisons): three foobar2000 SACD plug-in
+  settings measured again from a re-run whose input and output SHA-256 are published in
+  [docs/quality/data](docs/quality/data/README.md). The figures are unchanged at the
+  precision shown, except the DSD-silence transient of Multistage (32fp) at 352.8 kHz
+  (-26.7 dBFS, was -37.3). One file of that setting differs from the first run's, for a
+  reason not known.
+
 ## 0.2.0 - 2026-11-24
 
 Quality: [docs/quality/0.2.0.md](docs/quality/0.2.0.md), every filter measured against 0.1.2
