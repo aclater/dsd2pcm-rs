@@ -628,6 +628,10 @@ fn dff_partial_last_turn_is_not_read() {
 /// A DSF tag larger than `MAX_METADATA` is not loaded: the audio reads, `metadata` is
 /// `None` and `skipped_metadata_len` gives its size. One of exactly that size is loaded.
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "16 MiB tags: over 8 GB of Miri state; runs natively at every SIMD level"
+)]
 fn dsf_oversized_tag_is_skipped_not_fatal() {
     let data = pattern(2, 4096);
     let max = dsd2pcm::dsf::MAX_METADATA as usize;

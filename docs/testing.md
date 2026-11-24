@@ -168,9 +168,9 @@ one core of a Ryzen AI Max+ 395:
 
 | Part | Run | Left out |
 |---|---|---|
-| C interface (`dsd2pcm-capi`), 11 minutes | 14 tests | 9: 7 use files, 2 convert 40 or 70 frames |
-| Library unit tests | 7 tests | 9: 2 use files; the kernel proofs, every plan against the integer reference and pysacd's long renders |
-| `containers` (DSF, DFF, WAV readers and writers) | 15 tests | 2: thousands of corrupted files (fuzzed instead); a whole 1 MiB block converted with two filters |
+| C interface (`dsd2pcm-capi`), 11 minutes | 15 tests | 9: 7 use files, 2 convert 40 or 70 frames |
+| Library unit tests | 10 tests | 9: 2 use files; the kernel proofs, every plan against the integer reference and pysacd's long renders |
+| `containers` (DSF, DFF, WAV readers and writers) | 19 tests | 3: thousands of corrupted files (fuzzed instead); a whole 1 MiB block converted with two filters; two DSF files with 16 MiB tags (over 8 GB of Miri state) |
 | `flac` | 10 tests, the FLAC files embedded | 2: temporary files; thousands of corrupted files |
 | `frames` | 1 test (argument errors) | 6: tens of frames at every setting |
 | `identity`, `pysacd`, `progress`, `frames_alloc`, `soak` | not run | seconds of audio in every test |
