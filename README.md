@@ -27,6 +27,9 @@ Intel Core i9-13900H (P- and E-cores) and an AMD Ryzen 9 3950X.
 
 ## Quick start
 
+dsd2pcm reads DSF and DSDIFF (DFF) files: the files that DSD download stores sell, or that a
+tool such as [sacdfs](https://github.com/dsd-toolbox/sacdfs) shows for a Super Audio CD image.
+
 On Linux x86_64, with a DSF file named `01 - Track.dsf` in the current directory:
 
 <!-- docs-run: image=fedora-net setup="printf 'DSD \x1c\x00\x00\x00\x00\x00\x00\x00\x5c\x20\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00fmt \x34\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x02\x00\x00\x00\x00\x11\x2b\x00\x01\x00\x00\x00\x00\x80\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00data\x0c\x20\x00\x00\x00\x00\x00\x00' > '01 - Track.dsf' && head -c 8192 /dev/zero | tr '\000' i >> '01 - Track.dsf'" expect="Hz -> 176400 Hz, .*clipped samples: 0" -->
@@ -39,6 +42,21 @@ tar xzf dsd2pcm-0.2.0-x86_64-linux.tar.gz
 This writes a 176.4 kHz, 24-bit WAV and prints the duration, the speed and the number of
 clipped samples. With Rust installed, `cargo install dsd2pcm-cli` installs the same tool.
 Options: [docs/options.md](docs/options.md); more in the [user guide](docs/user-guide.md).
+
+### macOS
+
+On macOS 11 or later, in Terminal, with the same DSF file in the current folder (Apple
+silicon; for an Intel Mac use `x86_64-macos` in both names):
+
+<!-- docs-run: skip="macOS" -->
+```sh
+curl -LO https://github.com/dsd-toolbox/dsd2pcm-rs/releases/download/v0.2.0/dsd2pcm-0.2.0-aarch64-macos.tar.gz
+tar xzf dsd2pcm-0.2.0-aarch64-macos.tar.gz
+./dsd2pcm-0.2.0-aarch64-macos/dsd2pcm "01 - Track.dsf" "01 - Track.wav"
+```
+
+The tool is signed with a Developer ID and notarised by Apple, so it runs without a
+Gatekeeper prompt.
 
 ### Windows
 
