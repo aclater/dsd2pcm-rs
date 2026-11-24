@@ -335,6 +335,22 @@ on. Runs given as one buffer per frame are converted in groups of 32 frames, eac
 real neighbours and its position (`at_frame(first_frame + g)`, for pysacd's dither), so the frame references live on the stack and nothing is allocated; by the
 run property the bytes equal one call.
 
+### Intel CET
+
+On x86_64 Linux the release marks every object of the static library `libdsd2pcm.a` for
+the CET shadow stack (`.github/scripts/clib-shstk.py`), but not the shared library
+`libdsd2pcm.so.1`. The release links the shared library with zig (cargo-zigbuild, for glibc
+2.17), and zig satisfies `-lgcc_s` with its own LLVM libunwind, linked in statically and
+built without shadow-stack support: it restores registers on unwinding without unwinding
+the shadow stack. Every entry point of the C interface runs inside `catch_unwind`, so a
+panic unwinds through that code to the boundary; in a process running with shadow stacks a
+marked shared library would turn that caught panic into a control-protection fault. A
+program that links the static library uses its own libgcc unwinder, which handles the
+shadow stack on distributions built for CET, so the static library can carry the mark.
+`check-capi-archive.sh` fails if the shared library is ever marked while it holds
+libunwind. The way to a marked shared library is to link it against the system's
+`libgcc_s` instead of zig's libunwind (not done yet).
+
 ## Speed
 
 - S1 reads each window as 64-bit words cut into 13-bit chunks, one table per chunk (5

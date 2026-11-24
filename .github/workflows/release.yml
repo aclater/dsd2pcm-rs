@@ -1,18 +1,21 @@
 # The release. On a version tag (v0.1.0, ...), annotated, on a commit on main, equal to the
 # workspace version (.github/scripts/release-preflight.sh):
 #   1. build and test the command-line tool `dsd2pcm` and the C library (dsd2pcm-capi) for
-#      Linux x86_64, aarch64 and i686 (glibc 2.17 or later), macOS arm64 and Windows x86_64;
-#      every packed binary converts the same test file, and all five outputs must be
-#      byte-identical; every packed C library builds and runs a C program. On a tag the
-#      macOS tool and libdsd2pcm.1.dylib are signed with a Developer ID and notarised by
-#      Apple (job macos-sign, environment `release`; a tag without the signing secrets fails);
+#      Linux x86_64, aarch64 and i686 (glibc 2.17 or later), Linux x86_64 and aarch64 with
+#      musl, macOS arm64 and x86_64, Windows x86_64 (MSVC) and Windows x86_64 with MinGW-w64
+#      (C library only); every platform's binary converts the same test file, and all nine
+#      outputs must be byte-identical; every packed C library builds and runs a C program.
+#      On a tag the macOS tools and libdsd2pcm.1.dylib (both architectures) are signed with
+#      a Developer ID and notarised by Apple (job macos-sign, environment `release`; a tag
+#      without the signing secrets fails);
 #   2. publish the crates to crates.io with trusted publishing (OIDC, no stored token), in
 #      dependency order: dsd2pcm, then dsd2pcm-capi if it is publishable (not for 0.1.0),
 #      then dsd2pcm-cli (.github/scripts/publish-crates.sh). This job runs in the GitHub
 #      environment `release`, whose required reviewers approve it;
-#   3. create the GitHub release with ten archives (dsd2pcm-<v>-<platform> and
-#      libdsd2pcm-<v>-<platform>), a .sha256 file for each, SHA256SUMS and a build
-#      provenance attestation (Sigstore) for each archive.
+#   3. create the GitHub release with eighteen archives (dsd2pcm-<v>-<platform> for eight
+#      platforms, libdsd2pcm-<v>-<platform> for nine, and the source, dsd2pcm-<v>-src made
+#      with git archive), a .sha256 file for each,
+#      SHA256SUMS and a build provenance attestation (Sigstore) for each archive.
 # Any other run (a pull request that changes the release files, or a manual run) is a dry run:
 # the same builds and checks, and `cargo publish --dry-run`, with nothing published.
 # The steps that need a person are in docs/release.md.
@@ -82,6 +85,13 @@ jobs:
   # zig archive by its SHA-256. Each is tested on the runner (natively; i686 runs on the
   # x86_64 runner with the 32-bit C libraries installed), checked for its newest glibc symbol,
   # packed, and the packed binary converts the test file.
+  # The musl builds (zig's musl) give a static command-line tool, which runs on the runner,
+  # and a C library whose shared library links musl dynamically (Rust's musl target links
+  # statically by default and then builds no shared library: -crt-static for the C library
+  # only); the C library is checked in an Alpine container.
+  # On x86_64 every object of the static library is marked for the CET shadow stack
+  # (clib-shstk.py); not the shared library, whose unwinder (zig's libunwind) does not unwind
+  # the shadow stack, and never IBT (docs/c-api.md, "Intel CET").
   linux:
     name: binary (${{ matrix.name }})
     needs: preflight
@@ -94,24 +104,43 @@ jobs:
           # target-cpu is always set on x86, never left to a toolchain's default; the AVX2
           # kernels are chosen at run time.
           - {name: x86_64-linux, arch: x86_64, target: x86_64-unknown-linux-gnu, runner: ubuntu-24.04,
-             rustflags: "-C target-cpu=x86-64",
+             libc: gnu, zig_target: x86_64-unknown-linux-gnu.2.17, shstk: true,
+             rustflags: "-C target-cpu=x86-64", capi_rustflags: "",
              zig_sha256: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00}
           - {name: aarch64-linux, arch: aarch64, target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm,
-             rustflags: "",
+             libc: gnu, zig_target: aarch64-unknown-linux-gnu.2.17, shstk: false,
+             rustflags: "", capi_rustflags: "",
              zig_sha256: ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17}
           - {name: i686-linux, arch: x86_64, target: i686-unknown-linux-gnu, runner: ubuntu-24.04,
-             rustflags: "-C target-cpu=pentium4",
+             libc: gnu, zig_target: i686-unknown-linux-gnu.2.17, shstk: false,
+             rustflags: "-C target-cpu=pentium4", capi_rustflags: "",
              zig_sha256: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00}
+          - {name: x86_64-linux-musl, arch: x86_64, target: x86_64-unknown-linux-musl, runner: ubuntu-24.04,
+             libc: musl, zig_target: x86_64-unknown-linux-musl, shstk: true,
+             rustflags: "-C target-cpu=x86-64", capi_rustflags: "-C target-feature=-crt-static",
+             zig_sha256: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00}
+          - {name: aarch64-linux-musl, arch: aarch64, target: aarch64-unknown-linux-musl, runner: ubuntu-24.04-arm,
+             libc: musl, zig_target: aarch64-unknown-linux-musl, shstk: false,
+             rustflags: "", capi_rustflags: "-C target-feature=-crt-static",
+             zig_sha256: ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17}
     env:
       VERSION: ${{ needs.preflight.outputs.version }}
       NAME: ${{ matrix.name }}
       ARCH: ${{ matrix.arch }}
       TARGET: ${{ matrix.target }}
+      ZIG_TARGET: ${{ matrix.zig_target }}
+      LIBC: ${{ matrix.libc }}
       GLIBC_MAX: "2.17"
       ZIG_VERSION: 0.16.0
       ZIG_SHA256: ${{ matrix.zig_sha256 }}
       CARGO_ZIGBUILD_VERSION: 0.24.0
       MATRIX_RUSTFLAGS: ${{ matrix.rustflags }}
+      CAPI_RUSTFLAGS: ${{ matrix.capi_rustflags }}
+      # The musl C library's check, in the oldest Alpine the docs name (3.17, musl 1.2.3) and
+      # a current one (3.24, musl 1.2.5); image indexes pinned by digest.
+      ALPINE_IMAGES: >-
+        docker.io/library/alpine:3.17.10@sha256:8fc3dacfb6d69da8d44e42390de777e48577085db99aa4e4af35f483eb08b989
+        docker.io/library/alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
       CARGO_PROFILE_RELEASE_STRIP: symbols
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -135,35 +164,52 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends gcc-multilib
-      - name: Build and test, linked against glibc 2.17
+      - name: Build and test, linked against glibc 2.17 (or musl)
         run: |
           zig version
-          cargo zigbuild --release --locked -p dsd2pcm-cli --target "$TARGET.$GLIBC_MAX"
-          cargo-zigbuild test --release --locked --workspace --target "$TARGET.$GLIBC_MAX"
+          cargo zigbuild --release --locked -p dsd2pcm-cli --target "$ZIG_TARGET"
+          cargo-zigbuild test --release --locked --workspace --target "$ZIG_TARGET"
       # The C library (shared, SONAME libdsd2pcm.so.1 from its build.rs, and static), and the
       # system libraries the static one needs, for the pkg-config file.
-      - name: The C library, linked against glibc 2.17
+      - name: The C library, linked against glibc 2.17 (or musl)
         env:
           CARGO_TERM_COLOR: never  # rustc's notes plain: the library list goes into dsd2pcm.pc
         run: |
-          cargo-zigbuild rustc --release --locked -p dsd2pcm-capi --lib --target "$TARGET.$GLIBC_MAX" \
-            -- --print native-static-libs 2>&1 | tee "$RUNNER_TEMP/capi.log"
+          RUSTFLAGS="$RUSTFLAGS $CAPI_RUSTFLAGS" cargo-zigbuild rustc --release --locked -p dsd2pcm-capi --lib \
+            --target "$ZIG_TARGET" -- --print native-static-libs 2>&1 | tee "$RUNNER_TEMP/capi.log"
           sed -e 's/\x1b\[[0-9;]*m//g' -n -e 's/.*native-static-libs: //p' "$RUNNER_TEMP/capi.log" | tail -n 1 > "$RUNNER_TEMP/static-libs"
           cat "$RUNNER_TEMP/static-libs"
-      - name: glibc 2.17 or later, stripped
+          ls -l "target/$TARGET/release/libdsd2pcm.so" "target/$TARGET/release/libdsd2pcm.a"
+      # Intel CET (x86_64): the static library's objects marked SHSTK; with glibc the shared
+      # library is then linked again from them, so that it carries the mark too.
+      - name: The C library marked for the CET shadow stack
+        if: matrix.shstk
+        run: |
+          python3 -I .github/scripts/clib-shstk.py "target/$TARGET/release/libdsd2pcm.a"
+      - name: glibc 2.17 or later (or musl), stripped
         run: |
           for bin in "target/$TARGET/release/dsd2pcm" "target/$TARGET/release/libdsd2pcm.so"; do
             file "$bin"
-            readelf -d "$bin" | grep -E 'NEEDED|SONAME'
-            max=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -n 1)
-            echo "newest glibc symbol version: $max"
-            if [[ "$(printf '%s\n' "$max" "$GLIBC_MAX" | sort -V | tail -n 1)" != "$GLIBC_MAX" ]]; then
-              echo "::error::$bin needs glibc $max, newer than $GLIBC_MAX"; exit 1
+            readelf -d "$bin" | grep -E 'NEEDED|SONAME' || true
+            if [[ "$LIBC" == musl ]]; then
+              # The tool is static; the shared library needs musl's libc only.
+              if [[ "$bin" == */dsd2pcm ]]; then
+                readelf -d "$bin" | grep NEEDED > /dev/null && { echo "::error::$bin is not static"; exit 1; }
+              else
+                needed=$(readelf -d "$bin" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | tr '\n' ' ')
+                [[ "$needed" == "libc.so " ]] || { echo "::error::$bin needs $needed"; exit 1; }
+              fi
+            else
+              max=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -n 1)
+              echo "newest glibc symbol version: $max"
+              if [[ "$(printf '%s\n' "$max" "$GLIBC_MAX" | sort -V | tail -n 1)" != "$GLIBC_MAX" ]]; then
+                echo "::error::$bin needs glibc $max, newer than $GLIBC_MAX"; exit 1
+              fi
             fi
             # grep without -q: under pipefail, grep -q exits at the first match, the writer
             # can die of SIGPIPE and the pipeline then fails although it matched (here: a
             # binary with a symbol table would pass as stripped). grep reads all its input.
-            if readelf -S "$bin" | grep '\.symtab' >/dev/null; then
+            if readelf -S "$bin" | grep '\.symtab' > /dev/null; then
               echo "::error::$bin is not stripped"; exit 1
             fi
           done
@@ -174,7 +220,7 @@ jobs:
           install -m 0755 "target/$TARGET/release/dsd2pcm" "dist/$pkg/dsd2pcm"
           install -m 0644 README.md LICENSE-MIT LICENSE-APACHE "dist/$pkg/"
           # The C library's archive (.github/scripts/stage-capi.sh).
-          cpkg=$(.github/scripts/stage-capi.sh "$VERSION" "$NAME" "target/$TARGET/release" dist "$(cat "$RUNNER_TEMP/static-libs")")
+          cpkg=$(.github/scripts/stage-capi.sh "$VERSION" "$NAME" "$TARGET" "target/$TARGET/release" dist "$(cat "$RUNNER_TEMP/static-libs")")
           # Reproducible: fixed order, owner and times (the commit's), no gzip timestamp.
           mtime=$(git log -1 --format=%ct)
           for p in "$pkg" "$cpkg"; do
@@ -198,7 +244,28 @@ jobs:
         run: |
           tar -C "$RUNNER_TEMP/check" -xzf "dist/$CPKG.tar.gz"
           ls -lR "$RUNNER_TEMP/check/$CPKG"
-          .github/scripts/check-capi-archive.sh "$RUNNER_TEMP/check/$CPKG"
+          if [[ "$LIBC" == musl ]]; then
+            # In Alpine (musl), with its gcc; the archives, the test file and the script mounted
+            # read-only. The static tool converts the test file there too, to the same bytes.
+            wav=$(cd "$RUNNER_TEMP" && sha256sum test.wav | cut -d ' ' -f 1)
+            for image in $ALPINE_IMAGES; do
+              docker run --rm -e CC=gcc -e WAV="$wav" \
+                -v "$RUNNER_TEMP/check/$CPKG:/archive:ro" -v "$RUNNER_TEMP/check/$PKG:/tool:ro" \
+                -v "$RUNNER_TEMP/test.dsf:/test.dsf:ro" -v "$GITHUB_WORKSPACE/.github/scripts:/scripts:ro" \
+                "$image" sh -euc 'apk add --no-cache -q bash binutils gcc musl-dev pkgconf
+                  echo "Alpine $(cat /etc/alpine-release)"; { /lib/ld-musl-*.so.1 || true; } 2>&1 | head -n 2
+                  /tool/dsd2pcm /test.dsf /tmp/test.wav
+                  [ "$(sha256sum /tmp/test.wav | cut -d " " -f 1)" = "$WAV" ] || { echo "the tool gave other output"; exit 1; }
+                  bash /scripts/check-capi-archive.sh /archive
+                  # A fully static program (docs/c-api.md): -static, -lgcc_eh in place of -lgcc_s.
+                  gcc -std=c99 -static -I /archive/include -o /tmp/minimal-full-static /archive/examples/minimal.c \
+                    /archive/lib/libdsd2pcm.a -lgcc_eh -lc
+                  readelf -d /tmp/minimal-full-static | grep NEEDED > /dev/null && { echo "not static"; exit 1; }
+                  /tmp/minimal-full-static'
+            done
+          else
+            .github/scripts/check-capi-archive.sh "$RUNNER_TEMP/check/$CPKG"
+          fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: bin-${{ matrix.name }}
@@ -209,16 +276,28 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # macOS arm64, in three jobs so that the signing credentials reach one job and one step only:
-  # "macos" builds and tests (no secrets), "macos-sign" signs, notarises and packs (environment
-  # `release` on a tag), "macos-check" unpacks the archives on a clean runner and checks them.
+  # macOS arm64 and x86_64, in three jobs so that the signing credentials reach one job and one
+  # step only: "macos" builds and tests (no secrets) on each architecture's own runner (x86_64
+  # on the Intel image macos-15-intel), "macos-sign" signs, notarises and packs both
+  # (environment `release` on a tag: one approval, one notarisation), "macos-check" unpacks
+  # the archives on a clean runner of each architecture and checks them.
   macos:
-    name: binary (aarch64-macos)
+    name: binary (${{ matrix.name }})
     needs: preflight
-    runs-on: macos-15
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: aarch64-macos, arch: arm64, runner: macos-15, rustflags: ""}
+          # target-cpu is always set on x86 (the AVX2 kernels are chosen at run time).
+          - {name: x86_64-macos, arch: x86_64, runner: macos-15-intel, rustflags: "-C target-cpu=x86-64"}
     env:
       VERSION: ${{ needs.preflight.outputs.version }}
+      NAME: ${{ matrix.name }}
+      ARCH: ${{ matrix.arch }}
+      MATRIX_RUSTFLAGS: ${{ matrix.rustflags }}
       # The oldest macOS the binary starts on.
       MACOSX_DEPLOYMENT_TARGET: "11.0"
       CARGO_PROFILE_RELEASE_STRIP: symbols
@@ -231,8 +310,8 @@ jobs:
           rustup toolchain install "$RUST_STABLE" --profile minimal
           rustup default "$RUST_STABLE"
           sw_vers
-          uname -m
-          echo "RUSTFLAGS=--remap-path-prefix=$HOME/.cargo=/cargo --remap-path-prefix=$GITHUB_WORKSPACE=/dsd2pcm" >> "$GITHUB_ENV"
+          [[ "$(uname -m)" == "$ARCH" ]] || { echo "::error::runner is $(uname -m), expected $ARCH"; exit 1; }
+          echo "RUSTFLAGS=$MATRIX_RUSTFLAGS --remap-path-prefix=$HOME/.cargo=/cargo --remap-path-prefix=$GITHUB_WORKSPACE=/dsd2pcm" >> "$GITHUB_ENV"
       - name: Build and test
         run: |
           cargo build --release --locked -p dsd2pcm-cli
@@ -256,17 +335,20 @@ jobs:
         run: |
           mkdir -p unsigned
           cp target/release/dsd2pcm target/release/libdsd2pcm.dylib target/release/libdsd2pcm.a "$RUNNER_TEMP/static-libs" unsigned/
-          lipo -archs unsigned/dsd2pcm
+          for f in unsigned/dsd2pcm unsigned/libdsd2pcm.dylib; do
+            [[ "$(lipo -archs "$f")" == "$ARCH" ]] || { echo "::error::$f is $(lipo -archs "$f"), not $ARCH"; exit 1; }
+            vtool -show-build "$f" | grep -E 'platform|minos' || true
+          done
           otool -L unsigned/dsd2pcm
           ls -l unsigned
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: macos-unsigned
+          name: macos-unsigned-${{ matrix.name }}
           path: unsigned/
           if-no-files-found: error
           retention-days: 1
 
-  # Signing and notarisation, then the two archives. On a tag the job runs in the environment
+  # Signing and notarisation of both architectures' files, then the four archives. On a tag the job runs in the environment
   # `release` (required reviewers), which holds the six MACOS_* secrets (docs/release.md); a tag
   # without them fails here, before anything is published. Other runs have no environment and
   # no secrets: the files stay unsigned (ad-hoc signed by the linker) and a notice says so.
@@ -274,14 +356,14 @@ jobs:
   # files are deleted in the next step whatever happens. This job builds nothing: it runs
   # codesign, notarytool and the packing script from the checked-out tag.
   macos-sign:
-    name: sign and notarise (aarch64-macos)
+    name: sign and notarise (macos)
     needs: [preflight, macos]
     runs-on: macos-15
     timeout-minutes: 60
     environment: ${{ github.ref_type == 'tag' && 'release' || '' }}
     env:
       VERSION: ${{ needs.preflight.outputs.version }}
-      NAME: aarch64-macos
+      NAMES: aarch64-macos x86_64-macos
       REF_TYPE: ${{ github.ref_type }}
       # Whether every secret is set; the values themselves are read by the signing step only.
       HAS_SIGNING: ${{ secrets.MACOS_CERT_P12_BASE64 != '' && secrets.MACOS_CERT_PASSWORD != '' && secrets.MACOS_SIGN_IDENTITY != '' && secrets.MACOS_NOTARY_KEY_ID != '' && secrets.MACOS_NOTARY_ISSUER != '' && secrets.MACOS_NOTARY_KEY_P8_BASE64 != '' }}
@@ -301,10 +383,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+      # One folder per platform: out/aarch64-macos, out/x86_64-macos.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
-          name: macos-unsigned
-          path: ${{ runner.temp }}/out
+          pattern: macos-unsigned-*
+          path: ${{ runner.temp }}/unsigned
+      - name: The files to sign
+        run: |
+          for name in $NAMES; do
+            mkdir -p "$RUNNER_TEMP/out/$name"
+            cp "$RUNNER_TEMP/unsigned/macos-unsigned-$name/"* "$RUNNER_TEMP/out/$name/"
+          done
+          ls -lR "$RUNNER_TEMP/out"
       - name: Sign (Developer ID, hardened runtime, timestamp) and notarise
         if: env.SIGN == 'true'
         env:
@@ -317,7 +407,8 @@ jobs:
         run: |
           set +x
           out="$RUNNER_TEMP/out"
-          files=("$out/dsd2pcm" "$out/libdsd2pcm.dylib")
+          files=()
+          for name in $NAMES; do files+=("$out/$name/dsd2pcm" "$out/$name/libdsd2pcm.dylib"); done
           # A keychain of this job's own, with a random password, deleted in the next step.
           kc="$RUNNER_TEMP/sign.keychain-db"
           kcpw=$(uuidgen)
@@ -338,8 +429,10 @@ jobs:
           # Notarisation: a zip of the signed files (bare Mach-O files cannot be stapled; the
           # ticket is looked up online, which the checks below and macos-check do).
           printf '%s' "$MACOS_NOTARY_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/notary.p8"
-          mkdir -p "$RUNNER_TEMP/notarise"
-          cp "${files[@]}" "$RUNNER_TEMP/notarise/"
+          for name in $NAMES; do
+            mkdir -p "$RUNNER_TEMP/notarise/$name"
+            cp "$out/$name/dsd2pcm" "$out/$name/libdsd2pcm.dylib" "$RUNNER_TEMP/notarise/$name/"
+          done
           ditto -c -k "$RUNNER_TEMP/notarise" "$RUNNER_TEMP/notarise.zip"
           mkdir -p notary
           xcrun notarytool submit "$RUNNER_TEMP/notarise.zip" --key "$RUNNER_TEMP/notary.p8" \
@@ -365,26 +458,35 @@ jobs:
         env:
           EXPECTED_TEAM_ID: ${{ vars.MACOS_TEAM_ID }}
         run: |
-          for f in "$RUNNER_TEMP/out/dsd2pcm" "$RUNNER_TEMP/out/libdsd2pcm.dylib"; do
-            .github/scripts/check-macos-signature.sh "$f"
+          for name in $NAMES; do
+            for f in "$RUNNER_TEMP/out/$name/dsd2pcm" "$RUNNER_TEMP/out/$name/libdsd2pcm.dylib"; do
+              .github/scripts/check-macos-signature.sh "$f"
+            done
           done
       - name: Package
         run: |
-          out="$RUNNER_TEMP/out"
-          pkg="dsd2pcm-$VERSION-$NAME"
-          mkdir -p "dist/$pkg"
-          install -m 0755 "$out/dsd2pcm" "dist/$pkg/"
-          install -m 0644 README.md LICENSE-MIT LICENSE-APACHE "dist/$pkg/"
-          # The C library's archive (.github/scripts/stage-capi.sh).
-          cpkg=$(.github/scripts/stage-capi.sh "$VERSION" "$NAME" "$out" dist "$(cat "$out/static-libs")")
           # Fixed order, owner and times (the commit's), no gzip timestamp.
           stamp=$(date -r "$(git log -1 --format=%ct)" +%Y%m%d%H%M.%S)
-          for p in "$pkg" "$cpkg"; do
-            find "dist/$p" -exec touch -h -t "$stamp" {} +
-            (cd dist && find "$p" | LC_ALL=C sort > files.txt \
-              && tar --uid 0 --gid 0 --no-recursion -cf - -T files.txt | gzip -n -9 > "$p.tar.gz" \
-              && rm -rf files.txt "$p")
-            (cd dist && shasum -a 256 "$p.tar.gz" > "$p.tar.gz.sha256" && cat "$p.tar.gz.sha256")
+          for name in $NAMES; do
+            out="$RUNNER_TEMP/out/$name"
+            # Not a case inside $( ): bash 3.2 (macOS's /bin/bash) cannot parse that.
+            case "$name" in
+              aarch64-macos) target=aarch64-apple-darwin ;;
+              x86_64-macos) target=x86_64-apple-darwin ;;
+            esac
+            pkg="dsd2pcm-$VERSION-$name"
+            mkdir -p "dist/$name/$pkg"
+            install -m 0755 "$out/dsd2pcm" "dist/$name/$pkg/"
+            install -m 0644 README.md LICENSE-MIT LICENSE-APACHE "dist/$name/$pkg/"
+            # The C library's archive (.github/scripts/stage-capi.sh).
+            cpkg=$(.github/scripts/stage-capi.sh "$VERSION" "$name" "$target" "$out" "dist/$name" "$(cat "$out/static-libs")")
+            for p in "$pkg" "$cpkg"; do
+              find "dist/$name/$p" -exec touch -h -t "$stamp" {} +
+              (cd "dist/$name" && find "$p" | LC_ALL=C sort > files.txt \
+                && tar --uid 0 --gid 0 --no-recursion -cf - -T files.txt | gzip -n -9 > "$p.tar.gz" \
+                && rm -rf files.txt "$p")
+              (cd "dist/$name" && shasum -a 256 "$p.tar.gz" > "$p.tar.gz.sha256" && cat "$p.tar.gz.sha256")
+            done
           done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: env.SIGN == 'true'
@@ -396,24 +498,40 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: bin-aarch64-macos
-          # dist/ only: the artifact keeps paths relative to it.
+          # dist/<name>/ only: the artifact keeps paths relative to it.
           path: |
-            dist/*.tar.gz
-            dist/*.sha256
+            dist/aarch64-macos/*.tar.gz
+            dist/aarch64-macos/*.sha256
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: bin-x86_64-macos
+          path: |
+            dist/x86_64-macos/*.tar.gz
+            dist/x86_64-macos/*.sha256
           if-no-files-found: error
           retention-days: 7
 
-  # The macOS archives as a user gets them, on a fresh runner without the signing job's
-  # keychain: on a tag, both files must be Developer ID signed, hardened and notarised;
-  # then the tool converts the test file and the C library builds and runs a C program.
+  # The macOS archives as a user gets them, on a fresh runner of each architecture without the
+  # signing job's keychain: on a tag, both files must be Developer ID signed, hardened and
+  # notarised; then the tool converts the test file and the C library builds and runs a C
+  # program.
   macos-check:
-    name: check (aarch64-macos)
+    name: check (${{ matrix.name }})
     needs: [preflight, macos-sign]
-    runs-on: macos-15
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: aarch64-macos, arch: arm64, runner: macos-15}
+          - {name: x86_64-macos, arch: x86_64, runner: macos-15-intel}
     env:
       VERSION: ${{ needs.preflight.outputs.version }}
-      NAME: aarch64-macos
+      NAME: ${{ matrix.name }}
+      ARCH: ${{ matrix.arch }}
       REF_TYPE: ${{ github.ref_type }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -421,13 +539,14 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
-          name: bin-aarch64-macos
+          name: bin-${{ matrix.name }}
           path: dist
       - name: Unpack
         run: |
           (cd dist && shasum -a 256 -c ./*.sha256)
           mkdir -p "$RUNNER_TEMP/check"
           for a in dist/*.tar.gz; do tar -C "$RUNNER_TEMP/check" -xzf "$a"; done
+          [[ "$(uname -m)" == "$ARCH" ]] || { echo "::error::runner is $(uname -m), expected $ARCH"; exit 1; }
           echo "PKG=dsd2pcm-$VERSION-$NAME" >> "$GITHUB_ENV"
           echo "CPKG=libdsd2pcm-$VERSION-$NAME" >> "$GITHUB_ENV"
       - name: Signed and notarised (required on a tag)
@@ -458,7 +577,7 @@ jobs:
           .github/scripts/check-capi-archive.sh "$RUNNER_TEMP/check/$CPKG"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: bin-aarch64-macos-smoke
+          name: bin-${{ matrix.name }}-smoke
           path: smoke/
           if-no-files-found: error
           retention-days: 7
@@ -513,7 +632,7 @@ jobs:
           mkdir -p "dist/$pkg"
           cp target/release/dsd2pcm.exe README.md LICENSE-MIT LICENSE-APACHE "dist/$pkg/"
           # The C library's archive (.github/scripts/stage-capi.sh).
-          cpkg=$(.github/scripts/stage-capi.sh "$VERSION" "$NAME" target/release dist "$(cat "$RUNNER_TEMP/static-libs")")
+          cpkg=$(.github/scripts/stage-capi.sh "$VERSION" "$NAME" x86_64-pc-windows-msvc target/release dist "$(cat "$RUNNER_TEMP/static-libs")")
           for p in "$pkg" "$cpkg"; do
             python -I .github/scripts/pack-zip.py "dist/$p.zip" "dist/$p" "$(git log -1 --format=%ct)"
             rm -rf "dist/$p"
@@ -558,12 +677,158 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # Windows x86_64 with MinGW-w64 (x86_64-pc-windows-gnu): the C library for programs built
+  # with gcc, in MSYS2's MINGW64 environment (msvcrt, like Rust's target). The command-line
+  # tool is built and tested here but not published (the MSVC one is). Rust's toolchain for
+  # this host; gcc, binutils and pkgconf from MSYS2.
+  windows-gnu:
+    name: binary (x86_64-windows-gnu)
+    needs: preflight
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      NAME: x86_64-windows-gnu
+      TARGET: x86_64-pc-windows-gnu
+      CARGO_PROFILE_RELEASE_STRIP: symbols
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e  # v2.33.0
+        with:
+          msystem: MINGW64
+          update: false
+          path-type: inherit  # rustup's cargo and the runner's Python stay on PATH
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-binutils
+            mingw-w64-x86_64-pkgconf
+      - name: Rust
+        run: |
+          rustup toolchain install "$RUST_STABLE-$TARGET" --profile minimal --force-non-host
+          rustup default "$RUST_STABLE-$TARGET"
+          rustc -vV
+          gcc --version | head -n 1
+          uname -s
+          echo "RUSTFLAGS=-C target-cpu=x86-64" >> "$GITHUB_ENV"
+      - name: Build and test
+        run: |
+          cargo build --release --locked -p dsd2pcm-cli
+          cargo test --release --locked --workspace
+      # The C library: dsd2pcm.dll with its import library libdsd2pcm.dll.a, and the static
+      # libdsd2pcm.a.
+      - name: The C library
+        env:
+          CARGO_TERM_COLOR: never  # rustc's notes plain: the library list goes into dsd2pcm.pc
+        run: |
+          cargo rustc --release --locked -p dsd2pcm-capi --lib -- --print native-static-libs 2>&1 | tee "$RUNNER_TEMP/capi.log"
+          sed -e 's/\x1b\[[0-9;]*m//g' -n -e 's/.*native-static-libs: //p' "$RUNNER_TEMP/capi.log" | tail -n 1 | tr -d '\r' > "$RUNNER_TEMP/static-libs"
+          cat "$RUNNER_TEMP/static-libs"
+          ls -l target/release/dsd2pcm.dll target/release/libdsd2pcm.dll.a target/release/libdsd2pcm.a
+      # Only Windows' own DLLs: no libgcc_s, libwinpthread or other MinGW runtime DLL.
+      - name: No MinGW runtime DLL among the imports
+        run: |
+          for f in target/release/dsd2pcm.exe target/release/dsd2pcm.dll; do
+            deps=$(objdump -p "$f" | sed -n 's/.*DLL Name: //p' | tr -d '\r')
+            echo "$f: $(tr '\n' ' ' <<< "$deps")"
+            if grep -Eiv '^(kernel32|ntdll|msvcrt|advapi32|bcrypt|bcryptprimitives|userenv|ws2_32|dbghelp|user32|shell32|ole32|oleaut32|api-ms-win-[a-z0-9-]+)\.dll$' <<< "$deps"; then
+              echo "::error::$f imports a DLL that Windows does not have"; exit 1
+            fi
+          done
+      - name: Package
+        run: |
+          # The C library's archive (.github/scripts/stage-capi.sh).
+          cpkg=$(.github/scripts/stage-capi.sh "$VERSION" "$NAME" "$TARGET" target/release dist "$(cat "$RUNNER_TEMP/static-libs")")
+          python -I .github/scripts/pack-zip.py "dist/$cpkg.zip" "dist/$cpkg" "$(git log -1 --format=%ct)"
+          rm -rf "dist/$cpkg"
+          (cd dist && sha256sum "$cpkg.zip" > "$cpkg.zip.sha256" && cat "$cpkg.zip.sha256")
+          echo "CPKG=$cpkg" >> "$GITHUB_ENV"
+      - name: The tool converts the test file
+        run: |
+          python -I .github/scripts/make-test-dsf.py "$RUNNER_TEMP/test.dsf"
+          target/release/dsd2pcm.exe "$RUNNER_TEMP/test.dsf" "$RUNNER_TEMP/test.wav"
+          (cd "$RUNNER_TEMP" && sha256sum test.wav) | tee "dist/smoke-$NAME.sha256"
+      - name: The packed C library builds and runs a C program (gcc, pkg-config)
+        env:
+          CC: gcc
+        run: |
+          mkdir -p "$RUNNER_TEMP/check"
+          python -I -m zipfile -e "dist/$CPKG.zip" "$RUNNER_TEMP/check"
+          ls -lR "$RUNNER_TEMP/check/$CPKG"
+          .github/scripts/check-capi-archive.sh "$RUNNER_TEMP/check/$CPKG"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: bin-x86_64-windows-gnu
+          # dist/ only: the artifact keeps paths relative to it.
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  # The source archive: the release commit's whole tree (the workspace, fuzz/, docs/), as
+  # `git archive --format=tar --prefix=dsd2pcm-<v>/ v<v> | gzip -n -9` makes it from the tag:
+  # the files' times are the commit's, so anyone can make the same bytes again. Checked by
+  # unpacking it in a fresh folder and building the C library from it.
+  source:
+    name: source archive
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust
+        run: |
+          rustup toolchain install "$RUST_STABLE" --profile minimal
+          rustup default "$RUST_STABLE"
+      - name: Pack
+        run: |
+          src="dsd2pcm-$VERSION-src"
+          mkdir -p dist
+          git archive --format=tar --prefix="dsd2pcm-$VERSION/" "$SHA" | gzip -n -9 > "dist/$src.tar.gz"
+          # The same bytes a second time (deterministic).
+          git archive --format=tar --prefix="dsd2pcm-$VERSION/" "$SHA" | gzip -n -9 | cmp - "dist/$src.tar.gz"
+          (cd dist && sha256sum "$src.tar.gz" > "$src.tar.gz.sha256" && cat "$src.tar.gz.sha256")
+          # Each of these files is in it (grep alone would pass on any one of them).
+          tar -tzf "dist/$src.tar.gz" > "$RUNNER_TEMP/src-files"
+          for f in Cargo.lock LICENSE-MIT LICENSE-APACHE fuzz/Cargo.toml docs/c-api.md crates/dsd2pcm-capi/include/dsd2pcm.h; do
+            grep -qxF "dsd2pcm-$VERSION/$f" "$RUNNER_TEMP/src-files" || { echo "::error::$f is not in the source archive"; exit 1; }
+          done
+          echo "$(wc -l < "$RUNNER_TEMP/src-files") entries"
+          echo "SRC=$src" >> "$GITHUB_ENV"
+      - name: The C library builds from the unpacked source
+        run: |
+          mkdir -p "$RUNNER_TEMP/src"
+          tar -C "$RUNNER_TEMP/src" -xzf "dist/$SRC.tar.gz"
+          cd "$RUNNER_TEMP/src/dsd2pcm-$VERSION"
+          cargo build --release --locked -p dsd2pcm-capi
+          ls -l target/release/libdsd2pcm.so target/release/libdsd2pcm.a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: bin-source
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 7
+
   # Every platform's binary made the same bytes from the test file, and every archive matches
   # its .sha256. On a dry run, the list of what a tag would publish.
   check:
     name: same output everywhere
-    needs: [preflight, linux, macos-check, windows]
+    needs: [preflight, linux, macos-check, windows, windows-gnu, source]
     runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
@@ -578,9 +843,14 @@ jobs:
           tr -d '\r' < <(cat smoke-*.sha256) | tee /dev/stderr | awk '{print $1}' | sort -u > hashes
           n=$(wc -l < hashes)
           [[ "$n" -eq 1 ]] || { echo "::error::the platforms' binaries converted the test file to $n different outputs"; exit 1; }
-          [[ $(ls smoke-*.sha256 | wc -l) -eq 5 ]] || { echo "::error::expected five platforms' outputs"; exit 1; }
-          [[ $(ls ./*.tar.gz ./*.zip | wc -l) -eq 10 ]] || { echo "::error::expected ten archives (the tool and the C library, five platforms)"; exit 1; }
-          echo "all five binaries: the same output"
+          smokes=$(find . -maxdepth 1 -name 'smoke-*.sha256' | wc -l)
+          [[ "$smokes" -eq 9 ]] || { echo "::error::expected nine platforms' outputs, found $smokes"; exit 1; }
+          tools=$(find . -maxdepth 1 \( -name 'dsd2pcm-*.tar.gz' -o -name 'dsd2pcm-*.zip' \) ! -name '*-src.tar.gz' | wc -l)
+          [[ "$tools" -eq 8 ]] || { echo "::error::expected eight archives of the tool, found $tools"; exit 1; }
+          [[ -f "dsd2pcm-${VERSION}-src.tar.gz" ]] || { echo "::error::no source archive"; exit 1; }
+          clibs=$(find . -maxdepth 1 \( -name 'libdsd2pcm-*.tar.gz' -o -name 'libdsd2pcm-*.zip' \) | wc -l)
+          [[ "$clibs" -eq 9 ]] || { echo "::error::expected nine archives of the C library, found $clibs"; exit 1; }
+          echo "all nine binaries: the same output"
       - name: What a tag would publish
         if: github.ref_type != 'tag'
         run: |
@@ -680,10 +950,14 @@ jobs:
             echo "- \`dsd2pcm-$VERSION-x86_64-linux.tar.gz\`: Linux x86_64, glibc 2.17 or later."
             echo "- \`dsd2pcm-$VERSION-aarch64-linux.tar.gz\`: Linux aarch64 (64-bit ARM), glibc 2.17 or later."
             echo "- \`dsd2pcm-$VERSION-i686-linux.tar.gz\`: Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later."
+            echo "- \`dsd2pcm-$VERSION-x86_64-linux-musl.tar.gz\`, \`dsd2pcm-$VERSION-aarch64-linux-musl.tar.gz\`: Linux x86_64 and aarch64, statically linked (musl): any Linux, Alpine included."
             echo "- \`dsd2pcm-$VERSION-aarch64-macos.tar.gz\`: macOS 11 or later on Apple silicon. Signed with a Developer ID and notarised by Apple (the tool and the C library's \`libdsd2pcm.1.dylib\`)."
+            echo "- \`dsd2pcm-$VERSION-x86_64-macos.tar.gz\`: macOS 11 or later on Intel. Signed and notarised the same way."
             echo "- \`dsd2pcm-$VERSION-x86_64-windows.zip\`: Windows 10 or 11, x86_64. Not code-signed."
             echo
-            echo "The C library (\`include/dsd2pcm.h\`, shared and static libraries, a pkg-config file; ABI version 1), \`libdsd2pcm-$VERSION-<platform>\` for the same five platforms: \`.tar.gz\`, and \`.zip\` for Windows. See [docs/c-api.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/c-api.md#binary-releases)."
+            echo "The C library (\`include/dsd2pcm.h\`, shared and static libraries, a pkg-config file; ABI version 1), \`libdsd2pcm-$VERSION-<platform>\` for the same eight platforms (on Linux with musl: musl 1.2.3 or later) and for Windows with MinGW-w64 (\`x86_64-windows-gnu\`, for gcc): \`.tar.gz\`, and \`.zip\` for Windows. On x86_64 Linux the static libraries are marked for the CET shadow stack. See [docs/c-api.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/c-api.md#binary-releases)."
+            echo
+            echo "The source: \`dsd2pcm-$VERSION-src.tar.gz\`, the tagged commit's whole tree (\`git archive --format=tar --prefix=dsd2pcm-$VERSION/ v$VERSION | gzip -n -9\` makes the same bytes)."
             echo
             echo "Verify a download: \`sha256sum -c <asset>.sha256\` and \`gh attestation verify <asset> -R $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml --source-ref refs/tags/v$VERSION --deny-self-hosted-runners\`."
             echo

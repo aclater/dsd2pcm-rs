@@ -30,6 +30,14 @@
   pysacd's filter, pinned to 0.1.2's files; the MSRV workflow also builds the tests with
   Rust 1.85, which they need ([development](docs/development.md)).
 
+- Releases: the C library for Linux with musl (x86_64, aarch64), macOS on Intel (signed and
+  notarised) and Windows with MinGW-w64 (`x86_64-windows-gnu`, for gcc); the command-line
+  tool for musl (statically linked) and macOS on Intel; an attested source archive
+  (`dsd2pcm-<version>-src.tar.gz`, from `git archive`). On x86_64 Linux the static
+  library's objects are marked for the CET shadow stack.
+  [c-api.md](docs/c-api.md#binary-releases) explains how to embed the static library in a
+  shared library with its symbols hidden.
+
 ### Changed
 
 - Speed in a consumer's release profile (codegen units 16, no LTO, overflow checks on, as
