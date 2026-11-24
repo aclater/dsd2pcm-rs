@@ -11,8 +11,14 @@ with its measured effect. Releases up to 0.1.2 keep their behaviour as released.
 
 ### Breaking changes (Rust API)
 
-Each with what to change in a caller. The C interface is unchanged (ABI 1, additions only).
+Each with what to change in a caller. The C interface stays ABI version 1, with additions only.
 
+- `Filter::Default` is removed; `Filter::Fast` is that filter (0.1.x's default), and
+  `Filter::Precise` is now `Filter::default()`, so `PcmOptions::new` and
+  `frames::PcmConfig::new` select it (see Changed (output)). Migration: use `Filter::Fast`
+  where `Filter::Default` was named to keep its output. The variants name the filters, not
+  which one is the default, so a later change of default renames nothing.
+  `decimator::Decimator` keeps scarletbook-pcm's filters.
 - `Error::Format`, `Error::Unsupported` and `Error::InvalidArgument` hold `FormatError`,
   `UnsupportedError` and `ArgumentError` instead of a `String`: a kind to match on
   (`FormatErrorKind`: `NotRecognised`, `Truncated`, `Malformed`, `LimitExceeded`;
@@ -36,12 +42,41 @@ Each with what to change in a caller. The C interface is unchanged (ABI 1, addit
 
 ### Changed (output)
 
+- Output stability rule: output is deterministic within a release (the same version, input
+  and settings give the same bytes on every CPU and SIMD level). Between releases it may
+  change when measured quality improves; every such change is listed in this changelog with
+  its measured effect (`docs/quality/<version>.md`). Releases up to 0.1.2 keep their
+  behaviour as released. This replaces the rule that output bytes change only with a major
+  version ([design](docs/design.md#the-contract-deterministic-output-the-deepest-stopband-filter-by-default),
+  [AGENTS.md](AGENTS.md)).
+- **The default filter is now `precise`; 0.1.x's default stays available as `fast`.**
+  A conversion with default settings gives other bytes than 0.1.x: SINAD with a very quiet
+  DSD64 source rises from about 122 dB to 142 to 145 dB (116 to 144 dB with `wide`), at
+  about 1.8 times the CPU time on one core (1.5 to 2.3 times;
+  [PCM quality](docs/pcm-quality.md#the-precise-filter),
+  [performance](docs/performance.md#precise-against-fast-by-rate-and-cutoff)). `fast`
+  (scarletbook-pcm 0.7.0's filters) is lower CPU, lower quality, and gives the bytes of
+  0.1.x's default and of scarletbook-pcm 0.7.0, unchanged.
+  - Command line: `--filter precise|fast|pysacd`, default `precise`. `--filter default` is
+    still accepted and means precise, as `DSD2PCM_FILTER_DEFAULT` does, so 0.1.x scripts
+    keep running; add `--filter fast` for 0.1.x's bytes. The help gives each filter's
+    trade-off.
+  - C interface (ABI version 1, additions only): new `DSD2PCM_FILTER_FAST` (3).
+    `DSD2PCM_FILTER_DEFAULT` keeps its value, 0, and now selects the precise filter, so
+    zero-initialised options (the `*_INIT` macros) do too; the other constants and every
+    struct are unchanged.
+  - Rust: see the breaking changes above.
 - `Filter::Pysacd` (`--filter pysacd`) computes pysacd's filter in `f64`: SINAD +0.72 /
   +0.25 dB at 88.2 / 176.4 kHz (now 127.97 / 128.13 dB, above pysacd 0.5.x's 127.81 /
   128.07 dB; dsd-measure 0.1.1, 1 kHz at 0 dB SACD). Output bytes change; they are the
   same on every CPU and SIMD level. pysacd's taps, response, dither and seeding are
   unchanged. A conversion on one core takes 1.2 to 1.3 times as long at the AVX2 level and
   1.5 to 1.8 times at the generic level ([design](docs/design.md#the-pysacd-preset)).
+- Output: DSD to WAV conversion writes the channel mask of the input's layout (DSF channel
+  type, DSDIFF channel IDs) instead of the one of its channel count. The WAV header changes
+  only where the two differ: a DSF of type 5 (FL FR C LFE) was labelled quad (FL FR BL BR),
+  and DSDIFF files with other speaker sets, such as FL FR LFE, were labelled by their
+  count. The samples are unchanged.
 
 ### Added
 
@@ -78,7 +113,7 @@ Each with what to change in a caller. The C interface is unchanged (ABI 1, addit
   `convert_file`, for mono, stereo and six-channel input, DSF channel types 5 to 7 and
   DSDIFF files with speaker and numbered channel IDs, at every rate and cutoff and with
   pysacd's filter, pinned to 0.1.2's files (except DSF type 5 and the DSDIFF speakers,
-  whose channel mask changed, below); the MSRV workflow also builds the tests with Rust
+  whose channel mask changed, and pysacd's, now computed in `f64`; see Changed (output)); the MSRV workflow also builds the tests with Rust
   1.85, which they need ([development](docs/development.md)).
 - Releases: the C library for Linux with musl (x86_64, aarch64), macOS on Intel (signed and
   notarised) and Windows with MinGW-w64 (`x86_64-windows-gnu`, for gcc); the command-line
@@ -89,21 +124,21 @@ Each with what to change in a caller. The C interface is unchanged (ABI 1, addit
   shared library with its symbols hidden.
 - New filter `precise` (`--filter precise`, `Filter::Precise`,
   `DSD2PCM_FILTER_PRECISE`), the default since this release (see Changed): every rate and
-  cutoff, exact integer arithmetic like scarletbook-pcm's filters, at least 150 dB of stopband wherever ultrasonic content folds into the passband
-  (the default: about 110 dB) and about half the passband ripple. With a very quiet DSD64
+  cutoff, exact integer arithmetic like scarletbook-pcm's filters, at least 150 dB of stopband
+  wherever ultrasonic content folds into the passband
+  (`fast`: about 110 dB) and about half the passband ripple. With a very quiet DSD64
   source the audio-band floor falls from -128 dBFS (SINAD 122 dB) to the 24-bit output's,
   about -150 dBFS (SINAD 142 to 145 dB); it takes about twice the CPU time
   ([PCM quality](docs/pcm-quality.md#the-precise-filter)). Its taps come from
   `tools/filters/design_precise.py`.
 - Tests: golden SHA-256 hashes of the precise filter, named and as the default, at every
   SIMD level, for the sample tests (`tests/identity.rs`) and the whole output files
-  (`tests/golden_files.rs`); the fast filter's and pysacd's golden hashes are unchanged.
+  (`tests/golden_files.rs`); the fast filter's golden hashes are unchanged.
   The C tests check every `DSD2PCM_FILTER_*` value and what each selects.
 - Docs: [PCM quality](docs/pcm-quality.md), the measured audio quality of every filter and
   rate (frequency response, aliasing, ringing, noise, ultrasonic noise, headroom, an
   RMAA-style summary; the pysacd preset, scarletbook-pcm 0.7.0 and the foobar2000 SACD
   plug-in compared), with the measurement scripts in `tools/quality`.
-
 - `Threads::Count(n)` runs a conversion on at most n threads (up to 256), and the C
   interface's `dsd2pcm_file_options.threads` takes n > 1 the same way (it was refused). The
   output bytes are the same for every count (tested from 1 to 7, all cores and above the
@@ -122,37 +157,8 @@ Each with what to change in a caller. The C interface is unchanged (ABI 1, addit
 
 ### Changed
 
-- **The default filter is now `precise`; 0.1.x's default stays available as `fast`.**
-  A conversion with default settings gives other bytes than 0.1.x: SINAD with a very quiet
-  DSD64 source rises from about 122 dB to 142 to 145 dB (116 to 144 dB with `wide`), at
-  about 1.8 times the CPU time on one core (1.5 to 2.3 times;
-  [PCM quality](docs/pcm-quality.md#the-precise-filter),
-  [performance](docs/performance.md#the-precise-filter)). `fast` (scarletbook-pcm 0.7.0's
-  filters) is lower CPU, lower quality, and gives the bytes of 0.1.x's default and of
-  scarletbook-pcm 0.7.0, unchanged.
-  - Rust (breaking): `Filter::Default` is removed; `Filter::Fast` is that filter, and
-    `Filter::Precise` is now `Filter::default()`, so `PcmOptions::new` and
-    `frames::PcmConfig::new` select it. Code that named `Filter::Default` no longer
-    compiles: use `Filter::Fast` to keep its output. The variants name the filters, not
-    which one is the default, so a later change of default renames nothing.
-    `decimator::Decimator` keeps scarletbook-pcm's filters.
-  - Command line: `--filter precise|fast|pysacd`, default `precise`. `--filter default` is
-    still accepted and means precise, as `DSD2PCM_FILTER_DEFAULT` does, so 0.1.x scripts
-    keep running; add `--filter fast` for 0.1.x's bytes. The help gives each filter's
-    trade-off.
-  - C interface (ABI version 1, additions only): new `DSD2PCM_FILTER_FAST` (3).
-    `DSD2PCM_FILTER_DEFAULT` keeps its value, 0, and now selects the precise filter, so
-    zero-initialised options (the `*_INIT` macros) do too; the other constants and every
-    struct are unchanged.
 - Docs, methodology and measurement data are now CC BY 4.0; code stays MIT OR Apache-2.0.
   Added NOTICE and CITATION.cff ([licence and credits](README.md#licence-and-credits)).
-- Output stability rule: output is deterministic within a release (the same version, input
-  and settings give the same bytes on every CPU and SIMD level). Between releases it may
-  change when measured quality improves; every such change is listed in this changelog with
-  its measured effect (`docs/quality/<version>.md`). Releases up to 0.1.2 keep their
-  behaviour as released. This replaces the rule that output bytes change only with a major
-  version ([design](docs/design.md#the-contract-deterministic-output-the-deepest-stopband-filter-by-default),
-  [AGENTS.md](AGENTS.md)).
 - Docs: the README, [performance](docs/performance.md), [PCM quality](docs/pcm-quality.md),
   the [user guide](docs/user-guide.md) and [options](docs/options.md) lead with the
   `precise` filter's measured quality (SINAD 142 to 145 dB with a very quiet DSD64 source,
@@ -165,14 +171,10 @@ Each with what to change in a caller. The C interface is unchanged (ABI 1, addit
   badges, the crates' `repository` field and the attestation commands
   (`gh attestation verify -R dsd-toolbox/dsd2pcm-rs --signer-workflow dsd-toolbox/dsd2pcm-rs/.github/workflows/release.yml`)
   use the new address. The old addresses redirect.
-- Output: DSD to WAV conversion writes the channel mask of the input's layout (DSF channel
-  type, DSDIFF channel IDs) instead of the one of its channel count. The WAV header changes
-  only where the two differ: a DSF of type 5 (FL FR C LFE) was labelled quad (FL FR BL BR),
-  and DSDIFF files with other speaker sets, such as FL FR LFE, were labelled by their
-  count. The samples are unchanged.
 - Speed in a consumer's release profile (codegen units 16, no LTO, overflow checks on, as
-  a dependency): it was up to 25 % slower than with ours, now within 1 % on the measured
-  CPUs. CI checks it on every pull request. Output bytes unchanged.
+  a dependency): it was up to 25 % slower than with ours, now within about 3 % on the
+  measured CPUs (up to 1.031 times; the CI gate allows 5 %). CI checks it on every pull
+  request. Output bytes unchanged.
 - `frames::Converter`: the first-stage values kept between calls cost next to nothing
   when consecutive calls are not adjacent runs (pooled converters): only the bytes the next
   run could share are kept. Output bytes unchanged.
@@ -186,7 +188,6 @@ Each with what to change in a caller. The C interface is unchanged (ABI 1, addit
 - Docs in the DSD Toolbox layout: a [documentation index](docs/README.md), the
   [user guide](docs/user-guide.md) and [options](docs/options.md) pages (from
   `docs/usage.md`), and [CONTRIBUTING.md](CONTRIBUTING.md).
-
 - C interface: a struct larger than the library's own (from a newer header) is accepted
   only when its bytes past the library's size are 0; a set field the library does not know
   is refused with `DSD2PCM_E_INVALID_ARGUMENT` naming the byte, instead of being ignored.
