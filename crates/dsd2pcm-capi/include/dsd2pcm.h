@@ -336,7 +336,8 @@ size_t dsd2pcm_frames_output_bytes(const struct dsd2pcm_frames *conv,
 // `frame_clipped` is NULL (with `frame_clipped_len` 0) or one entry per frame of the run;
 // each entry is set to the samples clamped in that frame over all channels. `stats` may be
 // NULL. On an error nothing is written. The output equals the run's part of a conversion
-// of the whole area; after the first call the converter allocates nothing.
+// of the whole area. A call that succeeds allocates nothing (`dsd2pcm_frames_new` sizes the
+// buffers), the first one included.
 //
 // Output buffers must not overlap each other or any input buffer.
 //

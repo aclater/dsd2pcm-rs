@@ -193,7 +193,8 @@ context, into interleaved 24-bit PCM, with clip counts per frame. Its interface 
 scarletbook-pcm 0.7.0's `Converter::convert`, and with `Filter::Fast` so are its output
 bytes; any run with its
 neighbours gives the bytes of that run in a whole-area conversion. One converter per
-thread; after the first call it allocates nothing.
+thread; it sizes its buffers when it is made, so a call that succeeds allocates nothing,
+whatever the run.
 
 `convert_file_with` and `dsd64_to_pcm_with` take a progress hook: it gets the output
 samples done and the total at each block, on the calling thread, and stops the conversion

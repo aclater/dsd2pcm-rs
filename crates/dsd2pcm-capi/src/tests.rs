@@ -981,11 +981,11 @@ unsafe impl std::alloc::GlobalAlloc for Counting {
 #[global_allocator]
 static COUNTING: Counting = Counting;
 
-/// After the first call, `dsd2pcm_frames_convert` allocates nothing, in either buffer
-/// layout and format.
+/// `dsd2pcm_frames_convert` allocates nothing, the first call included (a one-frame run at
+/// the edge of the area, then longer runs), in either buffer layout and format.
 #[test]
 #[cfg_attr(miri, ignore = "too slow: 40-frame conversions, covered natively")]
-fn frames_convert_allocates_nothing_after_warm_up() {
+fn frames_convert_allocates_nothing() {
     for filter in [
         DSD2PCM_FILTER_DEFAULT,
         DSD2PCM_FILTER_PRECISE,
@@ -1010,15 +1010,17 @@ fn alloc_case(filter: u32) {
     sep.frame_ptrs = ptrs.as_ptr();
     sep.frame_count = n;
     let cont = contiguous(Some(before), run, Some(after));
+    let first = contiguous(None, &a[..fb], None);
     let mut out = vec![0i32; n * 2352 * 6];
     let mut fc = vec![0u64; n];
     let mut st = stats_init();
     let mut go = |r: &dsd2pcm_run, fmt: u32| {
-        let len = if fmt == 0 {
-            n * 2352 * 6 * 3
+        let frames = if r.frame_ptrs.is_null() {
+            r.frames_len / fb
         } else {
-            n * 2352 * 6 * 4
+            r.frame_count
         };
+        let len = frames * 2352 * 6 * if fmt == 0 { 3 } else { 4 };
         // SAFETY (test): valid buffers of the given lengths.
         unsafe {
             dsd2pcm_frames_convert(
@@ -1028,14 +1030,13 @@ fn alloc_case(filter: u32) {
                 out.as_mut_ptr().cast(),
                 len,
                 fc.as_mut_ptr(),
-                n,
+                frames,
                 &mut st,
             )
         }
     };
-    assert_eq!(go(&cont, 0), DSD2PCM_OK);
     let before_count = ALLOCS.with(|a| a.get());
-    for (r, fmt) in [(&cont, 0), (&sep, 0), (&cont, 1), (&sep, 1)] {
+    for (r, fmt) in [(&first, 0), (&cont, 0), (&sep, 0), (&cont, 1), (&sep, 1)] {
         assert_eq!(go(r, fmt), DSD2PCM_OK);
     }
     assert_eq!(ALLOCS.with(|a| a.get()), before_count, "filter {filter}");

@@ -241,10 +241,18 @@ whole-area conversion. Only the neighbour bytes nearest the run matter (`context
   there, and the C interface returned `DSD2PCM_E_INTERNAL`.) The tests inject a thread
   builder that refuses workers (`convert::tests`).
 - **Shared tables.** The S1 lookup tables and the paired tables are built once per process
-  (`OnceLock`) and shared, read-only, by every converter and thread. A converter only owns
-  its buffers, and after the first call it allocates nothing (`tests/frames_alloc.rs`).
+  (`OnceLock`) and shared, read-only, by every converter and thread; a plan builds the
+  tables it reads when it is made. A converter only owns its buffers.
 - **Blocks.** Runs are converted in blocks of 6 frames, so buffers are bounded by the block
-  size, not the run length.
+  size, not the run length. A block's buffers depend on its length alone, not on where it
+  lies or what is around it, so `Converter::new` sizes them for a whole block and every
+  pass of its plan, ordered or in lanes (`Plan::size`); the passes trade buffers with each
+  other and with the carry, so each set that trades gets the longest length of any of
+  them. A call that succeeds allocates nothing, the first one included
+  (`tests/frames_alloc.rs`: every rate, cutoff, filter, channel count and SIMD level, runs
+  of any length, edge, layout and order). Until 0.2.0 the buffers grew on demand, and a
+  later call could still grow one: a run longer than any before, a short run after a long
+  one, or the edge of an area.
 
 ## The pysacd preset
 

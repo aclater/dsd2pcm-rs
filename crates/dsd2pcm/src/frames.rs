@@ -43,8 +43,8 @@
 //! [`Run::at_frame`]. A run with no frame before it starts the area.
 //!
 //! A [`Converter`] converts one call at a time on the calling thread (`&mut self`); use one
-//! per worker thread. Its buffers hold a few frames of every channel, grow on the first
-//! call and are reused: later calls allocate nothing.
+//! per worker thread. Its buffers hold a few frames of every channel; [`Converter::new`]
+//! sizes them for any run, so a call that succeeds allocates nothing, the first included.
 
 use crate::decimator::{self, Carry, Cutoff, PcmRate, Plan, Scratch, IDLE};
 use crate::error::{ArgumentKind, Error, Result};
@@ -324,7 +324,9 @@ pub struct Converter {
 
 impl Converter {
     /// A converter for `config`: 1 to 6 channels, a cutoff the rate has (`Wide` is not
-    /// available at 88.2 kHz), a gain made by [`Gain::from_db`].
+    /// available at 88.2 kHz), a gain made by [`Gain::from_db`]. Every buffer the converter
+    /// uses is allocated here, sized for any run: [`convert`](Self::convert) allocates
+    /// nothing when it succeeds.
     pub fn new(config: PcmConfig) -> Result<Converter> {
         if !(1..=MAX_CHANNELS).contains(&config.channels) {
             return Err(Error::invalid(
@@ -349,7 +351,7 @@ impl Converter {
             _ => None,
         };
         let plan = Plan::with_design(config.rate, config.cutoff, config.filter.design())?;
-        Ok(Converter {
+        let mut c = Converter {
             config,
             plan,
             sc: Scratch::default(),
@@ -358,7 +360,27 @@ impl Converter {
             pysacd,
             carry: Default::default(),
             next_shift: 0,
-        })
+        };
+        c.reserve();
+        Ok(c)
+    }
+
+    /// Sizes every buffer for the longest block, so that no call allocates: a block's
+    /// buffers depend on its length alone (at most `BLOCK_FRAMES` frames), not on where it
+    /// lies or what is around it.
+    fn reserve(&mut self) {
+        let ch = usize::from(self.config.channels);
+        if let Some(p) = &mut self.pysacd {
+            p.reserve(ch);
+            return;
+        }
+        let n = BLOCK_FRAMES * self.samples_per_frame();
+        self.bytes.reserve_exact(self.plan.span(0, n).1 * ch);
+        self.q.reserve_exact(n * ch);
+        self.plan.size(&mut self.sc);
+        for cy in &mut self.carry[..ch] {
+            self.plan.reserve(cy);
+        }
     }
 
     /// The configuration.
@@ -500,7 +522,6 @@ impl Converter {
                 let clipped = &mut stats.clipped[c];
                 let fc = &mut frame_clipped;
                 let cy = &mut carry[c];
-                plan.reserve(cy);
                 cy.shift = shift;
                 plan.run_quantised_carry(
                     src,

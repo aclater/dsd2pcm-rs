@@ -158,7 +158,8 @@ dsd2pcm_frames_free(conv);
   buffers; each returns 0 for a NULL handle.
 - `frame_clipped` receives the clamped samples per frame (all channels); `stats` the
   channel count, the clamped samples per channel and their sum.
-- After the first call a converter allocates nothing. Use one converter per thread: a call
+- `dsd2pcm_frames_new` sizes every buffer of the converter for any run, so a call that
+  succeeds allocates nothing, the first one included. Use one converter per thread: a call
   while another thread uses the same handle returns `DSD2PCM_E_BUSY`. Freeing a handle
   while another thread uses it is undefined.
 
