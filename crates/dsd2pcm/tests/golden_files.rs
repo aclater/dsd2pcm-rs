@@ -2,8 +2,8 @@
 //! cutoff (and with pysacd's filter at its rates), and the SHA-256 of every WAV file, header
 //! and samples, is pinned per input. A change to the header (chunk layout, format tag,
 //! channel mask) or to the samples fails here; output bytes change only with a major
-//! version (AGENTS.md). The hashes were computed on 0.1.2 and are the same on every SIMD
-//! level and platform.
+//! version (AGENTS.md). The hashes were computed on 0.1.2 (two updated for 0.2's channel
+//! mask, see [`GOLDEN`]) and are the same on every SIMD level and platform.
 //!
 //! Inputs: the material of the sample golden tests (`identity.rs`) for 1, 2 and 6 channels,
 //! full scale (all 0xFF), DSF files of channel types 5, 6 and 7, and DSDIFF files whose
@@ -165,9 +165,11 @@ fn inputs() -> Vec<(&'static str, Vec<u8>)> {
     ]
 }
 
-/// The whole-file hashes, per input in the order of [`inputs`], computed on 0.1.2.
-/// Type 7 and six channels give the same files (the same samples, and 7 is the type of six
-/// channels); so do type 5 and the DSDIFF speakers (FL FR C LFE).
+/// The whole-file hashes, per input in the order of [`inputs`], computed on 0.1.2, except
+/// type 5 and the DSDIFF speakers: since 0.2 their WAV header carries the input's mask,
+/// FL FR C LFE (0x0F), where 0.1.2 wrote the four-channel default, quad (0x33); their
+/// samples are unchanged. Type 7 and six channels give the same files (the same samples,
+/// and 7 is the type of six channels); so do type 5 and the DSDIFF speakers.
 const GOLDEN: [&str; 11] = [
     "9323556c11f42f42269266a8d073c8ca8b2124593313b029e64484da984c0e7b",
     "fa023dd555bea79b956a846a4a3c815a011dbf999ff4a1f853a3f204c657a423",
@@ -175,10 +177,10 @@ const GOLDEN: [&str; 11] = [
     "4eb718bb794c879f09548e08c7d63e1c52494c059134f786d1bf77b617ef5c8a",
     "5b39d5cfa76cfb364b9fd7bdd866576b6d823c97b5b3c99d3aa376d8c7b28eb8",
     "8b309aea9ba2b1506e28aa534eba5c8280e5c195819fee5d5be3d4eef0bac537",
-    "49be08ba870b20f7027bda275216db1a86d338e74c06a75cc42b376cdcf3340d",
+    "22f860b019fdf14fbf45238eccbe91329c85ce330efea77e42eacc3b294be5b5",
     "ce23e563145e18691512cdbcbc65a47fe0a7536e492f39422e50a29e8c8ed885",
     "48f40ee1137d4fb76276db1eca890aa346dc08be1d9bb3712bd06e8b7e85bc34",
-    "49be08ba870b20f7027bda275216db1a86d338e74c06a75cc42b376cdcf3340d",
+    "22f860b019fdf14fbf45238eccbe91329c85ce330efea77e42eacc3b294be5b5",
     "9c9f47f45e39a868188290ee3629602954954d87b695311db09f3f7bf68efe9a",
 ];
 

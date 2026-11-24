@@ -31,8 +31,9 @@ version.
 - Tests: golden SHA-256 hashes of whole output files (header and samples) from
   `convert_file`, for mono, stereo and six-channel input, DSF channel types 5 to 7 and
   DSDIFF files with speaker and numbered channel IDs, at every rate and cutoff and with
-  pysacd's filter, pinned to 0.1.2's files; the MSRV workflow also builds the tests with
-  Rust 1.85, which they need ([development](docs/development.md)).
+  pysacd's filter, pinned to 0.1.2's files (except DSF type 5 and the DSDIFF speakers,
+  whose channel mask changed, below); the MSRV workflow also builds the tests with Rust
+  1.85, which they need ([development](docs/development.md)).
 - Releases: the C library for Linux with musl (x86_64, aarch64), macOS on Intel (signed and
   notarised) and Windows with MinGW-w64 (`x86_64-windows-gnu`, for gcc); the command-line
   tool for musl (statically linked) and macOS on Intel; an attested source archive
