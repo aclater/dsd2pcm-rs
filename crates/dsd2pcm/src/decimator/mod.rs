@@ -725,7 +725,11 @@ impl Plan {
         let (_, plen) = self.byte_range((0, n), true);
         let s1 = self.levels((0, n), true)[0].1.div_ceil(PAD) * PAD;
         c.bytes.reserve(plen);
-        c.ev.reserve(s1);
+        // `keep` swaps `ev` with the scratch's `a`, which a pass in lanes then resizes to
+        // its output count (up to `pass`): `ev` must hold that too, or the first long pass
+        // after a short one with the carry grows `a` (seen with the precise filter at
+        // 176.4 kHz, avx2fma level).
+        c.ev.reserve(s1.max(self.pass));
         c.od.reserve(s1);
     }
 

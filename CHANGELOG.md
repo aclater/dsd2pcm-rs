@@ -114,6 +114,11 @@ version.
   least the calling one, with the same output; before, it panicked (in the C interface,
   `DSD2PCM_E_INTERNAL`). The calling thread now converts too, so a conversion starts one
   thread fewer for the same parallelism ([design](docs/design.md#frame-runs-threading-and-sharing)).
+- `frames::Converter` with the precise filter: at 176.4 kHz on the avx2fma level, a long
+  run after a short run with neighbours grew a buffer, so a call after the first could
+  allocate (one reallocation per converter). The buffer the short runs keep is now sized
+  for the long ones too. Output bytes unchanged; `tests/frames_alloc.rs` now checks every
+  filter at every SIMD level.
 
 ## 0.1.2 - 2026-11-23
 
