@@ -215,7 +215,8 @@ silent-end copies end in zeros.
 ```
 
 `crates/dsd2pcm-capi/check.sh` (header equal to cbindgen 0.29.4's output, every C test and
-the example under gcc and clang, the C++ check, then `smoke.c` and `leakloop.c` under
+the example under gcc and clang, the C++ check, the fail-closed check that the static
+library holds no claxon symbols, then `smoke.c`, `struct_size.c` and `leakloop.c` under
 clang's AddressSanitizer, LeakSanitizer and UndefinedBehaviorSanitizer) and
 `.github/scripts/capi-check.sh` with `ASAN_CC=clang` (the CI job's check), both with
 `LEAKLOOP_ITERATIONS=1000`.

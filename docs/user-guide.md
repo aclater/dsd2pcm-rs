@@ -66,7 +66,9 @@ The filter itself is chosen with `--filter`:
 | `fast` | scarletbook-pcm 0.7.0's filter, byte-identical with it; the default up to 0.1.2 | About 110 dB of stopband: SINAD 122 dB with the same source (116 dB with `wide`) | Lower: 1.11 to 1.25 times scarletbook-pcm's speed (Intel Core i9-13900H) |
 | `pysacd` | pysacd's filter and dithered quantiser, computed in `f64`; 88.2 and 176.4 kHz only | See [PCM quality](pcm-quality.md#comparisons) | – |
 
-`precise` (`Filter::Precise`) and `fast` (`Filter::Fast`) share the cutoffs, rates, exact
+`precise` is `Filter::Precise` in Rust and `DSD2PCM_FILTER_PRECISE` in C; `--filter
+default`, `Filter::default()` and `DSD2PCM_FILTER_DEFAULT` (0) name it too. `fast` is
+`Filter::Fast` and `DSD2PCM_FILTER_FAST` (3). The two share the cutoffs, rates, exact
 integer arithmetic, centring and rounding; `precise` has about half the passband ripple.
 On the real discs measured, the recording's own noise set the floor with either filter,
 and `precise` lowered it by 1.1 dB in the quietest second; the difference shows most with sources quieter
