@@ -9,15 +9,17 @@ with its measured effect. Releases up to 0.1.2 keep their behaviour as released.
 
 ## Unreleased
 
-### Breaking changes (Rust API)
+### Changed
+
+#### Breaking changes (Rust API)
 
 Each with what to change in a caller. The C interface stays ABI version 1, with additions only.
 
 - `Filter::Default` is removed; `Filter::Fast` is that filter (0.1.x's default), and
   `Filter::Precise` is now `Filter::default()`, so `PcmOptions::new` and
-  `frames::PcmConfig::new` select it (see Changed (output)). Migration: use `Filter::Fast`
-  where `Filter::Default` was named to keep its output. The variants name the filters, not
-  which one is the default, so a later change of default renames nothing.
+  `frames::PcmConfig::new` select it (see Output below). Migration: use `Filter::Fast` where
+  `Filter::Default` was named to keep its output. The variants name the filters, not which
+  one is the default, so a later change of default renames nothing.
   `decimator::Decimator` keeps scarletbook-pcm's filters.
 - `Error::Format`, `Error::Unsupported` and `Error::InvalidArgument` hold `FormatError`,
   `UnsupportedError` and `ArgumentError` instead of a `String`: a kind to match on
@@ -40,7 +42,7 @@ Each with what to change in a caller. The C interface stays ABI version 1, with 
   outside the crate can no longer implement them. `io::DsdRead` stays open, since
   `dsd64_to_pcm` converts callers' own sources.
 
-### Changed (output)
+#### Output
 
 - Output stability rule: output is deterministic within a release (the same version, input
   and settings give the same bytes on every CPU and SIMD level). Between releases it may
@@ -78,85 +80,7 @@ Each with what to change in a caller. The C interface stays ABI version 1, with 
   and DSDIFF files with other speaker sets, such as FL FR LFE, were labelled by their
   count. The samples are unchanged.
 
-### Added
-
-- No-clobber output: the tool's `-n` / `--no-clobber`, the library's `convert_file_to` with
-  `OutputOptions { no_clobber, .. }`, and the C interface's
-  `dsd2pcm_file_options.no_clobber` (appended; callers built against the 0.1.0 header keep
-  working) with the new status `DSD2PCM_E_EXISTS`. An existing output is refused and left
-  as it was, and the result is put in place without ever replacing a file that appeared
-  during the conversion: a hard link, or on file systems without hard links an exclusive
-  create then a rename ([design](docs/design.md#output-files)).
-- Channel layouts: `WavReader::channel_mask` and `FlacReader::channel_mask` (and
-  `PcmRead::channel_mask`) give the channel mask a file declares (`WAVE_FORMAT_EXTENSIBLE`,
-  or FLAC's `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` comment); `DsdRead::channel_mask` the
-  layout of a DSF channel type or of DSDIFF channel IDs; `WavWriter::with_channel_mask`,
-  `DsfWriter::set_channel_mask`, `dsf::channel_mask_for_type` and
-  `dsf::channel_type_for_mask` ([user guide](docs/user-guide.md#formats)).
-- C library: CI, `crates/dsd2pcm-capi/check.sh` and the release archive checks verify that
-  the libraries hold no claxon (FLAC decoder) symbols, by their symbol tables (`nm`), and
-  CI checks that the check catches a library built with `--features flac`
-  ([C interface](docs/c-api.md#checks)). The check fails closed (an nm error, or an archive
-  member nm did not list, fails it), has its own tests on small archives with a planted
-  claxon symbol, and reads Mach-O symbol tables on macOS: Xcode's `nm` otherwise reads the
-  LLVM bitcode embedded in Rust's `compiler_builtins` objects, fails on bitcode from a newer
-  LLVM, and skipped those members.
-- CI: a check that tracked files and commit identities hold no private names or addresses
-  ([testing](docs/testing.md#private-names)).
-- Docs: the shared DSD Toolbox docs checks in `docs.yml` (page and README shape, links in
-  every Markdown file, the facts regions, a docs change with every code change on pull
-  requests, and weekly the README's Quick start against the published release), and a
-  `docs-audit` workflow to run after each release
-  ([releasing](docs/release.md#after-the-release-run-the-docs-audit)). lychee now checks the
-  external links only; the shared check covers relative links and anchors.
-- Tests: golden SHA-256 hashes of whole output files (header and samples) from
-  `convert_file`, for mono, stereo and six-channel input, DSF channel types 5 to 7 and
-  DSDIFF files with speaker and numbered channel IDs, at every rate and cutoff and with
-  pysacd's filter, pinned to 0.1.2's files (except DSF type 5 and the DSDIFF speakers,
-  whose channel mask changed, and pysacd's, now computed in `f64`; see Changed (output)); the MSRV workflow also builds the tests with Rust
-  1.85, which they need ([development](docs/development.md)).
-- Releases: the C library for Linux with musl (x86_64, aarch64), macOS on Intel (signed and
-  notarised) and Windows with MinGW-w64 (`x86_64-windows-gnu`, for gcc); the command-line
-  tool for musl (statically linked) and macOS on Intel; an attested source archive
-  (`dsd2pcm-<version>-src.tar.gz`, from `git archive`). On x86_64 Linux the static
-  library's objects are marked for the CET shadow stack.
-  [c-api.md](docs/c-api.md#binary-releases) explains how to embed the static library in a
-  shared library with its symbols hidden.
-- New filter `precise` (`--filter precise`, `Filter::Precise`,
-  `DSD2PCM_FILTER_PRECISE`), the default since this release (see Changed): every rate and
-  cutoff, exact integer arithmetic like scarletbook-pcm's filters, at least 150 dB of stopband
-  wherever ultrasonic content folds into the passband
-  (`fast`: about 110 dB) and about half the passband ripple. With a very quiet DSD64
-  source the audio-band floor falls from -128 dBFS (SINAD 122 dB) to the 24-bit output's,
-  about -150 dBFS (SINAD 142 to 145 dB); it takes about twice the CPU time
-  ([PCM quality](docs/pcm-quality.md#the-precise-filter)). Its taps come from
-  `tools/filters/design_precise.py`.
-- Tests: golden SHA-256 hashes of the precise filter, named and as the default, at every
-  SIMD level, for the sample tests (`tests/identity.rs`) and the whole output files
-  (`tests/golden_files.rs`); the fast filter's golden hashes are unchanged.
-  The C tests check every `DSD2PCM_FILTER_*` value and what each selects.
-- Docs: [PCM quality](docs/pcm-quality.md), the measured audio quality of every filter and
-  rate (frequency response, aliasing, ringing, noise, ultrasonic noise, headroom, an
-  RMAA-style summary; the pysacd preset, scarletbook-pcm 0.7.0 and the foobar2000 SACD
-  plug-in compared), with the measurement scripts in `tools/quality`.
-- `Threads::Count(n)` runs a conversion on at most n threads (up to 256), and the C
-  interface's `dsd2pcm_file_options.threads` takes n > 1 the same way (it was refused), as
-  does the tool's new `--threads N` (1 to 256; 1 is `--single-thread`). The output bytes are
-  the same for every count (tested from 1 to 7, all cores and above the cap, with every
-  filter; the tool's test at 1, 2, 3, 5, 7, 64 and 256 against all cores).
-- `WavReader::declared_frames`: the frames a WAV file's `data` size declares, which is more
-  than `info().frames` when the file is cut short. `FlacReader::declared_frames`: the
-  frames STREAMINFO declares, which is less than `info().frames` at the end of a stream that
-  holds more. `DsfReader::skipped_metadata_len`: the
-  size of a DSF tag over `MAX_METADATA` (16 MiB) that was not loaded; before, such a tag
-  was dropped without a trace ([design](docs/design.md#robustness)).
-- C interface: `tests/struct_size.c` checks `struct_size` versioning from C, also under
-  AddressSanitizer and UndefinedBehaviorSanitizer: a `dsd2pcm_file_options` of the 0.1.0
-  size (no `no_clobber`) passed as a heap block of exactly that size and as one followed
-  by a set `no_clobber` that must not be read, the current size, larger ones with zero and
-  non-zero extra bytes, and the same for the other structs.
-
-### Changed
+#### Other changes
 
 - Docs, methodology and measurement data are now CC BY 4.0; code stays MIT OR Apache-2.0.
   Added NOTICE and CITATION.cff ([licence and credits](README.md#licence-and-credits)).
@@ -210,6 +134,84 @@ Each with what to change in a caller. The C interface stays ABI version 1, with 
 - Readers: the rules for files that bend their format (WAV cut short, DSDIFF `DSD ` chunk
   not a multiple of the channel count, DSF tag over 16 MiB) are documented with a test
   each ([design](docs/design.md#robustness)); their behaviour is unchanged.
+
+### Added
+
+- No-clobber output: the tool's `-n` / `--no-clobber`, the library's `convert_file_to` with
+  `OutputOptions { no_clobber, .. }`, and the C interface's
+  `dsd2pcm_file_options.no_clobber` (appended; callers built against the 0.1.0 header keep
+  working) with the new status `DSD2PCM_E_EXISTS`. An existing output is refused and left
+  as it was, and the result is put in place without ever replacing a file that appeared
+  during the conversion: a hard link, or on file systems without hard links an exclusive
+  create then a rename ([design](docs/design.md#output-files)).
+- Channel layouts: `WavReader::channel_mask` and `FlacReader::channel_mask` (and
+  `PcmRead::channel_mask`) give the channel mask a file declares (`WAVE_FORMAT_EXTENSIBLE`,
+  or FLAC's `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` comment); `DsdRead::channel_mask` the
+  layout of a DSF channel type or of DSDIFF channel IDs; `WavWriter::with_channel_mask`,
+  `DsfWriter::set_channel_mask`, `dsf::channel_mask_for_type` and
+  `dsf::channel_type_for_mask` ([user guide](docs/user-guide.md#formats)).
+- C library: CI, `crates/dsd2pcm-capi/check.sh` and the release archive checks verify that
+  the libraries hold no claxon (FLAC decoder) symbols, by their symbol tables (`nm`), and
+  CI checks that the check catches a library built with `--features flac`
+  ([C interface](docs/c-api.md#checks)). The check fails closed (an nm error, or an archive
+  member nm did not list, fails it), has its own tests on small archives with a planted
+  claxon symbol, and reads Mach-O symbol tables on macOS: Xcode's `nm` otherwise reads the
+  LLVM bitcode embedded in Rust's `compiler_builtins` objects, fails on bitcode from a newer
+  LLVM, and skipped those members.
+- CI: a check that tracked files and commit identities hold no private names or addresses
+  ([testing](docs/testing.md#private-names)).
+- Docs: the shared DSD Toolbox docs checks in `docs.yml` (page and README shape, links in
+  every Markdown file, the facts regions, a docs change with every code change on pull
+  requests, and weekly the README's Quick start against the published release), and a
+  `docs-audit` workflow to run after each release
+  ([releasing](docs/release.md#after-the-release-run-the-docs-audit)). lychee now checks the
+  external links only; the shared check covers relative links and anchors.
+- Tests: golden SHA-256 hashes of whole output files (header and samples) from
+  `convert_file`, for mono, stereo and six-channel input, DSF channel types 5 to 7 and
+  DSDIFF files with speaker and numbered channel IDs, at every rate and cutoff and with
+  pysacd's filter, pinned to 0.1.2's files (except DSF type 5 and the DSDIFF speakers,
+  whose channel mask changed, and pysacd's, now computed in `f64`; see Changed, Output);
+  the MSRV workflow also builds the tests with Rust 1.85, which they need ([development](docs/development.md)).
+- Releases: the C library for Linux with musl (x86_64, aarch64), macOS on Intel (signed and
+  notarised) and Windows with MinGW-w64 (`x86_64-windows-gnu`, for gcc); the command-line
+  tool for musl (statically linked) and macOS on Intel; an attested source archive
+  (`dsd2pcm-<version>-src.tar.gz`, from `git archive`). On x86_64 Linux the static
+  library's objects are marked for the CET shadow stack.
+  [c-api.md](docs/c-api.md#binary-releases) explains how to embed the static library in a
+  shared library with its symbols hidden.
+- New filter `precise` (`--filter precise`, `Filter::Precise`,
+  `DSD2PCM_FILTER_PRECISE`), the default since this release (see Changed, Output): every rate and
+  cutoff, exact integer arithmetic like scarletbook-pcm's filters, at least 150 dB of stopband
+  wherever ultrasonic content folds into the passband
+  (`fast`: about 110 dB) and about half the passband ripple. With a very quiet DSD64
+  source the audio-band floor falls from -128 dBFS (SINAD 122 dB) to the 24-bit output's,
+  about -150 dBFS (SINAD 142 to 145 dB); it takes about twice the CPU time
+  ([PCM quality](docs/pcm-quality.md#the-precise-filter)). Its taps come from
+  `tools/filters/design_precise.py`.
+- Tests: golden SHA-256 hashes of the precise filter, named and as the default, at every
+  SIMD level, for the sample tests (`tests/identity.rs`) and the whole output files
+  (`tests/golden_files.rs`); the fast filter's golden hashes are unchanged.
+  The C tests check every `DSD2PCM_FILTER_*` value and what each selects.
+- Docs: [PCM quality](docs/pcm-quality.md), the measured audio quality of every filter and
+  rate (frequency response, aliasing, ringing, noise, ultrasonic noise, headroom, an
+  RMAA-style summary; the pysacd preset, scarletbook-pcm 0.7.0 and the foobar2000 SACD
+  plug-in compared), with the measurement scripts in `tools/quality`.
+- `Threads::Count(n)` runs a conversion on at most n threads (up to 256), and the C
+  interface's `dsd2pcm_file_options.threads` takes n > 1 the same way (it was refused), as
+  does the tool's new `--threads N` (1 to 256; 1 is `--single-thread`). The output bytes are
+  the same for every count (tested from 1 to 7, all cores and above the cap, with every
+  filter; the tool's test at 1, 2, 3, 5, 7, 64 and 256 against all cores).
+- `WavReader::declared_frames`: the frames a WAV file's `data` size declares, which is more
+  than `info().frames` when the file is cut short. `FlacReader::declared_frames`: the
+  frames STREAMINFO declares, which is less than `info().frames` at the end of a stream that
+  holds more. `DsfReader::skipped_metadata_len`: the
+  size of a DSF tag over `MAX_METADATA` (16 MiB) that was not loaded; before, such a tag
+  was dropped without a trace ([design](docs/design.md#robustness)).
+- C interface: `tests/struct_size.c` checks `struct_size` versioning from C, also under
+  AddressSanitizer and UndefinedBehaviorSanitizer: a `dsd2pcm_file_options` of the 0.1.0
+  size (no `no_clobber`) passed as a heap block of exactly that size and as one followed
+  by a set `no_clobber` that must not be read, the current size, larger ones with zero and
+  non-zero extra bytes, and the same for the other structs.
 
 ### Fixed
 
