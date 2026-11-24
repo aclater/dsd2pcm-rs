@@ -23,11 +23,17 @@ The two side by side, from the [precise filter](#the-precise-filter) section bel
 | CPU time against scarletbook-pcm 0.7.0 (Intel Core i9-13900H, [performance](performance.md#precise-and-fast-against-scarletbook-pcm-070)) | 1.30 to 1.91 times | 0.80 to 0.90 times |
 | Output | deterministic within a release | the same bytes as scarletbook-pcm 0.7.0 |
 
+Measured with (this table): dsd2pcm at commit `e5871b4` for `precise` and `fast`,
+and the scripts in [tools/quality](../tools/quality/README.md) at the same commit
+(dsd-measure is not used on this page; it runs the [release comparison](quality/README.md));
+the full set of versions and the host CPU is under [reproducing](#reproducing-the-measurements).
+CPU time: Intel Core i9-13900H.
+
 With the 5th-order test signals below, both are limited by the test signal: `precise`
 measures the source's noise (-122.5 dBFS), `fast` -121.9 dBFS (-118.8 dBFS with `wide`). Unless a
 section says otherwise, the figures from here to the precise filter section are `fast`'s,
 measured on DSD64 test signals and from the filters' exact taps. "Source" is the test DSD
-itself, analysed as a bitstream: the best any converter could show with it.
+itself, analysed as a bitstream: the reference each converter's figures are set against.
 
 | | 30 kHz filter | 40 kHz filter (default) | wide filter |
 |---|---|---|---|
@@ -49,7 +55,7 @@ At every rate and filter:
 - **24-bit output, rounded, not dithered.** The rounding noise (-153 dBFS in 20 Hz-20 kHz at 176.4 kHz) is 30 dB below the DSD64 test signal's own noise.
 - **Filter floor:** with a very quiet DSD64 source the filters themselves limit the audio band to about -128 dBFS (-122 dBFS with `wide`): a stopband limit, measured and explained [below](#filter-floor-with-very-quiet-sources).
 - **The precise filter**, the default from 0.2.0, removes that floor: 150 dB and more of stopband wherever content folds into the passband, SINAD 142 to 145 dB with that source (the 24-bit output's limit), about half the passband ripple, at about twice the CPU time ([details](#the-precise-filter)).
-- **Against the foobar2000 SACD plug-in** (2.0.27): equal in the audio band within 0.6 dB, the plug-in slightly quieter; dsd2pcm keeps DSD silence and timing exact and passes far less ultrasonic noise than the plug-in's default mode ([details](#comparisons)).
+- **Against the foobar2000 SACD plug-in** (2.0.27): equal in the audio band within 0.6 dB, the plug-in slightly quieter; dsd2pcm keeps DSD silence and timing exact and passes -70.2 dBFS of ultrasonic noise above 20 kHz at 352.8 kHz, against -35.1 dBFS from the plug-in's default mode ([details](#comparisons)).
 
 With the 5th-order test signals the figures are limited by the test signal, not by the converter: THD+N, noise and
 dynamic range are within 0.1 to 0.6 dB of what the DSD itself contains, except the wide
@@ -74,6 +80,11 @@ The DSD itself is also analysed directly, as a bitstream, so each result can be 
 what the source contained. Where a figure is limited by the test signal rather than by the
 converter, this page says so.
 
+Measured with, unless a section says otherwise: dsd2pcm `fast` at commit `172eb97`, the
+scripts in tools/quality at that commit, on Linux x86_64 with an AMD Ryzen AI MAX+ 395
+(the full list is under [reproducing](#reproducing-the-measurements)); dsd-measure is not used
+on this page.
+
 **The test signals.** The set follows what reviewers publish, so results can be compared
 like for like. The method follows the DSD-to-PCM comparison of
 [Archimago](https://archimago.blogspot.com/)
@@ -82,7 +93,8 @@ his DSD test signals and level rules
 ([2021](https://archimago.blogspot.com/2021/10/measurements-look-at-dsd-and-using-sox.html),
 [2022](https://archimago.blogspot.com/2022/06/notes-on-dac-dsd-1-bit-pdm-measurements.html)),
 the [RightMark Audio Analyzer](http://audio.rightmark.org/) (RMAA) summary, and AES17 for
-the measurement bandwidth (20 Hz to 20 kHz), A-weighting and the dynamic range method. The
+the measurement bandwidth (20 Hz to 20 kHz). The noise and dynamic range figures are
+AES17-style, not AES17: the deviations are [listed below](#aes17-style-not-aes17). The
 measurement practice of [Audio Science Review](https://www.audiosciencereview.com/) and of
 John Atkinson at [Stereophile](https://www.stereophile.com/content/measurements-maps-precision)
 (multitone, J-Test, linearity, raw-sample impulse plots) was the reference for the
@@ -135,6 +147,37 @@ Blackman-Harris window, 2^18-point FFTs for tones (2^20 for the multitone, recta
 its tones sit exactly on bins), Welch averaging of 8 for noise, the first 0.5 s of every
 steady part skipped, and tones moved to exact FFT bins (multiples of 352 800 / 2^18 Hz).
 
+### AES17-style, not AES17
+
+The method takes two things from AES17 (*AES standard method for digital audio
+engineering: measurement of digital audio equipment*, AES17-2020): the 20 Hz to 20 kHz
+measurement band and levels in dBFS relative to a full-scale sine. Nothing on this page is
+an AES17 measurement or claims AES17 conformance. What `analyse.py` and `signals.toml` do
+differently (clause numbers of AES17-2020):
+
+- **Test tone:** 999.95 Hz (1 kHz moved onto an FFT bin), not 997 Hz.
+- **Level:** THD, THD+N and SINAD of a tone at 0 dB SACD, which is -6.02 dBFS in the
+  output; AES17 measures THD+N at -1 dB and -20 dB relative to the maximum level
+  (clause 6.3.2).
+- **Dynamic range:** a 1 kHz step at -60 dB SACD (-66.02 dBFS) in a stepped-level signal,
+  the noise and distortion beside it given relative to 0 dB SACD, A-weighted; AES17 uses
+  997 Hz at -60 dB relative to the maximum level, the result relative to full scale and
+  CCIR-RMS weighted (clause 6.4.1).
+- **Weighting:** A-weighting (IEC 61672-1, 0 dB at 1 kHz) for the weighted noise and
+  dynamic range figures; the AES17 weighting is CCIR-RMS, the ITU-R BS.468 response
+  (clause 5.2.7). All other figures are unweighted.
+- **Notch:** no notch filter. The tone is removed by leaving out 8 FFT bins on each side
+  of it: ±2.7 Hz at 88.2 kHz, ±5.4 Hz at 176.4 kHz and ±10.8 Hz at 352.8 kHz output
+  (±5.4 Hz at every rate for the dynamic range step). AES17's notch has a Q of 1.2 to 3
+  (clause 5.2.8) and so also removes the energy close to the tone, which counts here.
+- **Band limit:** a brick-wall sum of FFT bins from 20 Hz to 20 kHz, not AES17's standard
+  low-pass filter (clause 5.2.5).
+- **Averaging:** tones from a single 2^18-point FFT (7-term Blackman-Harris window), no
+  averaging; noise from Welch averaging of 8 records with 50 % overlap.
+- **Stimulus:** the device's input is DSD64 from a test modulator, not PCM dithered at the
+  input word length (clause 5.1.3); the modulator's noise is in every figure, so the
+  source's own figures stand beside the converter's in every table.
+
 ## Levels and headroom
 
 dsd2pcm maps 100 % DSD modulation (a stream of all ones) to 24-bit full scale at 0 dB
@@ -157,7 +200,8 @@ that by 1/8 to 2^23 and rounds. So, with the Scarlet Book's levels (as
   which leaves room for them. Raising `--gain` uses that room up.
 - **Clipping is clamped and counted, never wrapped.** The command prints the number of
   clipped samples, in all and per channel; the library reports them per frame. A clipped
-  sample sounds like any digital clipping: a short burst of harsh distortion on the peak.
+  sample is ordinary digital clipping: the peak is flattened at full scale, which adds
+  distortion products while it lasts.
   If a disc clips, convert it again with a lower `--gain` (for example `--gain -3`).
 
 ![Headroom](assets/quality/headroom.svg)
@@ -187,8 +231,7 @@ more. The 20 kHz line marks the top of the audio band.*
 
 ![Passband ripple](assets/quality/filter-passband.svg)
 
-*Zoomed to ±0.006 dB: the ripple of every filter stays within ±0.004 dB, about a thousandth
-of the smallest level difference anyone can hear.*
+*Zoomed to ±0.006 dB: the ripple of every filter stays within ±0.004 dB.*
 
 The filters' exact response, from their taps (the pysacd preset in the last two rows):
 
@@ -233,12 +276,12 @@ steep linear-phase low-pass has; it mirrors before the step.*
 
 | Option | Offered | Why |
 |---|---|---|
-| 40 kHz passband, 48 kHz stopband (default) | yes | Flat far past hearing; removes DSD64's noise from 48 kHz up, where it rises steeply. The Scarlet Book recommends a low-pass around 50 kHz for DSD64 playback (Annex D, as cited by Archimago, 2022). |
-| 30 kHz passband, 36 kHz stopband | yes | Less of DSD64's ultrasonic noise in the file, for amplifiers or tweeters that dislike it. |
-| wide: 80 kHz passband (176.4 and 352.8 kHz) | yes | Keeps everything a DSD64 stream holds to 80 kHz, for listeners who want the ultrasonic band. It follows the Philips blind tests cited in [sacdfs's filter decision](https://github.com/dsd-toolbox/sacdfs/blob/main/docs/pcm-quality.md#the-filters), which found 80 to 100 kHz filters undetectable and a 50 kHz one detectable; 40 kHz stays the default. |
+| 40 kHz passband, 48 kHz stopband (default) | yes | Flat to 40 kHz, twice the 20 kHz top of the audio band; removes DSD64's noise from 48 kHz up, where it rises steeply. The Scarlet Book recommends a low-pass around 50 kHz for DSD64 playback (Annex D, as cited by Archimago, 2022). |
+| 30 kHz passband, 36 kHz stopband | yes | Less of DSD64's ultrasonic noise in the file (-88.3 against -70.2 dBFS above 20 kHz), for playback chains that should receive less ultrasonic content. |
+| wide: 80 kHz passband (176.4 and 352.8 kHz) | yes | Keeps everything a DSD64 stream holds to 80 kHz, for listeners who want the ultrasonic band. It follows the Philips blind tests cited in [sacdfs's filter decision](https://github.com/dsd-toolbox/sacdfs/blob/main/docs/pcm-quality.md#the-filters), which report 80 to 100 kHz filters as not detected by their listeners and a 50 kHz one as detected. That is the cited source's listening result; no listening test was made here. 40 kHz stays the default. |
 | `fast` | yes | scarletbook-pcm 0.7.0's filter, byte-identical with it: lower CPU time, about 110 dB of stopband. The default up to 0.1.2. |
 | pysacd preset | yes | pysacd's own filter, for byte-identical output with pysacd. |
-| minimum phase, apodizing, "slow" roll-off | no | They trade passband phase or treble response for less pre-ringing, which here is ultrasonic and not excited by music (see the questions at the end). |
+| minimum phase, apodizing, "slow" roll-off | no | They trade passband phase or treble response for less pre-ringing, which here is at the transition band (32 to 85 kHz) and excited only by content there (see the questions at the end). |
 | dither | no | See [resolution](#resolution-noise-dynamic-range-rounding). |
 
 ## Bandwidth and ultrasonic noise
@@ -262,8 +305,9 @@ at 36 and 48 kHz; the wide filter keeps it to 96 kHz.*
 (352.8 kHz output; the source columns are the bitstreams themselves.)
 
 - **What "wide" lets through.** With DSD64, almost everything it keeps above 40 kHz is the
-  modulator's noise, at -50 dBFS: about 45 dB below a 0 dB SACD tone. Some amplifiers and
-  tweeters handle that poorly; that is the reason the 40 kHz default exists. With DSD128 or
+  modulator's noise, at -50 dBFS: about 45 dB below a 0 dB SACD tone. The 40 kHz default
+  keeps it out of the file (-72.2 dBFS in 40-96 kHz) for playback chains that should not
+  receive it. With DSD128 or
   DSD256 sources the 40-96 kHz band is 17 to 50 dB quieter, which is where a wide filter
   starts to make sense; dsd2pcm does not convert those rates yet.
 - **The wide filter's in-band noise is 3 dB higher** (-118.8 against -121.9 dBFS). This is
@@ -291,13 +335,16 @@ specification.
 
 - **The noise floor is the DSD's, not the converter's.** In 20 Hz to 20 kHz the output of
   modulated silence is -121.9 dBFS (-123.8 dB(A)); the test DSD itself has -122.5 dBFS.
-  Relative to 0 dB SACD that is a noise level of -117.8 dB(A), and the dynamic range by the
-  AES17 method (a -60 dB SACD tone) is 107.0 dB(A), against 107.1 dB(A) in the source. A
+  Relative to 0 dB SACD that is a noise level of -117.8 dB(A), and the dynamic range by an
+  AES17-style method (a -60 dB SACD tone; [deviations](#aes17-style-not-aes17)) is
+  107.0 dB(A), against 107.1 dB(A) in the source. A
   good SACD master has a lower floor than this test modulator; the converter's own floor is
   about -128 dBFS ([filter floor](#filter-floor-with-very-quiet-sources)) and the rounding's
   -153 dBFS.
-- **24 bits are more than enough.** The rounding to 24 bits adds -146 dBFS of noise over the
-  whole band at 176.4 kHz, -153 dBFS of it in 20 Hz-20 kHz: 30 dB below the source's noise.
+- **24-bit rounding is 30 dB below this test signal's noise.** The rounding to 24 bits adds
+  -146 dBFS of noise over the whole band at 176.4 kHz, -153 dBFS of it in 20 Hz-20 kHz: 30 dB
+  below the source's noise. With a much quieter source it sets the floor of the precise
+  filter ([limits](#the-precise-filter)).
 - **Rounding, not truncation.** Every stage rounds half to even. Truncation would add a
   constant offset of half an LSB (-144 dBFS of DC) and an error correlated with the signal.
   Measured DC on modulated silence: -175 dBFS with the 30 and 40 kHz filters.
@@ -319,7 +366,7 @@ specification.
 output (orange) lies on the source (grey); the bump around -40 dBFS is the test modulator's
 noise modulation. Bottom: measured minus requested level.*
 
-## Transparency
+## Determinism, gain, timing and channels
 
 | Property | Result |
 |---|---|
@@ -340,11 +387,13 @@ In the layout of [RMAA](http://audio.rightmark.org/)'s summary, as
 (no RMAA). Our conventions, stated exactly: levels relative to 0 dB SACD (RMAA normalises to
 its own reference level; ours is 0 dB SACD, -6.02 dBFS); 20 Hz to 20 kHz; noise level is
 A-weighted modulated silence; dynamic range is 60 dB plus the A-weighted noise and
-distortion beside a -60 dB SACD 1 kHz tone (AES17); THD (harmonics 2 to 9) and THD+N of
+distortion beside a -60 dB SACD 1 kHz tone (AES17-style, [deviations](#aes17-style-not-aes17)); THD (harmonics 2 to 9) and THD+N of
 1 kHz at 0 dB SACD; IMD SMPTE is 60 Hz and 7 kHz at 4:1 (sidebands to the 4th order); IMD
 CCIF is 19 and 20 kHz at 1:1 (difference and 3rd-order products); crosstalk is at 1 kHz,
 0 dB SACD; frequency response is the range of 1/3-octave tones relative to 1 kHz. All from
-the DSD64 versions of the 24/88.2 test signals.
+the DSD64 versions of the 24/88.2 test signals. Measured with: dsd2pcm `fast` at commit
+`172eb97`, tools/quality at that commit, on an AMD Ryzen AI MAX+ 395 (details under
+[reproducing](#reproducing-the-measurements)); dsd-measure not used.
 
 | Decoder and setting | Noise level, dB(A) | Dynamic range, dB(A) | THD, % | THD+N, dB | IMD+N SMPTE, % | IMD CCIF, % | Crosstalk at 1 kHz, dB | Frequency response 20 Hz-20 kHz, dB |
 |---|---:|---:|---:|---:|---:|---:|---|---|
@@ -362,14 +411,13 @@ the DSD64 versions of the 24/88.2 test signals.
 
 - **Every dsd2pcm row is within 0.4 dB of the source row**, except the wide filter's noise
   (explained under [bandwidth](#bandwidth-and-ultrasonic-noise)). The numbers describe the
-  test modulator; the converter does not degrade them measurably.
+  test modulator; the converter changes them by 0.4 dB or less.
 - **Crosstalk** reads the silent channel's own noise in one FFT bin: the converter has no
   path between channels.
-- Archimago's point holds here too: these differences sit 100 dB or more below the music,
-  and noise below about -130 to -150 dB is not audible.
+- These differences of 0.4 dB or less are on figures 100 dB or more below a 0 dB SACD tone.
 
 **With a better modulator.** SoX-DSD's 8th-order CLANS modulator with trellis search makes
-much cleaner DSD64 than the reference modulator, and dsd2pcm passes that on: the 32-tone
+DSD64 with less distortion and noise than the reference modulator, and dsd2pcm passes that on: the 32-tone
 multitone's distortion-free range (from the weakest tone to the highest residual bin, 15 Hz
 to 22 kHz) is 121.1 dB with SoX-DSD's DSD against 96.6 dB with ours, and a 1 kHz tone's
 THD+N is -113.7 dB against -108.5 dB. That is despite a 6 dB handicap: the SoX-DSD build
@@ -406,6 +454,10 @@ The figures above are limited by the test signal. With a much quieter DSD64 sour
 filters' own floor shows: about -128 dBFS in the audio band, -122 dBFS with the wide
 filter. This is a measured limit of the filters, reproduced here after an external
 measurement found it.
+
+Measured with: dsd2pcm `fast` (its samples equal scarletbook-pcm 0.7.0's at every commit,
+checked by the identity test) and the pysacd preset, with tools/quality as committed in
+`4648fdf`, which added this section; dsd-measure not used.
 
 **The source.** An 8th-order version of the reference modulator: noise transfer function
 zeros at the roots of the 8th-order Legendre polynomial across 20 kHz, Butterworth poles,
@@ -463,6 +515,12 @@ phase and cutoffs) and deepens the stopband to 150 dB and more wherever ultrason
 folds into the passband. How it is built is in [design](design.md#the-precise-filter-filterprecise).
 It is the default from 0.2.0, the first release with it; `--filter fast` keeps
 scarletbook-pcm's filter and bytes.
+
+Measured with: dsd2pcm at commit `e5871b4` (the precise filter's tables are unchanged
+since `6d4dfa7`, and golden hashes pin its output), tools/quality at that commit, ffmpeg
+9.0.2 (Fedora 45), Python and its packages as under [reproducing](#reproducing-the-measurements);
+dsd-measure not used. The host CPU of this run was not recorded; dsd2pcm's output is the
+same bytes on every CPU and SIMD level.
 
 **From the taps** (`filters.py --precise`; exact composite responses, as above; ripple is
 the largest deviation from the gain at DC, either way):
@@ -564,8 +622,9 @@ the source.*
 about 75 dB below the music, almost all of it the two filters' passband ripples (both
 within ±0.004 dB). In the quietest second of the one track with a near-silent lead-in the
 floor fell from -124.6 to -125.7 dBFS (the difference, -131.0 dBFS, is the folded noise
-the precise filter removes). On these masters the recording's own noise is far above both
-floors; the precise filter matters for quiet, well-made sources and for measurements.
+the precise filter removes). On these masters the recording's own noise sets the floor
+with either filter; in the quietest second the precise filter lowered it by 1.1 dB. Its lower floor
+shows most with sources quieter than `fast`'s -128 dBFS, and in measurements.
 
 **Limits, stated plainly.**
 
@@ -603,10 +662,10 @@ own 30 kHz filter.
 
 ![30 kHz filter against a separate low-pass](assets/quality/lp30.svg)
 
-dsd2pcm's 30 kHz filter is the better of the two in the audio band: a separate low-pass
-cannot remove noise that an earlier wide stage has already folded into the band. Above
-36 kHz the reference low-pass goes deeper (it is not limited by 24-bit output), which
-matters to no one.
+dsd2pcm's 30 kHz filter measures 3.1 dB less noise in the audio band (2.6 dB A-weighted)
+and 0.4 dB lower THD+N: a separate low-pass cannot remove noise that an earlier wide stage
+has already folded into the band. From 40 kHz up the reference low-pass goes deeper
+(below -200 against -150.9 dBFS in 40-96 kHz; it is not limited by 24-bit output).
 
 ## Comparisons
 
@@ -640,9 +699,8 @@ Kaiser-windowed linear-phase FIR stages in 32-bit floating point and a TPDF-dith
 - **Where it is worse:** its TPDF dither adds 1 dB of in-band noise and turns DSD silence
   into noise; at 176.4 kHz it passes DSD64's noise up to about 80 kHz (-54 dBFS above 20 kHz,
   16 dB more than the 40 kHz filter); and its output is offset from the DSD timeline by a
-  fraction of a sample (constant, the same in both channels, inaudible).
-- **Neither difference is audible.** Use the preset when files must match pysacd's byte for
-  byte.
+  fraction of a sample (constant, the same in both channels).
+- **Use the preset when files must match pysacd's byte for byte.**
 
 **sacd_extract.** The sacd_extract build available to us (the commonly distributed
 command-line tool, run as a black box) has no PCM output: it writes DSF, DSDIFF or an ISO
@@ -660,6 +718,11 @@ Direct with a 30 kHz low-pass, each in 32-bit and 64-bit floating point, and Ins
 FIR with each of the four filter files it ships (30, 40, 50 and 60 kHz, 641 taps); the
 default mode also at 176.4 kHz. The 32-bit and 64-bit float variants measured the same
 except where noted, so the tables show one of each.
+
+Measured with: the plug-in's output files analysed by tools/quality as committed in `cd25bca`
+beside dsd2pcm `fast` (samples equal to scarletbook-pcm 0.7.0's at every commit); dsd-measure
+not used. The analysis ran on the host under [reproducing](#reproducing-the-measurements);
+the CPU of the Windows virtual machine's host was not recorded.
 
 **Levels match.** At volume 0 dB the plug-in maps 100 % modulation to full scale, as
 dsd2pcm does: 0 dB SACD reads -6.02 dBFS in both, so no level correction was applied. Its
@@ -704,11 +767,11 @@ What the numbers say:
   quieter one.** Its Multistage and Installable FIR modes leave exactly the source's noise
   (-122.5 dBFS) where dsd2pcm's 110 dB stopband lets 0.6 dB more fold in. THD+N, IMD and
   dynamic range are the same: all of them are the test signal's.
-- **The default Multistage mode is barely a filter at 352.8 kHz.** It passes DSD64's noise
+- **The default Multistage mode filters little at 352.8 kHz.** It passes DSD64's noise
   almost unchanged to 176 kHz (-35 dBFS above 20 kHz, against -70 dBFS with dsd2pcm's
-  default), and its impulse response is close to a single sample. That is the most
-  "open" decode possible, and it also means the most ultrasonic noise for the amplifier and
-  the least headroom: a tone at the +3.1 dB SACD peak level gave sample peaks of -0.87 dBFS
+  default), and its impulse response is close to a single sample (0.011 ms above -60 dB).
+  Of the modes measured it passes the most ultrasonic noise and leaves the least
+  headroom: a tone at the +3.1 dB SACD peak level gave sample peaks of -0.87 dBFS
   (-2.09 dBFS with dsd2pcm). At 176.4 kHz it passes the noise up to that rate's Nyquist
   frequency (-49.9 dBFS above 20 kHz, like dsd2pcm's wide filter).
 - **Direct (30 kHz) folds noise into the band**: -118.8 dBFS in 20 Hz-20 kHz, 3.7 dB above
@@ -726,10 +789,11 @@ What the numbers say:
   centred on it by design), the plug-in's output is 0 to 1 samples late on some files and
   40 to 41 samples later (about 116 µs at 352.8 kHz, 227 µs at 176.4 kHz) on others, in
   every mode, with the file length unchanged; we did not find what decides it. Both
-  channels move together, so it is inaudible, but files converted from the same DSD do not
-  line up sample for sample.
-- **Higher DSD rates** convert as they should: the plug-in's DSD128 and DSD256 outputs
-  carry 20 dB less in-band noise than DSD64 (below), which dsd2pcm cannot show yet.
+  channels move together (no offset between them), but files converted from the same DSD
+  do not line up sample for sample.
+- **Higher DSD rates:** the plug-in's DSD128 and DSD256 outputs carry 18.8 and 19.5 dB
+  less in-band noise than DSD64 (below), within 3 dB of their sources; dsd2pcm does not
+  convert those rates yet.
 
 | Source | THD+N, 1 kHz at 0 dB SACD (dB) | Noise 20 Hz-20 kHz (dBFS) | Noise above 20 kHz (dBFS) |
 |---|---:|---:|---:|
@@ -750,7 +814,7 @@ them from their output files.
 
 ## Questions people ask
 
-**Is DSD to PCM lossy?** In the audio band, not measurably. DSD64 carries the music below
+**Is DSD to PCM lossy?** In the audio band the measured differences are small. DSD64 carries the music below
 about 20 kHz and pushes its quantisation noise above it; the conversion keeps the first and
 removes most of the second. Inside 20 kHz the output differs from the DSD's own content by
 the filter's ripple (±0.004 dB) and by the 24-bit rounding, whose noise is 30 dB below
@@ -758,7 +822,7 @@ the test DSD64's own noise in that band. What is lost is
 ultrasonic: above the cutoff the output keeps little or nothing, and with the 30 and 40 kHz
 filters that is mostly DSD's own shaped noise, not music.
 
-**Why not 768 kHz?** DSD64 has no more signal to give. Above about 50 kHz a DSD64 stream
+**Why not 768 kHz?** Above about 50 kHz a DSD64 stream
 is mostly its own shaped noise (see the ultrasonic plot), so a higher output rate would
 store more of that noise, not more music. 352.8 kHz, with the wide filter, already keeps
 everything to 80 kHz. The rates are exact divisors of 2.8224 MHz (by 32, 16 and 8), so no
@@ -767,7 +831,7 @@ fractional resampling is ever done.
 **Why no minimum-phase filter?** A minimum-phase filter moves all the ringing after the
 transient, at the cost of a frequency-dependent delay (phase distortion) in the passband.
 dsd2pcm's filters ring at about 43 kHz (the 30 kHz filter at about 33 kHz, wide at about
-84 kHz), above hearing, for a quarter to a third of a millisecond, and the ringing is only
+84 kHz), above the 20 kHz audio band, for a quarter to a third of a millisecond, and the ringing is only
 excited by content in the transition band, which in DSD64 is almost entirely the modulator's noise. Linear phase
 also keeps the output an exact, symmetric function of the input, which deterministic
 output relies on. There is no minimum-phase or apodizing option; the pysacd preset is
@@ -797,6 +861,7 @@ this page were made with:
 - scarletbook-pcm 0.7.0 from crates.io (`tools/quality/sbpcm`);
 - Python 3.15.2 with numpy 2.5.5, scipy 1.18.1 and matplotlib 3.11.2
   ([requirements.txt](../tools/quality/requirements.txt));
+- no dsd-measure: every figure on this page is from tools/quality;
 - SoX-DSD at commit `0be259e` of [mansr/sox](https://github.com/mansr/sox), built with
   CMake, for the three signals that have a SoX-DSD version: build it and replace `--no-sox`
   with `--sox` and the path of its `sox` program.
@@ -865,8 +930,9 @@ chart and every table came out identical. Only the charts are committed.
 - [Audio Science Review](https://www.audiosciencereview.com/) and John Atkinson,
   [Stereophile](https://www.stereophile.com/content/measurements-maps-precision): references
   for measurement practice.
-- AES17, *AES standard method for digital audio engineering: measurement of digital audio
-  equipment*: bandwidth, A-weighting, dynamic range.
+- AES17-2020, *AES standard method for digital audio engineering: measurement of digital
+  audio equipment*: the measurement band and the dBFS convention; the rest of the method is
+  AES17-style, with the deviations [listed](#aes17-style-not-aes17).
 - R. Schreier and G. C. Temes, *Understanding Delta-Sigma Data Converters*, Wiley-IEEE,
   2005: the reference modulator's design.
 - E. Janssen, *Look-ahead sigma-delta modulation and its application to Super Audio CD*,

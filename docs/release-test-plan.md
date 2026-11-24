@@ -337,10 +337,14 @@ dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/mul
 
 Copy [the template](quality/template.md) to `docs/quality/0.2.0.md` and fill it from
 `target/quality/report/<device>/results.json` (the keys are listed at the top of the suite
-file) and the first line of each `target/quality/null/*/index.md`.
+file) and the first line of each `target/quality/null/*/index.md`. Fill its "Measured with"
+line: the candidate's commit (`git rev-parse --short HEAD`), the previous tag's commit
+(`git rev-parse --short v0.1.2^{commit}`), the Rust version (`rustc --version`), the
+dsd-measure version and commit, and the CPU model (`lscpu`, the "Model name" line), never
+the host name.
 
 Pass: every command exits 0, and either nothing changed (every figure the same to
-0.01 dB, the suite's measured repeatability being 0.00 dB, and every null "identical"), or
+0.01 dB, the suite's measured run-to-run spread being 0.00 dB, and every null "identical"), or
 each change is accepted. A worse figure is a FAIL unless it is accepted. An accepted change
 or regression is recorded, with its reason, in that version's `docs/quality/X.Y.Z.md` page
 and in its CHANGELOG entry.

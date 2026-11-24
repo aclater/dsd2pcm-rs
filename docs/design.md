@@ -6,7 +6,7 @@ The design decisions behind dsd2pcm's DSD-to-PCM conversion. For each one: what 
 the alternatives, and why. The measured filter responses, noise and distortion are in
 [pcm-quality.md](pcm-quality.md); speed is in [performance.md](performance.md).
 
-## The contract: deterministic output, the best measured filter by default
+## The contract: deterministic output, the deepest-stopband filter by default
 
 **Chosen.**
 
@@ -17,7 +17,9 @@ the alternatives, and why. The measured filter responses, noise and distortion a
   listed in the [changelog](../CHANGELOG.md) with its measured effect
   ([`docs/quality/<version>.md`](quality/README.md)).
 - Releases up to 0.1.2 keep their behaviour as released.
-- The default filter is the best measured one: `precise` from 0.2.0. With `fast`, every
+- The default filter is the one with the deepest measured stopband: `precise` from 0.2.0
+  (150 dB or more where content folds into the passband, against about 110 dB; SINAD 142
+  to 145 dB against 122 dB with a very quiet DSD64 source). With `fast`, every
   output sample equals scarletbook-pcm 0.7.0's for the same rate, cutoff and gain; the
   tests compare the two crates directly (scarletbook-pcm is a dev-dependency).
 
@@ -104,8 +106,9 @@ scarletbook-pcm: it is the lowest rate that holds every cutoff, `wide` included.
   Above that, DSD's shaped noise rises steeply.
 - **30 kHz** removes more of that noise, for playback chains that do not want ultrasonic
   content.
-- **Wide** follows the Philips blind tests, which found 80 to 100 kHz filters undetectable
-  and a 50 kHz one detectable (the decision recorded in sacdfs's
+- **Wide** follows the Philips blind tests, which report 80 to 100 kHz filters as not
+  detected by their listeners and a 50 kHz one as detected; that is the source's listening
+  result, not tested here (the decision recorded in sacdfs's
   [PCM quality](https://github.com/dsd-toolbox/sacdfs/blob/main/docs/pcm-quality.md#the-filters)
   page).
 - **Why wide needs 176.4 kHz or more.** At 88.2 kHz the band ends at 44.1 kHz, below the

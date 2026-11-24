@@ -50,8 +50,9 @@ The filter itself is chosen with `--filter`:
 
 `precise` (`Filter::Precise`) and `fast` (`Filter::Fast`) share the cutoffs, rates, exact
 integer arithmetic, centring and rounding; `precise` has about half the passband ripple.
-On the real discs measured, the recording's own noise was far above both filters' floors;
-the difference shows with quiet, well-made sources and in measurements
+On the real discs measured, the recording's own noise set the floor with either filter,
+and `precise` lowered it by 1.1 dB in the quietest second; the difference shows most with sources quieter
+than `fast`'s -128 dBFS floor, and in measurements
 ([PCM quality](pcm-quality.md#the-precise-filter), [performance](performance.md)). Use
 `fast` for lower CPU time, or for output byte-identical with scarletbook-pcm 0.7.0 or with
 dsd2pcm 0.1.x's default.

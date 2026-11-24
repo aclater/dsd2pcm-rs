@@ -10,7 +10,7 @@ time. `fast` gives scarletbook-pcm's output byte for byte and is faster than it 
 ## precise and fast against scarletbook-pcm 0.7.0
 
 Measured 2026-11-24 on pre-release builds of 0.2.0: `fast` with the 0.2.0 kernels, and
-`precise` from the build that added it, which does not yet have the 0.2.0 kernel changes
+`precise` from the build that added it (commit `6d4dfa7`), which does not yet have the 0.2.0 kernel changes
 (its `fast` path ran at 0.1.2's speed there). Intel Core i9-13900H, Fedora, `powersave`
 governor, turbo on; built for the x86-64 baseline (`-C target-cpu=x86-64`, as the release
 builds), AVX2 kernels picked at run time. Inputs: generated music-like DSD64 files
@@ -203,7 +203,7 @@ crates give the same bytes on both platforms.
 `--filter precise` against `--filter fast` (not against scarletbook-pcm), whole file,
 2 channels, one thread, best of three over 20 s of audio
 (`cargo run --release --example bench_filters -- FILE.dsf 20`, pinned with `taskset`).
-Measured on the build that added `precise` (0.1.2's kernels). Multiples of real time, and
+Measured on the build that added `precise` (commit `6d4dfa7`, 0.1.2's kernels). Multiples of real time, and
 `precise`'s time over `fast`'s:
 
 | Rate | Cutoff | P-core | E-core | Zen 2 | i686 on the P-core, `sse2` level |

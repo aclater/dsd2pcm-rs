@@ -63,7 +63,7 @@ with its measured effect. Releases up to 0.1.2 keep their behaviour as released.
   change when measured quality improves; every such change is listed in this changelog with
   its measured effect (`docs/quality/<version>.md`). Releases up to 0.1.2 keep their
   behaviour as released. This replaces the rule that output bytes change only with a major
-  version ([design](docs/design.md#the-contract-deterministic-output-the-best-measured-filter-by-default),
+  version ([design](docs/design.md#the-contract-deterministic-output-the-deepest-stopband-filter-by-default),
   [AGENTS.md](AGENTS.md)).
 - Docs: the README, [performance](docs/performance.md), [PCM quality](docs/pcm-quality.md),
   the [user guide](docs/user-guide.md) and [options](docs/options.md) lead with the

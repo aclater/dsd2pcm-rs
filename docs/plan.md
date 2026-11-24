@@ -21,7 +21,7 @@ In 0.2.0: the `precise` filter as the default, for its measured quality (SINAD 1
 145 dB with a very quiet DSD64 source, against 122 dB), at 1.3 to 1.9 times
 scarletbook-pcm 0.7.0's CPU time; `fast` keeps scarletbook-pcm's filter and bytes. Output is
 deterministic within a release and may change between releases when measured quality
-improves, with every change in the changelog ([design.md](design.md#the-contract-deterministic-output-the-best-measured-filter-by-default)).
+improves, with every change in the changelog ([design.md](design.md#the-contract-deterministic-output-the-deepest-stopband-filter-by-default)).
 
 Next:
 
