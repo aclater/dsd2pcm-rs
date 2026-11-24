@@ -117,6 +117,7 @@ and 12 for the core crate on a Ryzen AI Max+ 395 (one core each):
 ## ThreadSanitizer
 
 ```
+export CARGO_PROFILE_DEV_OPT_LEVEL=2
 RUSTFLAGS=-Zsanitizer=thread DSD2PCM_SOAK_ITERATIONS=100 DSD2PCM_SOAK_RSS_REPORT_ONLY=1 DSD2PCM_SOAK_HEAP_REPORT_ONLY=1 \
   cargo +nightly-2026-11-01 test -Zbuild-std --target x86_64-unknown-linux-gnu \
   -p dsd2pcm --test progress --test frames --test soak -- --include-ignored
