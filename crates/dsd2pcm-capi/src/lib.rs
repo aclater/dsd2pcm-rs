@@ -251,12 +251,18 @@ pub struct dsd2pcm_frames {
 
 impl dsd2pcm_frames {
     pub(crate) fn new(conv: dsd::frames::Converter) -> dsd2pcm_frames {
-        dsd2pcm_frames {
+        let h = dsd2pcm_frames {
             channels: usize::from(conv.config().channels),
             samples_per_frame: conv.samples_per_frame(),
             context_bytes: conv.context_bytes(),
             conv: Mutex::new(conv),
-        }
+        };
+        // On some targets std's `Mutex` allocates its operating-system lock on first use
+        // (macOS: a boxed pthread mutex, 64 bytes). Use it once here, so that
+        // `dsd2pcm_frames_convert`, which takes it, allocates nothing on its first call.
+        // The boxed lock stays valid when the handle moves.
+        drop(h.conv.lock());
+        h
     }
 
     /// Bytes of one frame of all channels.

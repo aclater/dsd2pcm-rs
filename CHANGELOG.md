@@ -292,7 +292,10 @@ Each with what to change in a caller. The C interface stays ABI version 1, with 
   channels and SIMD level); before, one held 0.4 to 3.6 MiB after one 7-frame run. Output
   bytes unchanged. `tests/frames_alloc.rs` checks every rate, cutoff, filter and channel count
   with runs of every length, edge, layout and order from the first call
-  ([design](docs/design.md#frame-runs-threading-and-sharing)).
+  ([design](docs/design.md#frame-runs-threading-and-sharing)). On macOS the first
+  `dsd2pcm_frames_convert` call on a handle still allocated once (64 bytes: std's `Mutex`
+  there boxes its pthread mutex on first use); `dsd2pcm_frames_new` now takes the lock once,
+  and the C library's allocation test passes on aarch64 macOS.
 
 ## 0.1.2 - 2026-11-23
 
