@@ -33,6 +33,7 @@ Start with the [Quick start](../README.md#quick-start) in the README.
 
 - [Changelog](../CHANGELOG.md) · [Plan](plan.md)
 - [Contributing](../CONTRIBUTING.md) · [Development](development.md) · [Releases](release.md)
+  · [Release test plan](release-test-plan.md)
 - [Security policy](../SECURITY.md) · [Provenance](../PROVENANCE.md)
 - [Icons](assets/README.md): the project icon set, part of the DSD Toolbox family
 
