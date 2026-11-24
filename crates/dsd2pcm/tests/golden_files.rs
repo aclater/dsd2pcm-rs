@@ -2,11 +2,12 @@
 //! cutoff with the fast filter (and with pysacd's filter at its rates), and again with the
 //! precise filter, named and as the default, and the SHA-256 of every WAV file, header and
 //! samples, is pinned per input. A change to the header (chunk layout, format tag, channel
-//! mask) or to the samples fails here; output bytes change only between releases, with the
-//! change recorded (AGENTS.md). The fast and pysacd hashes were computed on 0.1.2 (updated
-//! for 0.2's channel mask and f64 pysacd filter, see [`GOLDEN`]), the precise ones on 0.2.0,
-//! and they are the same on every SIMD level (`.github/scripts/test-simd-levels.sh` runs
-//! this test at each) and platform.
+//! mask) or to the samples fails here. Within a release the output is deterministic;
+//! between releases it may change when measured quality improves, and each change is in the
+//! CHANGELOG with its measured effect and updates these hashes (AGENTS.md). The fast and
+//! pysacd hashes were computed on 0.1.2 (updated for 0.2's channel mask and f64 pysacd
+//! filter, see [`GOLDEN`]), the precise ones on 0.2.0, and they are the same on every SIMD
+//! level (`.github/scripts/test-simd-levels.sh` runs this test at each) and platform.
 //!
 //! Inputs: the material of the sample golden tests (`identity.rs`) for 1, 2 and 6 channels,
 //! full scale (all 0xFF), DSF files of channel types 5, 6 and 7, and DSDIFF files whose

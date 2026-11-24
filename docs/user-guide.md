@@ -87,8 +87,9 @@ reasons for each filter.
 ## Output
 
 Within a release, the output is deterministic: every sample of `precise` and `fast` is an
-exact integer computation, so the same input and settings give the same bytes on every CPU,
-SIMD level and build profile. With `fast` the samples are identical to those of
+exact integer computation, and `pysacd` computes in `f64` in a fixed order without fused
+multiply-adds, so the same input and settings give the same bytes on every CPU, SIMD level
+and build profile. With `fast` the samples are identical to those of
 scarletbook-pcm 0.7.0 for the same rate, cutoff and gain; the tests compare the two on
 synthetic and real input. Between releases the output may change when measured quality
 improves; the [changelog](../CHANGELOG.md) lists every such change with its measured
