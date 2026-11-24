@@ -7,8 +7,9 @@
 
 Writes DEC/<decoder>/<setting>/<signal file>.wav and DEC/runs.json (per output: the
 command, its exit status and output, and the SHA-256 of the input and output files).
-Imported outputs (decoders run elsewhere, e.g. the foobar2000 SACD plug-in) are listed by
-import.py instead.
+Outputs of decoders run elsewhere (for example the foobar2000 SACD plug-in on Windows) are
+not made here: copy their WAVs to DEC/<decoder>/<setting>/, named as the DSF inputs, and
+run analyse.py.
 """
 
 import argparse

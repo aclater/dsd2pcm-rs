@@ -51,6 +51,7 @@ the code stays MIT OR Apache-2.0
 ## See also
 
 - [Template](template.md)
+- [Measurement data](data/README.md): checksums behind published measurements
 - [Release test plan](../release-test-plan.md#11-quality-comparison-with-the-previous-release): item 11
 - [User guide](../user-guide.md#choose-the-rate-and-the-filter): the filters, rates and cutoffs
 
