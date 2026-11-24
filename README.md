@@ -31,9 +31,9 @@ On Linux x86_64, with a DSF file named `01 - Track.dsf` in the current directory
 
 <!-- docs-run: image=fedora-net setup="printf 'DSD \x1c\x00\x00\x00\x00\x00\x00\x00\x5c\x20\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00fmt \x34\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x02\x00\x00\x00\x00\x11\x2b\x00\x01\x00\x00\x00\x00\x80\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00data\x0c\x20\x00\x00\x00\x00\x00\x00' > '01 - Track.dsf' && head -c 8192 /dev/zero | tr '\000' i >> '01 - Track.dsf'" expect="Hz -> 176400 Hz, .*clipped samples: 0" -->
 ```sh
-curl -LO https://github.com/dsd-toolbox/dsd2pcm-rs/releases/download/v0.1.2/dsd2pcm-0.1.2-x86_64-linux.tar.gz
-tar xzf dsd2pcm-0.1.2-x86_64-linux.tar.gz
-./dsd2pcm-0.1.2-x86_64-linux/dsd2pcm "01 - Track.dsf" "01 - Track.wav"
+curl -LO https://github.com/dsd-toolbox/dsd2pcm-rs/releases/download/v0.2.0/dsd2pcm-0.2.0-x86_64-linux.tar.gz
+tar xzf dsd2pcm-0.2.0-x86_64-linux.tar.gz
+./dsd2pcm-0.2.0-x86_64-linux/dsd2pcm "01 - Track.dsf" "01 - Track.wav"
 ```
 
 This writes a 176.4 kHz, 24-bit WAV and prints the duration, the speed and the number of
@@ -46,12 +46,12 @@ On Windows 10 or 11, x86_64, in PowerShell, with the same DSF file in the curren
 
 <!-- docs-run: skip="Windows" -->
 ```powershell
-Invoke-WebRequest https://github.com/dsd-toolbox/dsd2pcm-rs/releases/download/v0.1.2/dsd2pcm-0.1.2-x86_64-windows.zip -OutFile dsd2pcm-0.1.2-x86_64-windows.zip
-Expand-Archive dsd2pcm-0.1.2-x86_64-windows.zip -DestinationPath .
-.\dsd2pcm-0.1.2-x86_64-windows\dsd2pcm.exe "01 - Track.dsf" "01 - Track.wav"
+Invoke-WebRequest https://github.com/dsd-toolbox/dsd2pcm-rs/releases/download/v0.2.0/dsd2pcm-0.2.0-x86_64-windows.zip -OutFile dsd2pcm-0.2.0-x86_64-windows.zip
+Expand-Archive dsd2pcm-0.2.0-x86_64-windows.zip -DestinationPath .
+.\dsd2pcm-0.2.0-x86_64-windows\dsd2pcm.exe "01 - Track.dsf" "01 - Track.wav"
 ```
 
-The archive is also on the [release page](https://github.com/dsd-toolbox/dsd2pcm-rs/releases/tag/v0.1.2).
+The archive is also on the [release page](https://github.com/dsd-toolbox/dsd2pcm-rs/releases/tag/v0.2.0).
 `dsd2pcm.exe` is not code-signed, so Windows SmartScreen may warn when it first runs; choose
 **More info**, then **Run anyway**. The [user guide](docs/user-guide.md#windows) covers the
 `PATH`, quoting and double-clicking.

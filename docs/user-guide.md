@@ -28,7 +28,7 @@ what to do when a conversion fails. Every option is listed in [options.md](optio
 176.4 kHz with the 40 kHz filter, on all cores. With the tool on the `PATH` (`cargo install
 dsd2pcm-cli`, or the release archive of the [Quick start](../README.md#quick-start)):
 
-<!-- docs-run: image=fedora-net setup="printf 'DSD \x1c\x00\x00\x00\x00\x00\x00\x00\x5c\x20\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00fmt \x34\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x02\x00\x00\x00\x00\x11\x2b\x00\x01\x00\x00\x00\x00\x80\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00data\x0c\x20\x00\x00\x00\x00\x00\x00' > '01 - Track.dsf' && head -c 8192 /dev/zero | tr '\000' i >> '01 - Track.dsf' && curl -fsSLO https://github.com/dsd-toolbox/dsd2pcm-rs/releases/download/v0.1.2/dsd2pcm-0.1.2-x86_64-linux.tar.gz && tar xzf dsd2pcm-0.1.2-x86_64-linux.tar.gz && mkdir -p .local/bin && cp dsd2pcm-0.1.2-x86_64-linux/dsd2pcm .local/bin/" expect="Hz -> 176400 Hz, .*clipped samples: 0" -->
+<!-- docs-run: image=fedora-net setup="printf 'DSD \x1c\x00\x00\x00\x00\x00\x00\x00\x5c\x20\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00fmt \x34\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x02\x00\x00\x00\x00\x11\x2b\x00\x01\x00\x00\x00\x00\x80\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00data\x0c\x20\x00\x00\x00\x00\x00\x00' > '01 - Track.dsf' && head -c 8192 /dev/zero | tr '\000' i >> '01 - Track.dsf' && curl -fsSLO https://github.com/dsd-toolbox/dsd2pcm-rs/releases/download/v0.2.0/dsd2pcm-0.2.0-x86_64-linux.tar.gz && tar xzf dsd2pcm-0.2.0-x86_64-linux.tar.gz && mkdir -p .local/bin && cp dsd2pcm-0.2.0-x86_64-linux/dsd2pcm .local/bin/" expect="Hz -> 176400 Hz, .*clipped samples: 0" -->
 ```sh
 dsd2pcm "01 - Track.dsf" "01 - Track.wav"
 ```
@@ -222,7 +222,7 @@ Unzip the release archive to a folder of your choice, for example `C:\Tools`:
 
 <!-- docs-run: skip="Windows" -->
 ```powershell
-Expand-Archive dsd2pcm-0.1.2-x86_64-windows.zip -DestinationPath C:\Tools
+Expand-Archive dsd2pcm-0.2.0-x86_64-windows.zip -DestinationPath C:\Tools
 ```
 
 To run it as `dsd2pcm` from any folder, add its folder to your user `PATH` (no
@@ -230,7 +230,7 @@ administrator rights needed), then open a new PowerShell window:
 
 <!-- docs-run: skip="Windows" -->
 ```powershell
-[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";C:\Tools\dsd2pcm-0.1.2-x86_64-windows", "User")
+[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";C:\Tools\dsd2pcm-0.2.0-x86_64-windows", "User")
 ```
 
 Each release unzips to a folder named after its version; after an update, change the `PATH`
@@ -253,7 +253,7 @@ To run the tool by a quoted path, put the call operator `&` first:
 
 <!-- docs-run: skip="Windows" -->
 ```powershell
-& "C:\Tools\dsd2pcm-0.1.2-x86_64-windows\dsd2pcm.exe" "01 - Track.dsf" "01 - Track.wav"
+& "C:\Tools\dsd2pcm-0.2.0-x86_64-windows\dsd2pcm.exe" "01 - Track.dsf" "01 - Track.wav"
 ```
 
 Tab completion adds the quotes, and the `&`, by itself.
@@ -278,7 +278,7 @@ PowerShell instead.
 
 ### The C library
 
-The C library for Windows is a separate archive, `libdsd2pcm-0.1.2-x86_64-windows.zip` for
+The C library for Windows is a separate archive, `libdsd2pcm-0.2.0-x86_64-windows.zip` for
 MSVC (and, from 0.2.0, an archive for MinGW-w64 gcc): see
 [C interface](c-api.md#binary-releases).
 

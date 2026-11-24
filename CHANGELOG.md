@@ -9,6 +9,8 @@ with its measured effect. Releases up to 0.1.2 keep their behaviour as released.
 
 ## Unreleased
 
+## 0.2.0 - 2026-11-24
+
 ### Changed
 
 #### Breaking changes (Rust API)

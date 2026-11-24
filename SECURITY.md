@@ -8,8 +8,9 @@ privately.
 
 | Version | Security fixes |
 |---|---|
-| 0.1.x, latest release | Yes |
-| Older 0.1.x releases | No: update to the latest 0.1.x |
+| 0.2.x, latest release | Yes |
+| Older 0.2.x releases | No: update to the latest 0.2.x |
+| 0.1.x | No: update to the latest 0.2.x |
 
 A fix is released as a new patch version; a published version or tag is never changed.
 
