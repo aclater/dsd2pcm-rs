@@ -84,6 +84,8 @@ pub struct FlacReader<R: Read + Seek> {
     pend_len: usize,
     pend_pos: usize,
     remaining: u64,
+    /// Whether the stream was checked, after its declared frames, for more frames.
+    end_checked: bool,
 }
 
 impl<R: Read + Seek> std::fmt::Debug for FlacReader<R> {
@@ -438,6 +440,7 @@ impl<R: Read + Seek> FlacReader<R> {
             pend_len: 0,
             pend_pos: 0,
             remaining: frames,
+            end_checked: false,
         })
     }
 
@@ -469,6 +472,31 @@ impl<R: Read + Seek> PcmRead for FlacReader<R> {
                 ArgumentKind::Buffer,
                 "output channel count mismatch",
             ));
+        }
+        if self.remaining == 0 && !self.end_checked {
+            self.end_checked = true;
+            // STREAMINFO's total is the length; audio past it would be dropped without a
+            // word, so it is an error (the reference decoder decodes it). What follows the
+            // last frame and does not decode (an ID3v1 tag, padding) is not audio.
+            let more = self.pend_pos < self.pend_len || {
+                // The spent block's buffer, so that one block is held at a time.
+                let buf = std::mem::take(&mut self.pend);
+                self.pend_len = 0;
+                self.pend_pos = 0;
+                matches!(
+                    next_block(&mut self.flac, self.info.channels, self.bits, buf),
+                    Ok(Some(_))
+                )
+            };
+            if more {
+                return format_err(
+                    FormatErrorKind::Malformed,
+                    format!(
+                        "FLAC stream has more frames than the {} its STREAMINFO declares",
+                        self.info.frames
+                    ),
+                );
+            }
         }
         let want = (max_frames.clamp(1, MAX_CHUNK) as u64).min(self.remaining) as usize;
         let scale = 1.0 / f64::from(1u32 << (self.bits - 1));

@@ -379,7 +379,12 @@ FLAC form of WAV's read-to-end rule: the reader decodes the stream once to count
 then restarts at the first frame; a stream without frames is an error. If that pass fails
 and the file ends in an ID3v1 tag (`TAG` and 125 bytes), the frames are counted again
 without those 128 bytes. A stream that ends
-before its declared length is an error; frames after it are ignored. Frame CRCs are checked
+before its declared length is an error (`Truncated`, after the frames that are there, as the
+reference decoder reports it). A stream with more frames than STREAMINFO declares is an
+error too (`Malformed`), raised by the first `read_frames` call after the declared frames:
+the reference decoder decodes them, so dropping them would lose audio without a word. Bytes
+after the last frame that do not decode as a frame (an ID3v1 tag, padding) are not audio and
+are ignored. Frame CRCs are checked
 (claxon skips the check only in `cfg(fuzzing)` builds).
 
 ## Progress and cancel
@@ -503,7 +508,8 @@ libunwind. The way to a marked shared library is to link it against the system's
 
 ## Robustness
 
-Parsers check every size against the file length, cap allocations (DSF metadata 16 MiB,
+Parsers check every size against the file length, cap allocations (DSF metadata 16 MiB:
+a larger tag is not loaded and `DsfReader::skipped_metadata_len` reports it,
 block size 1 MiB; FLAC one decoded block) and return errors instead of panicking. Chunk
 walking is bounded whatever reader the caller passes. Each reader stops at 4096: DFF
 top-level chunks up to and including `DSD `, DFF property chunks in `PROP`, WAV chunks up to
@@ -513,6 +519,23 @@ reads or `Seek::seek_relative`, never a plain `seek` per chunk, so a buffered re
 a large `BufReader<File>` keeps its buffer and opening a file costs time linear in its
 header. The tests truncate and corrupt valid files byte by byte, and cargo-fuzz targets
 cover every reader (see [fuzzing.md](fuzzing.md)).
+
+Files that bend their format are accepted when the audio is intact and real tools write or
+read them, and refused with a typed error when reading them would give wrong or silently
+missing audio. Each rule has a test with a crafted file (`tests/containers.rs`,
+`tests/flac.rs`):
+
+| Case | Rule | Why |
+|---|---|---|
+| WAV `data` size past the end of the file | Read to the end, whole frames; `WavReader::declared_frames` keeps the declared count | A recording or download cut short; other decoders read what is there |
+| WAV `data` size 0 or `0xFFFFFFFF` | Read to the end if no chunk follows, an error if one does | Placeholder of streaming writers |
+| `WAVE_FORMAT_EXTENSIBLE` valid bits 0, or fewer than the container | Read at the container's width | Samples are left-justified; `flac -d` writes 20 valid bits in 24; 0 is "not given" |
+| Valid bits above the container | `Malformed` | Contradicts the container |
+| Sub-format GUID other than `KSDATAFORMAT`'s PCM or float | `Unsupported` (`Encoding`) | Another format (such as Ambisonic B-format) whose first bytes look like PCM's |
+| DSDIFF `DSD ` chunk not a multiple of the channel count | The partial last turn (under one byte per channel) is not read | Every channel keeps the same length; the audio before it is intact |
+| DSF tag over 16 MiB | Not loaded; `DsfReader::skipped_metadata_len` gives its size | Bounded memory for any file; the audio still reads |
+| FLAC shorter than STREAMINFO declares | `Truncated` after the frames present | As the reference decoder |
+| FLAC longer than STREAMINFO declares | `Malformed` after the declared frames | The reference decoder decodes them; dropping them would lose audio unnoticed |
 
 ## Output files
 
@@ -558,9 +581,9 @@ file the user had, nor leave a partial WAV that a reader would take as complete.
   in the moment between the two leaves the empty file, and a process with write access to
   the directory that replaces the empty file in that moment has its file replaced by the
   rename. With hard links there is no such moment.
-  Not exposed through `PcmOptions`, because adding a field to that struct would break
-  every caller that builds it with a struct literal; `OutputOptions` is
-  `#[non_exhaustive]`, so later output settings can be added to it.
+  Kept in `OutputOptions`, apart from `PcmOptions`, because it is about the output file,
+  not the conversion; both are `#[non_exhaustive]` (since 0.2.0 for `PcmOptions`), so later
+  settings can be added to either.
 
 ## Known gaps
 

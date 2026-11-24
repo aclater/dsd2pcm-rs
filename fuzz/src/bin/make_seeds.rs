@@ -63,9 +63,9 @@ fn wav(format: WavFormat, ch: u16, rate: u32, frames: usize) -> Vec<u8> {
     w.into_inner().into_inner()
 }
 
-/// A 24-bit stereo WAV with a `WAVE_FORMAT_EXTENSIBLE` header and an odd-sized `LIST`
-/// chunk before the data.
-fn wav_extensible() -> Vec<u8> {
+/// A 24-bit stereo WAV with a `WAVE_FORMAT_EXTENSIBLE` header (`valid` valid bits) and an
+/// odd-sized `LIST` chunk before the data.
+fn wav_extensible(valid: u16) -> Vec<u8> {
     let mut fmt = Vec::new();
     fmt.extend_from_slice(&0xFFFEu16.to_le_bytes());
     fmt.extend_from_slice(&2u16.to_le_bytes());
@@ -74,7 +74,7 @@ fn wav_extensible() -> Vec<u8> {
     fmt.extend_from_slice(&6u16.to_le_bytes());
     fmt.extend_from_slice(&24u16.to_le_bytes());
     fmt.extend_from_slice(&22u16.to_le_bytes());
-    fmt.extend_from_slice(&24u16.to_le_bytes());
+    fmt.extend_from_slice(&valid.to_le_bytes());
     fmt.extend_from_slice(&3u32.to_le_bytes());
     fmt.extend_from_slice(&1u16.to_le_bytes());
     fmt.extend_from_slice(&[
@@ -112,8 +112,19 @@ fn wav_size(size: u32, list_after: bool) -> Vec<u8> {
     b
 }
 
-/// The FLAC test files, each also with an unknown length, a leading ID3v2 tag and a
-/// trailing ID3v1 tag.
+/// A DFF whose `DSD ` chunk ends in a partial turn (two bytes of three channels).
+fn dff_partial_turn() -> Vec<u8> {
+    let mut b = dff(3, 10, 2_822_400);
+    let at = b.windows(4).rposition(|w| w == b"DSD ").unwrap();
+    b[at + 4..at + 12].copy_from_slice(&32u64.to_be_bytes());
+    b.extend_from_slice(&[0xAA, 0xBB]);
+    let form = b.len() as u64 - 12;
+    b[4..12].copy_from_slice(&form.to_be_bytes());
+    b
+}
+
+/// The FLAC test files, each also with an unknown length, a leading ID3v2 tag, a
+/// trailing ID3v1 tag and a total shorter than the stream.
 fn flac_seeds() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/dsd2pcm/tests/data/flac");
     let mut names: Vec<_> = fs::read_dir(&dir)
@@ -139,6 +150,10 @@ fn flac_seeds() {
         put("flac", &format!("{stem}-unknown-length"), &unknown);
         put("flac", &format!("{stem}-id3v2"), &id3);
         put("flac", &format!("{stem}-unknown-id3v1"), &tagged);
+        let mut short = f.clone();
+        short[21] &= 0xF0;
+        short[22..26].copy_from_slice(&1000u32.to_be_bytes());
+        put("flac", &format!("{stem}-total-1000"), &short);
     }
 }
 
@@ -167,6 +182,7 @@ fn main() {
     put("dff_read", "5ch-odd", &dff(5, 7, 2_822_400));
     put("dff_read", "6ch", &dff(6, 4, 6_144_000));
     put("dff_read", "extra-chunks", &dff_extra_chunks());
+    put("dff_read", "partial-turn", &dff_partial_turn());
     put("wav_read", "i16-mono", &wav(WavFormat::I16, 1, 44_100, 9));
     put("wav_read", "i24-stereo", &wav(WavFormat::I24, 2, 88_200, 7));
     put("wav_read", "i32-3ch", &wav(WavFormat::I32, 3, 176_400, 5));
@@ -176,7 +192,11 @@ fn main() {
         &wav(WavFormat::F32, 2, 352_800, 6),
     );
     put("wav_read", "f64-6ch", &wav(WavFormat::F64, 6, 96_000, 3));
-    put("wav_read", "extensible-list", &wav_extensible());
+    put("wav_read", "extensible-list", &wav_extensible(24));
+    put("wav_read", "extensible-valid-20", &wav_extensible(20));
+    let mut cut = wav(WavFormat::I24, 2, 88_200, 7);
+    cut.truncate(cut.len() - 8);
+    put("wav_read", "data-past-the-end", &cut);
     put("wav_read", "data-size-0", &wav_size(0, false));
     put("wav_read", "data-size-ffffffff", &wav_size(u32::MAX, false));
     put("wav_read", "data-size-0-then-list", &wav_size(0, true));

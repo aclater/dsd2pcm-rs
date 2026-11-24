@@ -136,7 +136,21 @@ may remain next to the output; it is safe to delete. The library installs no sig
 ## Use the library
 
 `dsd2pcm::convert_file` converts a DSF or DFF file to a WAV file with `PcmOptions` (rate,
-cutoff, filter, gain, threads), the same conversion as the tool.
+cutoff, filter, gain, threads), the same conversion as the tool. Build the options with
+`PcmOptions::new(rate)` and its `with_*` methods, or set fields on that value:
+
+```rust
+use dsd2pcm::{Cutoff, PcmOptions, PcmRate, Threads};
+use std::num::NonZeroUsize;
+
+let opts = PcmOptions::new(PcmRate::Hz176400)
+    .with_cutoff(Cutoff::Low)
+    .with_threads(Threads::Count(NonZeroUsize::new(4).unwrap()));
+```
+
+`Threads` is `All` (the default: every core), `Single` (the calling thread) or `Count(n)`
+(at most n threads, for a program that runs several conversions or must leave cores
+free). The output bytes are the same with every setting.
 
 `dsd2pcm::frames::Converter` converts SACD frames (channels interleaved byte by byte, 4704
 bytes per channel per frame) a run at a time, with the frames before and after the run as
@@ -147,7 +161,15 @@ thread; after the first call it allocates nothing.
 
 `convert_file_with` and `dsd64_to_pcm_with` take a progress hook: it gets the output
 samples done and the total at each block, on the calling thread, and stops the conversion
-with `Error::Cancelled` when it returns `ControlFlow::Break`. `Error` is `#[non_exhaustive]`.
+with `Error::Cancelled` when it returns `ControlFlow::Break`.
+
+Errors: `Error::Format`, `Error::Unsupported` and `Error::InvalidArgument` carry a kind to
+match on and a message for people (`FormatErrorKind`, `UnsupportedKind`, `ArgumentKind`;
+`kind()` and `message()`), for example to tell a file cut short
+(`FormatErrorKind::Truncated`) from one that is not audio at all
+(`FormatErrorKind::NotRecognised`). `Error`, the kinds and most structs are
+`#[non_exhaustive]`: match with a wildcard arm and build the structs with their
+constructors, so that later versions can add to them.
 
 A project that depends on the crate gets the best speed with the build settings in
 [options.md](options.md#build-settings-for-consumers). The API reference is on

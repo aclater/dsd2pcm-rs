@@ -51,6 +51,12 @@ fn channel_mask_of_ids(ids: &[u8]) -> Option<u32> {
 }
 
 /// DFF reader over any seekable byte source.
+///
+/// The `DSD ` chunk holds one byte per channel in turn. A chunk whose length is not a
+/// multiple of the channel count ends in a partial turn, which a conforming writer never
+/// leaves: those last bytes (fewer than the channel count, so under 8 samples of some
+/// channels) are not read, and every channel gets `length / channels` bytes. The file is
+/// otherwise read as usual, since its audio is intact.
 #[derive(Debug)]
 pub struct DffReader<R> {
     r: R,

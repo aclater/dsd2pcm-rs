@@ -47,13 +47,48 @@ impl WavFormat {
     }
 }
 
+/// Bytes 2 to 15 of every `KSDATAFORMAT_SUBTYPE_*` GUID of a `WAVE_FORMAT_*` tag
+/// (`XXXXXXXX-0000-0010-8000-00AA00389B71`, as stored).
+const KSDATAFORMAT_TAIL: [u8; 14] = [
+    0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71,
+];
+
+/// A GUID as stored in a file, in its usual text form.
+fn guid(b: &[u8]) -> String {
+    format!(
+        "{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{}",
+        le_u32(b, 0),
+        le_u16(b, 4),
+        le_u16(b, 6),
+        b[8],
+        b[9],
+        b[10..16]
+            .iter()
+            .map(|x| format!("{x:02X}"))
+            .collect::<String>()
+    )
+}
+
 /// WAV reader.
+///
+/// Rules for files that bend the format, each accepted as real tools write or read them:
+/// - A `data` size of 0 or `0xFFFFFFFF` (a placeholder left by streaming writers and some
+///   encoders past 4 GiB) is read to the end of the file, if no chunk follows.
+/// - A `data` size larger than the rest of the file (a recording or download cut short) is
+///   read to the end of the file: [`PcmInfo::frames`] counts the whole frames present, and
+///   [`WavReader::declared_frames`] gives what the header declared.
+/// - `WAVE_FORMAT_EXTENSIBLE`: a valid-bits count of 0 is taken as the container's width,
+///   and fewer valid bits than the container (20 bits in 24, as `flac -d` writes them) read
+///   at the container's width, the samples being left-justified. More valid bits than the
+///   container is [`crate::FormatErrorKind::Malformed`]; a sub-format GUID other than
+///   `KSDATAFORMAT`'s PCM and IEEE float is [`crate::UnsupportedKind::Encoding`].
 #[derive(Debug)]
 pub struct WavReader<R> {
     r: R,
     info: PcmInfo,
     format: WavFormat,
     channel_mask: Option<u32>,
+    declared_frames: u64,
     remaining: u64,
     buf: Vec<u8>,
 }
@@ -110,7 +145,26 @@ impl<R: Read + Seek> WavReader<R> {
                                 "WAV extensible 'fmt ' chunk is too small",
                             );
                         }
+                        // wValidBitsPerSample: the samples' bits, left-justified in the
+                        // container, so they read right at the container's width. 0 is
+                        // "not given" (older writers); more than the container is invalid.
+                        let valid = le_u16(&f, 18);
+                        if valid > bits {
+                            return format_err(
+                                FormatErrorKind::Malformed,
+                                format!("WAV valid bits {valid} exceed the {bits}-bit container"),
+                            );
+                        }
                         mask = Some(le_u32(&f, 20));
+                        // The sub-format GUID: a format tag in the first two bytes, then
+                        // KSDATAFORMAT's fixed tail. Any other GUID is another format (for
+                        // example Ambisonic B-format), not PCM or IEEE float.
+                        if f[26..40] != KSDATAFORMAT_TAIL {
+                            return unsupported(
+                                UnsupportedKind::Encoding,
+                                format!("WAV extensible sub-format GUID {}", guid(&f[24..40])),
+                            );
+                        }
                         tag = le_u16(&f, 24);
                     }
                     let format = match (tag, bits) {
@@ -169,6 +223,11 @@ impl<R: Read + Seek> WavReader<R> {
                     };
                     let frame = (usize::from(channels) * format.bytes()) as u64;
                     let frames = len / frame;
+                    let declared_frames = if size == 0 || size == 0xFFFF_FFFF {
+                        frames
+                    } else {
+                        size / frame
+                    };
                     return Ok(WavReader {
                         r,
                         info: PcmInfo {
@@ -178,6 +237,7 @@ impl<R: Read + Seek> WavReader<R> {
                         },
                         format,
                         channel_mask,
+                        declared_frames,
                         remaining: frames,
                         buf: Vec::new(),
                     });
@@ -198,6 +258,13 @@ impl<R: Read + Seek> WavReader<R> {
     /// speaker assignment); `None` for a plain `fmt ` chunk, which declares none.
     pub fn channel_mask(&self) -> Option<u32> {
         self.channel_mask
+    }
+
+    /// The frames the `data` chunk's size declares (whole frames). More than
+    /// [`PcmInfo::frames`] when the file is cut short; the same otherwise, and for a
+    /// placeholder size (0 or `0xFFFFFFFF`).
+    pub fn declared_frames(&self) -> u64 {
+        self.declared_frames
     }
 }
 

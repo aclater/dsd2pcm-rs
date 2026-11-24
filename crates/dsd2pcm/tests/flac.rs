@@ -6,7 +6,7 @@
 use dsd2pcm::flac::FlacReader;
 use dsd2pcm::io::PcmRead;
 use dsd2pcm::wav::{WavFormat, WavReader, WavWriter};
-use dsd2pcm::{open_input, Error, Input};
+use dsd2pcm::{open_input, Error, FormatErrorKind, Input};
 use std::io::Cursor;
 
 /// The sample formula of `tests/data/flac/gen.py`.
@@ -180,12 +180,36 @@ fn short_stream_is_an_error() {
         matches!(e, Error::Format(ref m) if m.message().contains("ended after 4100 of 5000")),
         "{e}"
     );
-    // Declared shorter: the rest is ignored.
-    let mut g = f.clone();
-    set_total(&mut g, 2000);
-    let mut r = FlacReader::new(Cursor::new(g)).unwrap();
-    let got = read_all(&mut r, 999).unwrap();
-    assert_eq!(got[0], expected(16, 2, 2000)[0]);
+    // Declared shorter than the stream, inside a block (2000) or at a block boundary
+    // (2304 = 2 x 1152): the declared frames are delivered, then the audio past them is an
+    // error rather than dropped (the reference decoder decodes it).
+    for total in [2000u64, 2304, 1] {
+        let mut g = f.clone();
+        set_total(&mut g, total);
+        let mut r = FlacReader::new(Cursor::new(g)).unwrap();
+        assert_eq!(r.info().frames, total);
+        let mut out = vec![Vec::new(), Vec::new()];
+        let mut e = None;
+        loop {
+            match r.read_frames(999, &mut out) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(x) => {
+                    e = Some(x);
+                    break;
+                }
+            }
+        }
+        assert_eq!(out[0], expected(16, 2, total)[0], "{total}");
+        let e = e.expect("an error after the declared frames");
+        assert!(
+            matches!(&e, Error::Format(m) if m.kind() == FormatErrorKind::Malformed
+                && m.message().contains(&format!("more frames than the {total}"))),
+            "{e}"
+        );
+        // Once: the reader then ends.
+        assert_eq!(r.read_frames(999, &mut out).unwrap(), 0);
+    }
     // Truncated inside a frame.
     let mut r = FlacReader::new(Cursor::new(f[..f.len() - 100].to_vec())).unwrap();
     assert!(matches!(read_all(&mut r, 1 << 20), Err(Error::Format(_))));
@@ -390,6 +414,12 @@ fn trailing_id3v1_tag() {
         assert_eq!(r.info().frames, 4100);
         assert_eq!(read_all(&mut r, 3000).unwrap(), expected(16, 2, 4100));
     }
+    // With the length declared, trailing bytes that do not decode as a frame are not audio
+    // and are ignored.
+    let mut f = fixture("s16_2ch_44100.flac");
+    f.extend_from_slice(&[0x55; 128]);
+    let mut r = FlacReader::new(Cursor::new(f)).unwrap();
+    assert_eq!(read_all(&mut r, 3000).unwrap(), expected(16, 2, 4100));
     // Other trailing junk with an unknown length is still an error.
     let mut f = fixture("s16_2ch_44100.flac");
     set_total(&mut f, 0);

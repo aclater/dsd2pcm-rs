@@ -16,7 +16,9 @@ use std::io::{Read, Seek, SeekFrom, Write};
 
 /// Block size per channel that this writer uses (the only value the specification allows).
 pub const BLOCK_SIZE: usize = 4096;
-/// Largest metadata block carried over from the input (larger tags are dropped).
+/// Largest metadata block carried over from the input. A larger one is not loaded (it would
+/// cost that much memory for any file): the audio still reads, [`DsdRead::metadata`] is
+/// `None` and [`DsfReader::skipped_metadata_len`] gives its size.
 pub const MAX_METADATA: u64 = 16 << 20;
 /// DSD idle (silence) pattern, MSB-first.
 const IDLE: u8 = 0x69;
@@ -39,10 +41,17 @@ pub struct DsfReader<R> {
     /// Bytes per channel still to deliver.
     remaining: u64,
     metadata: Option<Vec<u8>>,
+    skipped_metadata: Option<u64>,
     buf: Vec<u8>,
 }
 
 impl<R: Read + Seek> DsfReader<R> {
+    /// The size of the file's metadata block (ID3v2 tag) when it was not loaded because it
+    /// is larger than [`MAX_METADATA`]; `None` when it was loaded or there is none.
+    pub fn skipped_metadata_len(&self) -> Option<u64> {
+        self.skipped_metadata
+    }
+
     /// Parses the headers and positions the reader at the first audio block.
     pub fn new(mut r: R) -> Result<Self> {
         let file_len = r.seek(SeekFrom::End(0))?;
@@ -156,6 +165,7 @@ impl<R: Read + Seek> DsfReader<R> {
             }
         }
 
+        let mut skipped_metadata = None;
         let metadata = if meta_ptr != 0 && meta_ptr >= data_start + data_len && meta_ptr < file_len
         {
             let len = file_len - meta_ptr;
@@ -166,6 +176,7 @@ impl<R: Read + Seek> DsfReader<R> {
                 seek_to(&mut r, data_start)?;
                 Some(m)
             } else {
+                skipped_metadata = Some(len);
                 None
             }
         } else {
@@ -184,6 +195,7 @@ impl<R: Read + Seek> DsfReader<R> {
             channel_type,
             remaining: bytes_per_ch,
             metadata,
+            skipped_metadata,
             buf: Vec::new(),
         })
     }

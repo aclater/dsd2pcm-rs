@@ -7,6 +7,31 @@ version.
 
 ## Unreleased
 
+### Breaking changes (Rust API)
+
+Each with what to change in a caller. The C interface is unchanged (ABI 1, additions only).
+
+- `Error::Format`, `Error::Unsupported` and `Error::InvalidArgument` hold `FormatError`,
+  `UnsupportedError` and `ArgumentError` instead of a `String`: a kind to match on
+  (`FormatErrorKind`: `NotRecognised`, `Truncated`, `Malformed`, `LimitExceeded`;
+  `UnsupportedKind`; `ArgumentKind`) and the same message. `Display` of `Error` is
+  unchanged. Migration: `Error::Format(m)` binds the details; use `m.message()` where the
+  string was used, or match on `m.kind()`.
+- `PcmOptions::threads` is a `Threads` (`All`, `Single`, `Count(NonZeroUsize)`) instead of
+  a `bool`. Migration: `true` is `Threads::All`, `false` is `Threads::Single`.
+- `#[non_exhaustive]` on `PcmOptions`, `PcmConfig`, `Report`, `ConvertStats`, `FrameRun`,
+  `frames::Run`, `DsdInfo`, `PcmInfo`, and the enums `PcmRate`, `Cutoff`, `WavFormat`,
+  `PcmOut` and `SimdLevel`, so that later versions can add fields and variants.
+  Migration: build `PcmOptions` with `PcmOptions::new(rate)` and `with_cutoff`,
+  `with_gain_db`, `with_threads`, `with_filter` (new), or set fields on that value;
+  `PcmConfig`, `FrameRun` and `Run` with their existing `new` and `with_*`; `DsdInfo` and
+  `PcmInfo` with the new `DsdInfo::new` and `PcmInfo::new`; add a wildcard arm to a
+  `match` on those enums.
+- `io::DsdWrite` and `io::PcmRead` are sealed (implemented by the crate's writers and
+  readers only), so methods can be added to them. Migration: none for callers; a type
+  outside the crate can no longer implement them. `io::DsdRead` stays open, since
+  `dsd64_to_pcm` converts callers' own sources.
+
 ### Added
 
 - No-clobber output: the tool's `-n` / `--no-clobber`, the library's `convert_file_to` with
@@ -54,6 +79,20 @@ version.
   RMAA-style summary; the pysacd preset, scarletbook-pcm 0.7.0 and the foobar2000 SACD
   plug-in compared), with the measurement scripts in `tools/quality`.
 
+- `Threads::Count(n)` runs a conversion on at most n threads (up to 256), and the C
+  interface's `dsd2pcm_file_options.threads` takes n > 1 the same way (it was refused). The
+  output bytes are the same for every count (tested from 1 to 7, all cores and above the
+  cap, with every filter).
+- `WavReader::declared_frames`: the frames a WAV file's `data` size declares, which is more
+  than `info().frames` when the file is cut short. `DsfReader::skipped_metadata_len`: the
+  size of a DSF tag over `MAX_METADATA` (16 MiB) that was not loaded; before, such a tag
+  was dropped without a trace ([design](docs/design.md#robustness)).
+- C interface: `tests/struct_size.c` checks `struct_size` versioning from C, also under
+  AddressSanitizer and UndefinedBehaviorSanitizer: a `dsd2pcm_file_options` of the 0.1.0
+  size (no `no_clobber`) passed as a heap block of exactly that size and as one followed
+  by a set `no_clobber` that must not be read, the current size, larger ones with zero and
+  non-zero extra bytes, and the same for the other structs.
+
 ### Changed
 
 - Output: DSD to WAV conversion writes the channel mask of the input's layout (DSF channel
@@ -77,6 +116,27 @@ version.
 - Docs in the DSD Toolbox layout: a [documentation index](docs/README.md), the
   [user guide](docs/user-guide.md) and [options](docs/options.md) pages (from
   `docs/usage.md`), and [CONTRIBUTING.md](CONTRIBUTING.md).
+
+- C interface: a struct larger than the library's own (from a newer header) is accepted
+  only when its bytes past the library's size are 0; a set field the library does not know
+  is refused with `DSD2PCM_E_INVALID_ARGUMENT` naming the byte, instead of being ignored.
+  An output struct's extra bytes are left as they are, as before. A `struct_size` above
+  4096 is refused (it catches a size that was never set). The library never reads past the
+  caller's `struct_size`, and fields the caller's struct lacks read as 0, as before
+  ([C interface](docs/c-api.md#abi)).
+- WAV input: `WAVE_FORMAT_EXTENSIBLE` files are checked: a sub-format GUID other than
+  `KSDATAFORMAT`'s PCM and IEEE float (for example Ambisonic B-format, whose first bytes
+  read like PCM's) is `Unsupported`, and more valid bits than the container is
+  `Malformed`. Valid bits of 0 or below the container (20 in 24, as `flac -d` writes)
+  read as before.
+- FLAC input: a stream with more frames than STREAMINFO declares is an error
+  (`Malformed`) after the declared frames, instead of losing the rest without a word; the
+  reference decoder decodes them. A stream with fewer stays an error (`Truncated`), as with
+  the reference decoder. Bytes after the last frame that are not a frame (an ID3v1 tag,
+  padding) are still ignored.
+- Readers: the rules for files that bend their format (WAV cut short, DSDIFF `DSD ` chunk
+  not a multiple of the channel count, DSF tag over 16 MiB) are documented with a test
+  each ([design](docs/design.md#robustness)); their behaviour is unchanged.
 
 ### Fixed
 
