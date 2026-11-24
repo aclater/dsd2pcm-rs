@@ -12,13 +12,14 @@ dsd2pcm crate; the decoders are run by path.
 | `signals.toml` | | The test signals: frequencies, levels, lengths, lead-in silence and ramps, PCM rates, DSD rates, modulators |
 | `modulator.py` | | The reference 1-bit modulator (5th order, error feedback; its design is in the file) |
 | `gen_signals.py` | `signals.toml` | PCM test files (24-bit WAV), DSD files (DSF) and `signals.json` (every tone and level as generated) |
-| `decoders.toml` | | The decoders: command templates and settings |
+| `decoders.toml` | | The decoders: command templates and settings (`dsd2pcm` is `--filter fast`, `dsd2pcm-precise` the default filter) |
 | `decode.py` | DSF files | One WAV per decoder, setting and signal, and `runs.json` (commands, exit status, SHA-256 of inputs and outputs) |
 | `postfilter.py` | WAV files | The same, through a separate reference linear-phase low-pass (for the 30 kHz comparison) |
 | `analyse.py` | WAV files (and DSF sources) | `results.json` (metrics) and `curves.json` (plot data); the analysis settings are written into `results.json`. Alias tones are also related to each tone's level measured in the bitstream (pass the signal in `--sources`), and `loud_alias` is detected narrow-band |
 | `filters.py` | `tables.rs`, `pysacd_taps.rs`, `tables_precise.rs` (`--precise`) | `filters.json`: the filters' exact response, from their taps; with `--apply`, the same filter in 64-bit floating point run on a DSF file (a reference decoder without rounding or word length; `--cutoff precise-40` and so on for the precise filter) |
 | `plot.py` | JSON | SVG charts |
 | `report.py` | JSON | The Markdown tables of the page |
+| `test_analyse.py` | | Tests of `analyse.py` (`venv/bin/python -m unittest discover -s tools/quality`) |
 | `sbpcm/` | raw DSD | scarletbook-pcm 0.7.0 as a command-line decoder (a separate Cargo project) |
 
 ## Quick start

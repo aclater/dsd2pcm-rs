@@ -24,7 +24,7 @@ ANALYSIS = {
     "window": "7-term Blackman-Harris (Albrecht 2001 coefficients) for spectra; rectangular for the coherent multitone",
     "fft": "2^18 points for tones (frequency response tones: 2^18 x fs / 88200, 0.34 Hz bins) (step signals: 2^18 x fs / 176400, 1.49 s), Welch 2^18 x fs / 88200 with 50 % overlap and 8 averages for noise, 2^20 (2^19 at 88.2 kHz) for the multitone and the J-Test",
     "settling": "steady signals: analysis from 0.5 s after the steady part starts; steps: from 0.25 s into each step; never the last 0.1 s",
-    "bandwidth": "20 Hz to 20 kHz (AES17) unless stated; THD: harmonics 2 to 9 up to 20 kHz",
+    "bandwidth": "20 Hz to 20 kHz (AES17-style) unless stated; THD: harmonics 2 to 9 up to 20 kHz",
     "tone_lobe_bins": 8,
     "weighting": "A-weighting per IEC 61672-1, 0 dB at 1 kHz",
     "dbfs": "0 dBFS = a full-scale sine (RMS 1/sqrt(2)); powers are mean squares",
@@ -279,7 +279,7 @@ def analyse_file(path, meta, key):
             out.append({k: v for k, v in r.items() if k != "phase_rad"})
         res["steps"] = out
         if sid == "level_steps":
-            # Dynamic range (AES17): the -60 dB SACD step is -66 dBFS here.
+            # Dynamic range (AES17-style): the -60 dB SACD step is -66 dBFS here.
             near = min(out, key=lambda r: abs(r["expected_dbfs"] + 66))
             res["dr_step_dbfs"] = near["expected_dbfs"]
             res["dynamic_range_db"] = -(near["residual_dbfs"] + 6.02)
@@ -485,9 +485,10 @@ def relate_to_sources(results):
         src = results.get("source/" + key.rsplit("/", 1)[-1])
         if not src or "steps" not in src:
             continue
-        tones = {t["in_hz"]: t for t in src["steps"] if "tone_dbfs" in t}
+        # Only alias steps carry in_hz; level, frequency and crosstalk steps have none.
+        tones = {t["in_hz"]: t for t in src["steps"] if "in_hz" in t and "tone_dbfs" in t}
         for stp in r["steps"]:
-            t = tones.get(stp["in_hz"])
+            t = tones.get(stp.get("in_hz"))
             if t is None or "out_dbfs" not in stp:
                 continue
             stp["source_tone_dbfs"] = t["tone_dbfs"]

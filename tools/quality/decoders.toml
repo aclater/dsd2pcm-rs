@@ -10,8 +10,8 @@
 # dsd_rates: the DSD rates the decoder accepts.
 
 [decoder.dsd2pcm]
-desc = "dsd2pcm (default filter)"
-command = ["{tool:dsd2pcm}", "{input}", "{output}", "--rate", "{rate}", "--cutoff", "{cutoff}", "--gain", "{gain}"]
+desc = "dsd2pcm --filter fast (scarletbook-pcm 0.7.0's filters; the default up to 0.1.2)"
+command = ["{tool:dsd2pcm}", "{input}", "{output}", "--rate", "{rate}", "--cutoff", "{cutoff}", "--gain", "{gain}", "--filter", "fast"]
 input = "dsf"
 output = "wav"
 dsd_rates = [64]
@@ -27,8 +27,8 @@ settings = [
 ]
 
 [decoder.dsd2pcm-gain]
-desc = "dsd2pcm, 176.4 kHz, 40 kHz filter, with gain (headroom tests)"
-command = ["{tool:dsd2pcm}", "{input}", "{output}", "--rate", "{rate}", "--cutoff", "{cutoff}", "--gain", "{gain}"]
+desc = "dsd2pcm --filter fast, 176.4 kHz, 40 kHz filter, with gain (headroom tests)"
+command = ["{tool:dsd2pcm}", "{input}", "{output}", "--rate", "{rate}", "--cutoff", "{cutoff}", "--gain", "{gain}", "--filter", "fast"]
 input = "dsf"
 output = "wav"
 dsd_rates = [64]
