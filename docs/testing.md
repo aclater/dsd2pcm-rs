@@ -171,4 +171,4 @@ in the same job) checks each of those cases in throwaway repositories. Locally:
 - [C interface](c-api.md#checks): the C library checks
 - [Fuzzing](fuzzing.md): the readers against bad input
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

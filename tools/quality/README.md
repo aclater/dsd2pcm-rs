@@ -64,4 +64,4 @@ WAVs in `out/dec/<decoder>/<setting>/`, named as the DSF inputs with `.wav`, and
 - [PCM quality](../../docs/pcm-quality.md): the results and what they mean
 - [Design](../../docs/design.md): the converter being measured
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

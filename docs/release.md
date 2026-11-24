@@ -25,24 +25,24 @@ The GitHub release, with these assets:
 
 | Asset | Platform |
 |---|---|
-| `dsd2pcm-0.1.2-src.tar.gz` | (from 0.1.3) The source: the tagged commit's whole tree (workspace, `fuzz/`, `docs/`) |
+| `dsd2pcm-0.1.2-src.tar.gz` | (from 0.2.0) The source: the tagged commit's whole tree (workspace, `fuzz/`, `docs/`) |
 | `dsd2pcm-0.1.2-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
 | `dsd2pcm-0.1.2-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
 | `dsd2pcm-0.1.2-i686-linux.tar.gz` | Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later |
-| `dsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | (from 0.1.3) Linux x86_64, statically linked (musl): any Linux |
-| `dsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | (from 0.1.3) Linux aarch64, statically linked (musl): any Linux |
+| `dsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | (from 0.2.0) Linux x86_64, statically linked (musl): any Linux |
+| `dsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | (from 0.2.0) Linux aarch64, statically linked (musl): any Linux |
 | `dsd2pcm-0.1.2-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon; signed (Developer ID) and notarised |
-| `dsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.1.3) macOS 11 or later, Intel; signed (Developer ID) and notarised |
+| `dsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.2.0) macOS 11 or later, Intel; signed (Developer ID) and notarised |
 | `dsd2pcm-0.1.2-x86_64-windows.zip` | Windows 10 and 11, x86_64; C runtime linked in; not code-signed |
 | `libdsd2pcm-0.1.2-x86_64-linux.tar.gz` | C library, Linux x86_64, glibc 2.17 or later; static library marked for the CET shadow stack |
 | `libdsd2pcm-0.1.2-aarch64-linux.tar.gz` | C library, Linux aarch64, glibc 2.17 or later |
 | `libdsd2pcm-0.1.2-i686-linux.tar.gz` | C library, Linux 32-bit x86, glibc 2.17 or later |
-| `libdsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | (from 0.1.3) C library, Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later); static library marked for the CET shadow stack |
-| `libdsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | (from 0.1.3) C library, Linux aarch64, musl 1.2.3 or later |
+| `libdsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | (from 0.2.0) C library, Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later); static library marked for the CET shadow stack |
+| `libdsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | (from 0.2.0) C library, Linux aarch64, musl 1.2.3 or later |
 | `libdsd2pcm-0.1.2-aarch64-macos.tar.gz` | C library, macOS 11 or later, Apple silicon; `libdsd2pcm.1.dylib` signed and notarised |
-| `libdsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.1.3) C library, macOS 11 or later, Intel; `libdsd2pcm.1.dylib` signed and notarised |
+| `libdsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.2.0) C library, macOS 11 or later, Intel; `libdsd2pcm.1.dylib` signed and notarised |
 | `libdsd2pcm-0.1.2-x86_64-windows.zip` | C library, Windows 10 and 11, x86_64, for MSVC |
-| `libdsd2pcm-0.1.2-x86_64-windows-gnu.zip` | (from 0.1.3) C library, Windows 10 and 11, x86_64, for MinGW-w64 gcc (msvcrt) |
+| `libdsd2pcm-0.1.2-x86_64-windows-gnu.zip` | (from 0.2.0) C library, Windows 10 and 11, x86_64, for MinGW-w64 gcc (msvcrt) |
 
 A `dsd2pcm-` archive holds `dsd2pcm` (or `dsd2pcm.exe`), `README.md`, `LICENSE-MIT` and
 `LICENSE-APACHE`. A `libdsd2pcm-` archive holds `include/dsd2pcm.h`, the shared library
@@ -178,7 +178,7 @@ no token when there is nothing to publish).
 2. From a clean clone of the release commit:
 
    ```sh
-   git clone https://github.com/aclater/dsd2pcm-rs.git
+   git clone https://github.com/dsd-toolbox/dsd2pcm-rs.git
    cd dsd2pcm-rs
    cargo publish --dry-run --locked -p dsd2pcm -p dsd2pcm-cli
    cargo login
@@ -191,7 +191,7 @@ no token when there is nothing to publish).
    depends on it.
 3. For each of `dsd2pcm` and `dsd2pcm-cli`, on crates.io, the crate's Settings, Trusted
    Publishing, Add, GitHub:
-   - Repository owner: `aclater`
+   - Repository owner: `dsd-toolbox`
    - Repository name: `dsd2pcm-rs`
    - Workflow filename: `release.yml`
    - Environment: `release`
@@ -231,19 +231,19 @@ steps 1 to 5 for that crate alone.
    archives, their `.sha256` and `.intoto.jsonl` files, and `SHA256SUMS`), and an asset:
 
    ```sh
-   gh release download v0.1.2 -R aclater/dsd2pcm-rs -p dsd2pcm-0.1.2-x86_64-linux.tar.gz
-   gh attestation verify dsd2pcm-0.1.2-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs --signer-workflow aclater/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.2 --deny-self-hosted-runners
+   gh release download v0.1.2 -R dsd-toolbox/dsd2pcm-rs -p dsd2pcm-0.1.2-x86_64-linux.tar.gz
+   gh attestation verify dsd2pcm-0.1.2-x86_64-linux.tar.gz -R dsd-toolbox/dsd2pcm-rs --signer-workflow dsd-toolbox/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.2 --deny-self-hosted-runners
    ```
 
-   From 0.1.3 on, also run the source archive's commands in [c-api.md](c-api.md) (download,
+   From 0.2.0 on, also run the source archive's commands in [c-api.md](c-api.md) (download,
    `sha256sum -c`, `gh attestation verify`, unpack, build) against the new tag.
 6. Release notes: the workflow writes the same notes for every release. Put the version's
    CHANGELOG section on top of them, from a clone of the release commit:
 
    ```sh
    awk '/^## 0\.1\.2 /{f=1; next} /^## /{f=0} f' CHANGELOG.md > notes.md
-   gh release view v0.1.2 -R aclater/dsd2pcm-rs --json body -q .body >> notes.md
-   gh release edit v0.1.2 -R aclater/dsd2pcm-rs --notes-file notes.md
+   gh release view v0.1.2 -R dsd-toolbox/dsd2pcm-rs --json body -q .body >> notes.md
+   gh release edit v0.1.2 -R dsd-toolbox/dsd2pcm-rs --notes-file notes.md
    ```
 
 7. Yank: when the release fixes security issues, yank the affected earlier versions of both
@@ -274,4 +274,4 @@ patch version.
 - [Development](development.md): CI and the checks before a release
 - [Security policy](../SECURITY.md): supported versions
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

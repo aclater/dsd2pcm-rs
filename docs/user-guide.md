@@ -40,25 +40,37 @@ For example, 88.2 kHz with the 30 kHz filter, 3 dB quieter:
 dsd2pcm "01 - Track.dsf" "01 - Track.wav" --rate 88200 --cutoff 30 --gain -3
 ```
 
-`--filter precise` (`Filter::Precise`, `DSD2PCM_FILTER_PRECISE` in C) uses the precise
-filter: the same cutoffs, rates, exact integer arithmetic, centring and rounding as the
-default, with at least 150 dB of stopband wherever ultrasonic content would fold into the
-passband (the default: about 110 dB) and about half the passband ripple. With very quiet sources
-it lowers the audio-band floor from about -128 dBFS to the 24-bit output's own, about
--150 dBFS. It takes about twice the CPU time of the default and its output bytes differ
-from scarletbook-pcm's ([PCM quality](pcm-quality.md#the-precise-filter)).
+The filter itself is chosen with `--filter`:
+
+| `--filter` | What it is | Quality | CPU time |
+|---|---|---|---|
+| `precise` (default) | Exact integer filter with at least 150 dB of stopband wherever ultrasonic content would fold into the passband | SINAD 142 to 145 dB with a very quiet DSD64 source, the limit of 24-bit output | 1.3 to 1.9 times scarletbook-pcm 0.7.0's (Intel Core i9-13900H) |
+| `fast` | scarletbook-pcm 0.7.0's filter, byte-identical with it; the default up to 0.1.2 | About 110 dB of stopband: SINAD 122 dB with the same source (116 dB with `wide`) | Lower: 1.11 to 1.25 times scarletbook-pcm's speed (Intel Core i9-13900H) |
+| `pysacd` | pysacd's filter and dithered quantiser; 88.2 and 176.4 kHz only | See [PCM quality](pcm-quality.md#comparisons) | – |
+
+`precise` (`Filter::Precise`) and `fast` (`Filter::Fast`) share the cutoffs, rates, exact
+integer arithmetic, centring and rounding; `precise` has about half the passband ripple.
+On the real discs measured, the recording's own noise was far above both filters' floors;
+the difference shows with quiet, well-made sources and in measurements
+([PCM quality](pcm-quality.md#the-precise-filter), [performance](performance.md)). Use
+`fast` for lower CPU time, or for output byte-identical with scarletbook-pcm 0.7.0 or with
+dsd2pcm 0.1.x's default.
 
 `--filter pysacd` (`Filter::Pysacd` in `PcmOptions` and `frames::PcmConfig`) uses pysacd's
 filter instead: three Kaiser-windowed FIR stages in `f32` and a TPDF-dithered quantiser,
 bit-exact with pysacd's reference build on every CPU and SIMD level; 88.2 and 176.4 kHz
-only, with a fixed response (leave `--cutoff` at the default). The default filter and its
-output are unchanged. [design.md](design.md) gives the reasons for each filter.
+only, with a fixed response (leave `--cutoff` at the default). [design.md](design.md) gives
+the reasons for each filter.
 
 ## Output
 
-The output samples are identical to those of scarletbook-pcm 0.7.0 for the same rate,
-cutoff and gain; the tests compare the two on synthetic and real input. Every sample is an
-exact integer computation, so the output is byte-identical on every CPU and build profile.
+Within a release, the output is deterministic: every sample of `precise` and `fast` is an
+exact integer computation, so the same input and settings give the same bytes on every CPU,
+SIMD level and build profile. With `fast` the samples are identical to those of
+scarletbook-pcm 0.7.0 for the same rate, cutoff and gain; the tests compare the two on
+synthetic and real input. Between releases the output may change when measured quality
+improves; the [changelog](../CHANGELOG.md) lists every such change with its measured
+effect.
 On x86 this assumes SSE2 floating point, as on x86_64 and Rust's i686 targets (the release
 builds); targets that use the x87 unit (i586 and older) are not covered.
 The DSD idle pattern (0x69) converts to exact zeros. On x86 the filters use AVX2 and FMA
@@ -68,16 +80,16 @@ when the CPU has them, chosen at run time, with the same output; the environment
 One intended difference: a DSF file whose sample count is not a multiple of 8 ends in a
 byte with padding bits past the last sample, usually zeros. The reader delivers those bits
 as the idle pattern 0x69's bits at the same positions, so the padding converts as silence
-rather than as a step of up to -7 dBFS. The output is identical to scarletbook-pcm 0.7.0
+rather than as a step of up to -7 dBFS. With `fast` the output is identical to scarletbook-pcm 0.7.0
 given the same masked bytes. It differs from a conversion of the raw bytes only for such
 files whose padding is not already 0x69's bits, and only in each channel's last K output
 samples, with K at most `ceil(context_bytes / k) + 1` (`k` input bytes per output sample):
 
 | Filter | Rate | Cutoff | K at most |
 |---|---|---|---|
-| default | 88.2 kHz | 30 / 40 | 46 / 36 |
-| default | 176.4 kHz | 30 / 40 / wide | 91 / 71 / 62 |
-| default | 352.8 kHz | 30 / 40 / wide | 196 / 156 / 67 |
+| fast | 88.2 kHz | 30 / 40 | 46 / 36 |
+| fast | 176.4 kHz | 30 / 40 / wide | 91 / 71 / 62 |
+| fast | 352.8 kHz | 30 / 40 / wide | 196 / 156 / 67 |
 | precise | 88.2 kHz | 30 / 40 | 83 / 64 |
 | precise | 176.4 kHz | 30 / 40 / wide | 164 / 126 / 113 |
 | precise | 352.8 kHz | 30 / 40 / wide | 350 / 274 / 119 |
@@ -140,8 +152,9 @@ cutoff, filter, gain, threads), the same conversion as the tool.
 
 `dsd2pcm::frames::Converter` converts SACD frames (channels interleaved byte by byte, 4704
 bytes per channel per frame) a run at a time, with the frames before and after the run as
-context, into interleaved 24-bit PCM, with clip counts per frame. Its interface and output
-bytes are those of scarletbook-pcm 0.7.0's `Converter::convert`; any run with its
+context, into interleaved 24-bit PCM, with clip counts per frame. Its interface is that of
+scarletbook-pcm 0.7.0's `Converter::convert`, and with `Filter::Fast` so are its output
+bytes; any run with its
 neighbours gives the bytes of that run in a whole-area conversion. One converter per
 thread; after the first call it allocates nothing.
 
@@ -179,6 +192,6 @@ a negative `--gain` (for example `--gain -3`) avoids it.
 - [Options](options.md): every command-line option and its default
 - [C interface](c-api.md): the C library
 - [Design](design.md): the decisions behind the filters and the output
-- [Performance](performance.md): speed against scarletbook-pcm 0.7.0
+- [Performance](performance.md): speed of `precise` and `fast` against scarletbook-pcm 0.7.0
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

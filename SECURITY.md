@@ -32,7 +32,7 @@ space in proportion to its input.
 
 Do not open a public issue. Report it privately through GitHub: the repository's
 **Security** tab, **Report a vulnerability**
-([direct link](https://github.com/aclater/dsd2pcm-rs/security/advisories/new)).
+([direct link](https://github.com/dsd-toolbox/dsd2pcm-rs/security/advisories/new)).
 
 Please include:
 
@@ -60,4 +60,4 @@ Please give us the chance to release a fix before you disclose the issue.
 - Releases are built in CI from an annotated tag on `main`, with build provenance
   attestations ([docs/release.md](docs/release.md)).
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

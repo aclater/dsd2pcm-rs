@@ -14,8 +14,11 @@ rules every change follows are in [AGENTS.md](AGENTS.md).
 
 - Every change goes through a pull request against `main`; the required CI checks must pass
   on a branch that is up to date with `main`.
-- Output bytes never change without a major version and a release note; the tests hold
-  golden hashes at every SIMD level.
+- Output is deterministic within a release: the same version, input and settings give the
+  same bytes on every CPU and SIMD level, and the tests hold golden hashes at every level.
+  Between releases output may change when measured quality improves; every such change is
+  listed in the CHANGELOG with its measured effect (`docs/quality/<version>.md`). Releases up
+  to 0.1.2 keep their behaviour as released.
 - `unsafe` code, parsers and untrusted-input handling get a security review first.
 - Update the README and the docs in the same pull request where the change needs it.
 - [docs/development.md](docs/development.md) has the commands CI runs, to run them locally
@@ -27,4 +30,4 @@ Unless you state otherwise, any contribution you intentionally submit for inclus
 work, as defined in the Apache-2.0 licence, is dual-licensed under the MIT licence and the
 Apache License, Version 2.0, without any additional terms or conditions.
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

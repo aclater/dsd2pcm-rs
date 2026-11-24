@@ -9,7 +9,7 @@ use them.
 ## Synopsis
 
 ```text
-dsd2pcm [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|precise|pysacd] [--single-thread] [-n|--no-clobber] [--] IN OUT
+dsd2pcm [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter precise|fast|pysacd] [--single-thread] [-n|--no-clobber] [--] IN OUT
 ```
 
 `IN` is a DSF or DFF file (DSD64); `OUT` is the WAV file to write (24-bit PCM). An existing
@@ -27,7 +27,7 @@ option values must be UTF-8, and a value that is not is a usage error.
 | `--rate` | `88200`, `176400`, `352800` (Hz) | `176400` | Output sample rate. |
 | `--cutoff` | `30`, `40`, `wide` | `40` | Filter: passband to 30 kHz, 40 kHz, or 80 kHz (`wide`, 176.4 and 352.8 kHz only). `80` is accepted for `wide`. |
 | `--gain` | -120 to +24 (dB) | `0` | Applied before quantising to 24 bits. |
-| `--filter` | `default`, `precise`, `pysacd` | `default` | `precise`: at least 150 dB of stopband, every rate and cutoff, about twice the CPU time. `pysacd`: pysacd's filter and dithered quantiser, 88.2 and 176.4 kHz only, standard cutoff only. |
+| `--filter` | `precise`, `fast`, `pysacd` | `precise` | `precise`: at least 150 dB of stopband, every rate and cutoff; 1.3 to 1.9 times scarletbook-pcm 0.7.0's CPU time. `fast`: scarletbook-pcm 0.7.0's filter, byte-identical with it, lower CPU time and lower quality (about 110 dB of stopband); the default up to 0.1.2. `pysacd`: pysacd's filter and dithered quantiser, 88.2 and 176.4 kHz only, standard cutoff only. |
 | `--single-thread` | | all cores | Convert on the calling thread only. |
 | `-n`, `--no-clobber` | | off | Refuse an existing `OUT` (exit status 1, the file left as it was), and never replace a file that appears at `OUT` during the conversion. |
 | `--` | | | Ends the options: every later argument is a file name. |
@@ -51,10 +51,11 @@ option values must be UTF-8, and a value that is not is a usage error.
 
 ## Build settings for consumers
 
-dsd2pcm's kernels are fastest when the compiler sees each loop whole. A release profile
-with many codegen units and overflow checks (16 units, no LTO, overflow checks on) measured
-25 % slower; the output bytes are the same. Until 0.1.3 makes the kernels robust to such
-profiles, a project that depends on the crate can set, in its own `Cargo.toml`:
+From 0.2.0 no settings are needed: a release profile with many codegen units and overflow
+checks (16 units, no LTO, overflow checks on) keeps the crate's speed, which CI checks on
+every pull request ([design](design.md#release-profiles-of-consumers)). Up to 0.1.2 such a
+profile measured 25 % slower, with the same output bytes; a project that depends on 0.1.2
+can set, in its own `Cargo.toml`:
 
 ```toml
 [profile.release.package.dsd2pcm]
@@ -68,4 +69,4 @@ overflow-checks = false
 - [C interface](c-api.md): the same options for C programs
 - [Design](design.md): the filters, the SIMD levels and consumer profiles
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

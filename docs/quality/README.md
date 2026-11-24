@@ -2,7 +2,7 @@
 
 # Release quality comparison
 
-Every release from 0.1.3 on publishes `docs/quality/<version>.md`, which measures it against
+Every release from 0.2.0 on publishes `docs/quality/<version>.md`, which measures it against
 the previous release.
 
 Both versions are built from source (the release candidate and the previous release's tag) and measured on one machine with

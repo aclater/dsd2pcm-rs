@@ -73,4 +73,4 @@ This replays the corpus and writes `fuzz/coverage/dsf_read/coverage.profdata` fo
 - [Design](design.md#robustness): how the parsers guard against bad input
 - [Security policy](../SECURITY.md): reporting a vulnerability
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

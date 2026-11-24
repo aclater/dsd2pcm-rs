@@ -46,7 +46,7 @@ lychee 0.24.2 from its GitHub release (the version and SHA-256 pinned in
 record its SHA:
 
 ```sh
-git clone https://github.com/aclater/dsd2pcm-rs.git
+git clone https://github.com/dsd-toolbox/dsd2pcm-rs.git
 cd dsd2pcm-rs
 git checkout BRANCH
 git rev-parse HEAD
@@ -300,7 +300,7 @@ Measures the candidate and the previous release with
 `docs/quality/X.Y.Z.md` ([how the comparison is made](quality/README.md)). Nothing is timed,
 so it runs in parallel with the other items. It needs Python 3.11 or later, a C compiler
 and about 15 minutes with the builds (the measurements take 5 minutes and 1.7 GB of memory
-on an AMD Ryzen AI Max+ 395). The example is the first comparison, 0.1.3 against 0.1.2; for
+on an AMD Ryzen AI Max+ 395). The example is the first comparison, 0.2.0 against 0.1.2; for
 a later release, change the two tags and the file name.
 
 Install the pinned measurement suite and build the two versions under `target/quality/`
@@ -310,7 +310,7 @@ Install the pinned measurement suite and build the two versions under `target/qu
 pipx install git+https://github.com/dsd-toolbox/dsd-measure@d234b7a8233ccfe391776e7c6425cbf8643c47e3
 dsd-measure --version
 cargo install --locked --path crates/dsd2pcm-cli --root target/quality/new
-cargo install --locked --git https://github.com/aclater/dsd2pcm-rs --tag v0.1.2 --root target/quality/old dsd2pcm-cli
+cargo install --locked --git https://github.com/dsd-toolbox/dsd2pcm-rs --tag v0.1.2 --root target/quality/old dsd2pcm-cli
 ```
 
 `dsd-measure --version` must print `0.1.1`. Measure both, from the repository root:
@@ -335,7 +335,7 @@ dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/mul
 dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old pysacd 176400" --device "new pysacd 176400" -o target/quality/null/pysacd-176400
 ```
 
-Copy [the template](quality/template.md) to `docs/quality/0.1.3.md` and fill it from
+Copy [the template](quality/template.md) to `docs/quality/0.2.0.md` and fill it from
 `target/quality/report/<device>/results.json` (the keys are listed at the top of the suite
 file) and the first line of each `target/quality/null/*/index.md`.
 
@@ -383,4 +383,4 @@ Release: X.Y.Z    Candidate: BRANCH at SHA    Date:    Tester:
 - [Release quality comparison](quality/README.md): the item 11 pages
 - [Development](development.md): the checks CI runs on every pull request
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

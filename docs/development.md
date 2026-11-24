@@ -40,4 +40,4 @@ disagree (`python3 -I .github/scripts/check-doc-versions.py`).
 - [Fuzzing](fuzzing.md): the fuzz targets
 - [Releases](release.md): publishing a version
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

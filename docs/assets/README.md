@@ -16,6 +16,6 @@ keep the file names, so links to them keep working.
 ## See also
 
 - [Documentation](../README.md): the documentation index
-- [DSD Toolbox](https://github.com/aclater/dsd-toolbox): the other projects of the family
+- [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox): the other projects of the family
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

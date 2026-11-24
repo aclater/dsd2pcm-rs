@@ -1,6 +1,6 @@
 [dsd2pcm-rs](../README.md) › Documentation
 
-<img src="https://raw.githubusercontent.com/aclater/dsd2pcm-rs/main/docs/assets/icon-256.png" alt="" width="96">
+<img src="https://raw.githubusercontent.com/dsd-toolbox/dsd2pcm-rs/main/docs/assets/icon-256.png" alt="" width="96">
 
 # Documentation
 
@@ -25,7 +25,7 @@ Start with the [Quick start](../README.md#quick-start) in the README.
 ## Internals
 
 - [Design](design.md): the design decisions and their reasons, and how the conversion works
-- [Performance](performance.md): speed against scarletbook-pcm 0.7.0, including the gaps
+- [Performance](performance.md): speed of `precise` and `fast` against scarletbook-pcm 0.7.0, including the gaps
 - [PCM quality](pcm-quality.md): the measured audio quality of every filter and rate
 - [Release quality comparison](quality/README.md): each release measured against the previous one
 - [Fuzzing](fuzzing.md): the fuzz targets and how to run them
@@ -39,4 +39,4 @@ Start with the [Quick start](../README.md#quick-start) in the README.
 - [Security policy](../SECURITY.md) · [Provenance](../PROVENANCE.md)
 - [Icons](assets/README.md): the project icon set, part of the DSD Toolbox family
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

@@ -41,6 +41,9 @@
 - Zero fields are the defaults, apart from the rate (and channel count): cutoff
   `DSD2PCM_CUTOFF_STANDARD`, filter `DSD2PCM_FILTER_DEFAULT`, 0 dB, all cores, no
   callback. Integer selectors (cutoff, filter, format, threads) are checked, never trusted.
+<!-- TODO 0.2.0: state what 0 (DSD2PCM_FILTER_DEFAULT) selects now that the library's
+default is the precise filter and scarletbook-pcm's is `fast`, once the C interface lane
+settles the names (ABI 1, additions only). -->
 - `filter` selects the filter and quantiser: 0 is the default (scarletbook-pcm 0.7.0's
   samples). `DSD2PCM_FILTER_PYSACD` (1) is pysacd's filter with its dithered quantiser
   (`Filter::Pysacd`): 88200 and 176400 Hz, standard cutoff only. Its dither is seeded per
@@ -62,7 +65,7 @@ int dsd2pcm_convert_file(const char *input_path, const char *output_path,
 Converts a DSF or DFF file (DSD64) to a 24-bit WAV file. `options` holds the rate (88200,
 176400, 352800), cutoff, filter, gain (-120 to +24 dB), `threads` (0: all cores, 1: the
 calling thread only), `no_clobber` (0: replace an existing output, 1: refuse it; since
-0.1.3) and an optional progress callback:
+0.2.0) and an optional progress callback:
 
 ```c
 typedef int (*dsd2pcm_progress_fn)(uint64_t done, uint64_t total, void *user_data);
@@ -188,9 +191,9 @@ Both run without arguments.
 
   A struct from a caller built against an older header is read for its `struct_size` bytes
   and the fields it lacks are taken as 0.
-- Appended since 0.1.0: `dsd2pcm_file_options.no_clobber` (`uint32_t`, 0.1.3), which makes
+- Appended since 0.1.0: `dsd2pcm_file_options.no_clobber` (`uint32_t`, 0.2.0), which makes
   the struct 56 bytes on 64-bit targets, 40 on i686 Linux and 48 on other 32-bit targets.
-  The status code `DSD2PCM_E_EXISTS` (9) is new in 0.1.3; the library returns it only
+  The status code `DSD2PCM_E_EXISTS` (9) is new in 0.2.0; the library returns it only
   when `no_clobber` is set.
 
 ## Building from source
@@ -201,15 +204,15 @@ library (MIT OR Apache-2.0). `--features flac` adds it back. Build it on its own
 (`-p dsd2pcm-capi`): a workspace build (`cargo build --workspace`) turns the feature on for
 it too, through the command-line tool, and its libraries then hold claxon's code.
 
-From 0.1.3 on, each release has the source as an attested archive,
+From 0.2.0 on, each release has the source as an attested archive,
 `dsd2pcm-0.1.2-src.tar.gz` for this version: the tagged commit's whole tree, made with
 `git archive --format=tar --prefix=dsd2pcm-0.1.2/ v0.1.2 | gzip -n -9` (the same command
 gives the same tar, and with GNU gzip the same bytes). To pin and check it:
 
 ```sh
-gh release download v0.1.2 -R aclater/dsd2pcm-rs -p 'dsd2pcm-0.1.2-src.tar.gz*'
+gh release download v0.1.2 -R dsd-toolbox/dsd2pcm-rs -p 'dsd2pcm-0.1.2-src.tar.gz*'
 sha256sum -c dsd2pcm-0.1.2-src.tar.gz.sha256
-gh attestation verify dsd2pcm-0.1.2-src.tar.gz -R aclater/dsd2pcm-rs --signer-workflow aclater/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.2 --deny-self-hosted-runners
+gh attestation verify dsd2pcm-0.1.2-src.tar.gz -R dsd-toolbox/dsd2pcm-rs --signer-workflow dsd-toolbox/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.2 --deny-self-hosted-runners
 tar -xzf dsd2pcm-0.1.2-src.tar.gz
 cd dsd2pcm-0.1.2
 cargo build --release --locked -p dsd2pcm-capi
@@ -235,7 +238,7 @@ LD_LIBRARY_PATH=target/release ./minimal
 
 ## Binary releases
 
-Each GitHub release has the C library built for nine platforms (four of them from 0.1.3 on),
+Each GitHub release has the C library built for nine platforms (four of them from 0.2.0 on),
 next to the command-line tool, each with a `.sha256` file and a build provenance attestation:
 
 | Archive | Platform |
@@ -243,12 +246,12 @@ next to the command-line tool, each with a `.sha256` file and a build provenance
 | `libdsd2pcm-0.1.2-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
 | `libdsd2pcm-0.1.2-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
 | `libdsd2pcm-0.1.2-i686-linux.tar.gz` | Linux 32-bit x86, glibc 2.17 or later |
-| `libdsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | (from 0.1.3) Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later) |
-| `libdsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | (from 0.1.3) Linux aarch64, musl 1.2.3 or later |
+| `libdsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | (from 0.2.0) Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later) |
+| `libdsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | (from 0.2.0) Linux aarch64, musl 1.2.3 or later |
 | `libdsd2pcm-0.1.2-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon |
-| `libdsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.1.3) macOS 11 or later, Intel |
+| `libdsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.2.0) macOS 11 or later, Intel |
 | `libdsd2pcm-0.1.2-x86_64-windows.zip` | Windows x86_64, for MSVC |
-| `libdsd2pcm-0.1.2-x86_64-windows-gnu.zip` | (from 0.1.3) Windows x86_64, for MinGW-w64 gcc (MSYS2 MINGW64, msvcrt) |
+| `libdsd2pcm-0.1.2-x86_64-windows-gnu.zip` | (from 0.2.0) Windows x86_64, for MinGW-w64 gcc (MSYS2 MINGW64, msvcrt) |
 
 An archive holds:
 
@@ -273,7 +276,7 @@ shown):
 
 ```sh
 sha256sum -c libdsd2pcm-0.1.2-x86_64-linux.tar.gz.sha256
-gh attestation verify libdsd2pcm-0.1.2-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs
+gh attestation verify libdsd2pcm-0.1.2-x86_64-linux.tar.gz -R dsd-toolbox/dsd2pcm-rs
 tar -xzf libdsd2pcm-0.1.2-x86_64-linux.tar.gz
 export PKG_CONFIG_PATH=libdsd2pcm-0.1.2-x86_64-linux/lib/pkgconfig
 cc libdsd2pcm-0.1.2-x86_64-linux/examples/minimal.c $(pkg-config --cflags --libs dsd2pcm) -Wl,-rpath,'$ORIGIN/libdsd2pcm-0.1.2-x86_64-linux/lib' -o minimal
@@ -391,4 +394,4 @@ frames, which are marked as ignored under Miri, and under ThreadSanitizer (weekl
 - [Testing](testing.md): the leak loop and sanitizers for the C library
 - [Releases](release.md): how the binary archives are built and checked
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

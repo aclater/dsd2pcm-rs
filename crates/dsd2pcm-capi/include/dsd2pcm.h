@@ -57,7 +57,7 @@ template <typename T> static inline T dsd2pcm_init_() {
 #define DSD2PCM_E_INTERNAL 8
 
 // The output file exists and `dsd2pcm_file_options.no_clobber` is set: it is left as it
-// was. (Since 0.1.3.)
+// was. (Since 0.2.0.)
 #define DSD2PCM_E_EXISTS 9
 
 // Output layout: packed 3-byte little-endian samples (24-bit WAV and FLAC).
@@ -134,7 +134,7 @@ typedef struct dsd2pcm_file_options {
   void *user_data;
   // 0: replace an existing output file. 1: refuse it with `DSD2PCM_E_EXISTS` and leave
   // it as it was; the result is put in place without ever replacing a file that appears
-  // during the conversion. Other values are reserved. Appended in 0.1.3: a caller built
+  // during the conversion. Other values are reserved. Appended in 0.2.0: a caller built
   // against an older header passes the 0.1.0 size, and this reads as 0.
   uint32_t no_clobber;
 } dsd2pcm_file_options;
