@@ -31,11 +31,13 @@ code is copied from it.
 scarletbook-pcm 0.7.0 is also a dev-dependency: the tests check that the output samples
 are identical.
 
-Documentation and measurement data (CC BY 4.0; see the README's licence section): written and
-measured for this project. They cite, but do not copy, other work: the Scarlet Book's DSD
+Documentation (READMEs included), measurement data and creative assets (CC BY 4.0; see the
+README's licence section): written, measured and drawn for this project. The icon set in
+`docs/assets/` was drawn for this project (hand-written SVG and its PNG exports; no fonts,
+embedded images or third-party artwork) and added by the owner's account in the commit
+"docs: add the project icon set under docs/assets". They cite, but do not copy, other work: the Scarlet Book's DSD
 levels and its Annex D low-pass recommendation, as restated by Archimago (2022); the AES17
 measurement band and dBFS convention; RMAA's summary layout (the figures are our own);
 Archimago's signal choices and SoX-DSD's modulator settings. These facts and the cited works
 keep their own terms and are not part of the CC BY grant. The foobar2000 SACD plug-in rows
-and charts are our own measurements of its output. The icon files in `docs/assets/` stay
-MIT OR Apache-2.0.
+and charts are our own measurements of its output.

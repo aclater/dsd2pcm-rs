@@ -61,7 +61,7 @@ WAVs in `out/dec/<decoder>/<setting>/`, named as the DSF inputs with `.wav`, and
 
 ## Licence
 
-The scripts and `sbpcm` are code, MIT OR Apache-2.0. This README, `signals.toml` and
+The scripts and `sbpcm` are code, MIT OR Apache-2.0. This README (code snippets in it may also be used under the code licence), `signals.toml` and
 `decoders.toml` (the signal and decoder definitions) are licensed under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 ([LICENSES/CC-BY-4.0.txt](../../LICENSES/CC-BY-4.0.txt)), as is the measurement data the

@@ -2,7 +2,7 @@
 
 # Icon
 
-The dsd2pcm-rs icon (DSD pulses turned into a PCM wave), © the dsd2pcm-rs project, under the repository's licence, MIT OR Apache-2.0. It is one of the DSD Toolbox icons: a silver disc on a navy rounded square, with the project's motif on an amber panel below it.
+The dsd2pcm-rs icon (DSD pulses turned into a PCM wave), © the dsd2pcm-rs authors, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) ([LICENSES/CC-BY-4.0.txt](../../LICENSES/CC-BY-4.0.txt)), like the charts in `quality/` and the rest of the documentation. It is one of the DSD Toolbox icons: a silver disc on a navy rounded square, with the project's motif on an amber panel below it.
 
 | File | Use |
 |---|---|
