@@ -16,8 +16,8 @@ Converts DSD64 to 24-bit PCM WAV. Defaults: --rate 176400 --cutoff 40 --gain 0.
 Cutoffs: 30 (pass 30 kHz, stop 36 kHz), 40 (pass 40 kHz, stop 48 kHz),
 wide (pass 80 kHz; 176.4 and 352.8 kHz only).
 Filters: default (scarletbook-pcm 0.7.0's), precise (150 dB stopbands, every rate and
-cutoff, more CPU), pysacd (pysacd's filter and dithered quantiser, bit-exact with its
-reference; 88200 and 176400 only, fixed response).
+cutoff, more CPU), pysacd (pysacd's filter and dithered quantiser, computed in f64;
+88200 and 176400 only, fixed response).
 --single-thread: convert on the calling thread only (default: all cores).
 -n, --no-clobber: fail if OUT exists, and never replace a file that appears at OUT
 during the conversion (default: replace OUT).

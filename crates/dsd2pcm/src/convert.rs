@@ -445,7 +445,7 @@ pub fn check_options(opts: &PcmOptions) -> Result<()> {
 }
 
 /// Converts DSD64 to 24-bit PCM, sample-identical to scarletbook-pcm 0.7.0 (or with
-/// [`Filter::Pysacd`], to pysacd's reference), into `w`. `w` is not finished.
+/// [`Filter::Pysacd`], to its C reference), into `w`. `w` is not finished.
 ///
 /// Every output sample depends only on a fixed window of input bytes, so each block of
 /// input is cut into pieces (per channel and per range of outputs) that run on all cores;

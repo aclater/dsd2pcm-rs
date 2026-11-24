@@ -2,8 +2,8 @@
 //! cutoff (and with pysacd's filter at its rates), and the SHA-256 of every WAV file, header
 //! and samples, is pinned per input. A change to the header (chunk layout, format tag,
 //! channel mask) or to the samples fails here; output bytes change only with a major
-//! version (AGENTS.md). The hashes were computed on 0.1.2 (two updated for 0.2's channel
-//! mask, see [`GOLDEN`]) and are the same on every SIMD level and platform.
+//! version (AGENTS.md). The hashes were computed on 0.1.2 (updated for 0.2's channel mask
+//! and f64 pysacd filter, see [`GOLDEN`]) and are the same on every SIMD level and platform.
 //!
 //! Inputs: the material of the sample golden tests (`identity.rs`) for 1, 2 and 6 channels,
 //! full scale (all 0xFF), DSF files of channel types 5, 6 and 7, and DSDIFF files whose
@@ -165,23 +165,24 @@ fn inputs() -> Vec<(&'static str, Vec<u8>)> {
     ]
 }
 
-/// The whole-file hashes, per input in the order of [`inputs`], computed on 0.1.2, except
-/// type 5 and the DSDIFF speakers: since 0.2 their WAV header carries the input's mask,
-/// FL FR C LFE (0x0F), where 0.1.2 wrote the four-channel default, quad (0x33); their
-/// samples are unchanged. Type 7 and six channels give the same files (the same samples,
+/// The whole-file hashes, per input in the order of [`inputs`], computed on 0.1.2 and
+/// updated twice for 0.2: type 5 and the DSDIFF speakers' WAV header carries the input's
+/// mask, FL FR C LFE (0x0F), where 0.1.2 wrote the four-channel default, quad (0x33); and
+/// pysacd's filter is computed in `f64`, so its samples changed (its C reference, in
+/// tests/pysacd-ref, pins them). Type 7 and six channels give the same files (the same samples,
 /// and 7 is the type of six channels); so do type 5 and the DSDIFF speakers.
 const GOLDEN: [&str; 11] = [
-    "9323556c11f42f42269266a8d073c8ca8b2124593313b029e64484da984c0e7b",
-    "fa023dd555bea79b956a846a4a3c815a011dbf999ff4a1f853a3f204c657a423",
-    "48f40ee1137d4fb76276db1eca890aa346dc08be1d9bb3712bd06e8b7e85bc34",
-    "4eb718bb794c879f09548e08c7d63e1c52494c059134f786d1bf77b617ef5c8a",
-    "5b39d5cfa76cfb364b9fd7bdd866576b6d823c97b5b3c99d3aa376d8c7b28eb8",
-    "8b309aea9ba2b1506e28aa534eba5c8280e5c195819fee5d5be3d4eef0bac537",
-    "22f860b019fdf14fbf45238eccbe91329c85ce330efea77e42eacc3b294be5b5",
-    "ce23e563145e18691512cdbcbc65a47fe0a7536e492f39422e50a29e8c8ed885",
-    "48f40ee1137d4fb76276db1eca890aa346dc08be1d9bb3712bd06e8b7e85bc34",
-    "22f860b019fdf14fbf45238eccbe91329c85ce330efea77e42eacc3b294be5b5",
-    "9c9f47f45e39a868188290ee3629602954954d87b695311db09f3f7bf68efe9a",
+    "70d10fa4cd370c99a88f33170f5e88cf8076baafef461368b4956f828b8ee8db",
+    "4be0ecccd9a74b4e58c6637d1138e32921f68a4d477258673fa6dd2f88ccaf46",
+    "9d7a64f6d7f9fd030397717fe5becf8e95e6ec86ae9f4ab2ab9d6acec81cf2a8",
+    "e05d39e07cddb00dbb859af666e6246ac5dbae35ce5b22f9168c5653df9b4514",
+    "98a0223e3b4eccdee500ab149c85cc84d96658615347c41b4bbdf1a6551b6c63",
+    "6d8c4a247a7cb77067bac0c2ac8b229442c8ac1b6479c5c79023590bead7a335",
+    "dd6367837babfaabfe4b65a1259b46ae09de8d9ae5046e0ddf1e64e3dfa60f3b",
+    "f13fbbbd087bfabff028665f0c21fade826d70b73845e4e63995c18958354af8",
+    "9d7a64f6d7f9fd030397717fe5becf8e95e6ec86ae9f4ab2ab9d6acec81cf2a8",
+    "dd6367837babfaabfe4b65a1259b46ae09de8d9ae5046e0ddf1e64e3dfa60f3b",
+    "fbc957c1a6ad3e0e0bacd652e6db5fc301884b9b456574f4bd54b22db103bcd2",
 ];
 
 #[test]

@@ -471,7 +471,7 @@ use crate::filters::pysacd::{self as pk, Lut};
 
 impl Isa {
     /// [`pk::s1_kernel`].
-    pub(crate) fn pysacd_s1(self, lut: &Lut, bytes: &[u8], out: &mut [f32]) {
+    pub(crate) fn pysacd_s1(self, lut: &Lut, bytes: &[u8], out: &mut [f64]) {
         match self.0 {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
             // SAFETY: the level guarantees AVX2 (see above).
@@ -481,7 +481,7 @@ impl Isa {
     }
 
     /// [`pk::dec2_kernel`].
-    pub(crate) fn pysacd_dec2(self, h: &[f32], xe: &[f32], xo: &[f32], out: &mut [f32]) {
+    pub(crate) fn pysacd_dec2(self, h: &[f64], xe: &[f64], xo: &[f64], out: &mut [f64]) {
         match self.0 {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
             // SAFETY: the level guarantees AVX2 (see above).
@@ -494,11 +494,11 @@ impl Isa {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn pysacd_quantise(
         self,
-        chans: &[&[f32]],
+        chans: &[&[f64]],
         n0: u64,
         tc0: u64,
         per_frame: usize,
-        scale: f32,
+        scale: f64,
         out: &mut [i32],
         clips: &mut [u64],
     ) {
@@ -520,23 +520,23 @@ mod pysacd_avx2 {
     use crate::filters::pysacd::{self as pk, Lut};
 
     #[target_feature(enable = "avx2")]
-    pub(super) unsafe fn s1(lut: &Lut, bytes: &[u8], out: &mut [f32]) {
+    pub(super) unsafe fn s1(lut: &Lut, bytes: &[u8], out: &mut [f64]) {
         pk::s1_kernel(lut, bytes, out)
     }
 
     #[target_feature(enable = "avx2")]
-    pub(super) unsafe fn dec2(h: &[f32], xe: &[f32], xo: &[f32], out: &mut [f32]) {
+    pub(super) unsafe fn dec2(h: &[f64], xe: &[f64], xo: &[f64], out: &mut [f64]) {
         pk::dec2_kernel(h, xe, xo, out)
     }
 
     #[allow(clippy::too_many_arguments)]
     #[target_feature(enable = "avx2")]
     pub(super) unsafe fn quantise(
-        chans: &[&[f32]],
+        chans: &[&[f64]],
         n0: u64,
         tc0: u64,
         per_frame: usize,
-        scale: f32,
+        scale: f64,
         out: &mut [i32],
         clips: &mut [u64],
     ) {

@@ -12,9 +12,9 @@ pub enum Filter {
     /// dither: the same bytes as scarletbook-pcm.
     #[default]
     Default,
-    /// pysacd's filter: three Kaiser-windowed FIR stages in `f32` and a TPDF-dithered
-    /// 24-bit quantiser, bit-exact with pysacd's reference build (`csrc/dsp.c` compiled with
-    /// `-O2 -ffp-contract=off`), each area one stream. 88.2 and 176.4 kHz only, with the
+    /// pysacd's filter: its three Kaiser-windowed FIR stages and TPDF-dithered 24-bit
+    /// quantiser, computed in `f64` (pysacd computes in `f32`), the same bytes at every SIMD
+    /// level, each area one stream. 88.2 and 176.4 kHz only, with the
     /// cutoff left at [`crate::Cutoff::Standard`] (the response is fixed). The dither is
     /// seeded per Super Audio CD frame from its index in the area; files count frames from
     /// their start, the frames API from [`crate::frames::Run::at_frame`].

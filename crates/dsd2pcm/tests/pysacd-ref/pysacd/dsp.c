@@ -9,6 +9,10 @@
  * Relicensed from GPL-2.0-or-later by its copyright holder on 2026-11-23 (licenses/README.md;
  * texts in licenses/dsp-LICENSE-MIT and licenses/dsp-LICENSE-APACHE).
  *
+ * dsd2pcm: changed from pysacd commit 94b2c53 to compute in double (byte tables, signals
+ * between stages and the stage 2 and 3 sums; the stage 2 and 3 taps stay float). See
+ * ../PROVENANCE.md.
+ *
  * SPDX-License-Identifier: MIT OR Apache-2.0
  */
 
@@ -78,7 +82,7 @@ static int fir2_init(fir2_t *f, int ntaps, double fc, int max_in)
     f->ntaps = ntaps;
     f->cap = ntaps - 1 + max_in;
     f->h = malloc(sizeof(float) * ntaps);
-    f->buf = calloc(f->cap, sizeof(float));
+    f->buf = calloc(f->cap, sizeof(double));
     if (!f->h || !f->buf)
         return -1;
     for (int i = 0; i < ntaps; i++)
@@ -93,18 +97,18 @@ static void fir2_free(fir2_t *f)
 }
 
 /* n even; writes n/2 outputs. Inlined, so each clone of dsd2pcm_frame vectorises it for its CPU. */
-static inline __attribute__((always_inline)) void fir2_run(fir2_t *f, const float *in, int n, float *out)
+static inline __attribute__((always_inline)) void fir2_run(fir2_t *f, const double *in, int n, double *out)
 {
     int hist = f->ntaps - 1;
-    memcpy(f->buf + hist, in, sizeof(float) * n);
+    memcpy(f->buf + hist, in, sizeof(double) * n);
     for (int o = 0; o < n / 2; o++) {
-        const float *x = f->buf + 2 * o + 1;
-        float acc = 0;
+        const double *x = f->buf + 2 * o + 1;
+        double acc = 0;   /* float taps, double signal, double sum in tap order */
         for (int k = 0; k < f->ntaps; k++)
-            acc += f->h[k] * x[k];
+            acc += (double)f->h[k] * x[k];
         out[o] = acc;
     }
-    memmove(f->buf, f->buf + n, sizeof(float) * hist);
+    memmove(f->buf, f->buf + n, sizeof(double) * hist);
 }
 
 
@@ -125,7 +129,7 @@ int dsd2pcm_init(dsd2pcm_t *d, int channels, int rate)
             double acc = 0;
             for (int i = 0; i < 8; i++)
                 acc += h1[j * 8 + i] * ((v >> (7 - i)) & 1 ? 1.0 : -1.0);
-            d->s1_lut[j][v] = (float)acc;
+            d->s1_lut[j][v] = acc;   /* tables kept in double */
         }
 
     for (int c = 0; c < channels; c++) {
@@ -168,7 +172,7 @@ SC_CLONES void dsd2pcm_frame(dsd2pcm_t *d, const uint8_t *frame)
         for (int i = 0; i < FRAME_BYTES_PER_CH; i++)
             hb[S1_BYTES - 1 + i] = frame[i * ch + c];
         for (int t = 0; t < FRAME_BYTES_PER_CH; t++) {
-            float acc = 0;
+            double acc = 0;
             for (int j = 0; j < S1_BYTES; j++)
                 acc += d->s1_lut[j][hb[t + j]];
             d->t1[t] = acc;
@@ -189,8 +193,8 @@ void dsd2pcm_reset(dsd2pcm_t *d)
 {
     for (int c = 0; c < d->channels; c++) {
         memset(d->s1_hist[c], DSD_SILENCE, S1_BYTES - 1);
-        memset(d->s2[c].buf, 0, sizeof(float) * (d->s2[c].ntaps - 1));
+        memset(d->s2[c].buf, 0, sizeof(double) * (d->s2[c].ntaps - 1));
         if (d->stages == 3)
-            memset(d->s3[c].buf, 0, sizeof(float) * (d->s3[c].ntaps - 1));
+            memset(d->s3[c].buf, 0, sizeof(double) * (d->s3[c].ntaps - 1));
     }
 }

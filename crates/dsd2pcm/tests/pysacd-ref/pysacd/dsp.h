@@ -1,6 +1,6 @@
 /* DSD64 -> PCM conversion (see dsp.c).
  *
- * See dsp.c and licenses/README.md for the licence.
+ * See dsp.c and licenses/README.md for the licence. dsd2pcm: computed in double (see dsp.c).
  *
  * SPDX-License-Identifier: MIT OR Apache-2.0
  */
@@ -19,18 +19,18 @@
 typedef struct {
     int    ntaps;
     float *h;
-    float *buf;     /* ntaps-1 history followed by new input */
+    double *buf;    /* ntaps-1 history followed by new input */
     int    cap;
 } fir2_t;
 
 typedef struct {
     int      channels;
     int      stages;                    /* 2 (176.4k) or 3 (88.2k) */
-    float    s1_lut[S1_BYTES][256];
+    double   s1_lut[S1_BYTES][256];
     uint8_t  s1_hist[MAX_CHANNELS_SACD][S1_BYTES - 1 + FRAME_BYTES_PER_CH];
     fir2_t   s2[MAX_CHANNELS_SACD], s3[MAX_CHANNELS_SACD];
-    float    t1[FRAME_BYTES_PER_CH], t2[FRAME_BYTES_PER_CH / 2];
-    float    out[MAX_CHANNELS_SACD][FRAME_BYTES_PER_CH / 2];
+    double   t1[FRAME_BYTES_PER_CH], t2[FRAME_BYTES_PER_CH / 2];
+    double   out[MAX_CHANNELS_SACD][FRAME_BYTES_PER_CH / 2];
     int      out_per_frame;
     int      delay;                     /* group delay in output samples */
 } dsd2pcm_t;
