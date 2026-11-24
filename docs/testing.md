@@ -213,16 +213,16 @@ C interface's 24 tests.
 
 The command-line tool, threaded (8 worker threads), on a 20-second excerpt of a stereo
 DSD64 DSF file, under `valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all
---errors-for-leak-kinds=definite,indirect --track-origins=yes`. Before 0.1.2, valgrind
-3.28.0, AMD Ryzen AI Max+ 395:
+--errors-for-leak-kinds=definite,indirect --track-origins=yes`. Measured for 0.2.0 (release
+test plan, the 0.2.0 candidate's CLI), valgrind 3.28.0, AMD Ryzen AI Max+ 395:
 
 | Run | Heap | Definitely lost | Indirectly lost | Possibly lost | Errors |
 |---|---|---|---|---|---|
-| 176.4 kHz, default filter | 751 allocations, 38.5 MB | 0 | 0 | 64 bytes in 1 block | 0 |
-| 88.2 kHz, pysacd filter | 824 allocations, 16.7 MB | 0 | 0 | 64 bytes in 1 block | 0 |
-| 352.8 kHz, default filter | 679 allocations, 59.7 MB | 0 | 0 | 64 bytes in 1 block | 0 |
+| 176.4 kHz, default filter (precise) | 663 allocations, 35.4 MB | 0 | 0 | 48 bytes in 1 block | 0 |
+| 88.2 kHz, pysacd filter | 687 allocations, 17.2 MB | 0 | 0 | 48 bytes in 1 block | 0 |
+| 352.8 kHz, default filter (precise) | 711 allocations, 61.7 MB | 0 | 0 | 48 bytes in 1 block | 0 |
 
-The 64 bytes are the standard library's handle of the main thread (`Thread::new_current`,
+The 48 bytes are the standard library's handle of the main thread (`Thread::new_current`,
 created once when the first scoped thread starts), which lives until exit by design; the
 rest still reachable at exit (under 200 KB) are the standard library's own buffers.
 

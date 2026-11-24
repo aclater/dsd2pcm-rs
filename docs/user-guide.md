@@ -96,7 +96,7 @@ improves; the [changelog](../CHANGELOG.md) lists every such change with its meas
 effect.
 On x86 this assumes SSE2 floating point, as on x86_64 and Rust's i686 targets (the release
 builds); targets that use the x87 unit (i586 and older) are not covered.
-The DSD idle pattern (0x69) converts to exact zeros. On x86 the filters use AVX2 and FMA
+With the precise and fast filters the DSD idle pattern (0x69) converts to exact zeros; the pysacd filter's dither leaves ±1 LSB. On x86 the filters use AVX2 and FMA
 when the CPU has them, chosen at run time, with the same output; the environment variable
 `DSD2PCM_SIMD` (`generic`, `sse2` on x86 and x86_64, `avx2` or `avx2fma`) caps the level.
 
