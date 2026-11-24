@@ -1116,7 +1116,10 @@ fn dsd128_with_pysacd_is_unsupported() {
     }
 }
 
-/// A caller's struct with a field this version does not know.
+/// A caller's struct with a field this version does not know. Pass the library a pointer to
+/// the whole value (`(&raw const v).cast()`), not `&v.known`: the library reads an input
+/// struct's `struct_size` bytes, past `known`, which a reference to `known` alone does not
+/// cover.
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct Newer<T> {
@@ -1196,14 +1199,22 @@ fn struct_size_is_checked() {
     let bad = newer(run, 1 << 40);
     let mut st = newer(stats_init(), 0xDEAD_BEEF);
     assert_eq!(
-        convert(&bad.known, &mut st.known, &mut out),
+        convert(
+            (&raw const bad).cast::<dsd2pcm_run>(),
+            (&raw mut st).cast::<dsd2pcm_stats>(),
+            &mut out
+        ),
         DSD2PCM_E_INVALID_ARGUMENT
     );
     assert!(last_error().contains("is not 0"), "{}", last_error());
     assert_eq!(st.known.channels, 0, "nothing written");
     let r = newer(run, 0);
     assert_eq!(
-        convert(&r.known, &mut st.known, &mut out),
+        convert(
+            (&raw const r).cast::<dsd2pcm_run>(),
+            (&raw mut st).cast::<dsd2pcm_stats>(),
+            &mut out
+        ),
         DSD2PCM_OK,
         "{}",
         last_error()
@@ -1218,13 +1229,16 @@ fn struct_size_is_checked() {
     let c = newer(cfg, 1);
     // SAFETY (test): valid pointers.
     assert_eq!(
-        unsafe { dsd2pcm_frames_new(&c.known, &mut hh) },
+        unsafe { dsd2pcm_frames_new((&raw const c).cast::<dsd2pcm_frames_config>(), &mut hh) },
         DSD2PCM_E_INVALID_ARGUMENT
     );
     assert!(hh.is_null());
     let c = newer(cfg, 0);
     // SAFETY (test): valid pointers.
-    assert_eq!(unsafe { dsd2pcm_frames_new(&c.known, &mut hh) }, DSD2PCM_OK);
+    assert_eq!(
+        unsafe { dsd2pcm_frames_new((&raw const c).cast::<dsd2pcm_frames_config>(), &mut hh) },
+        DSD2PCM_OK
+    );
     // SAFETY (test): live handles.
     unsafe {
         dsd2pcm_frames_free(hh);
@@ -1258,11 +1272,20 @@ fn struct_size_is_checked_for_files() {
     assert!(!out.exists(), "refused before converting");
     let bad = newer(good, 1);
     let mut rep = newer(report_init(), 0xDEAD_BEEF);
-    assert_eq!(call(&bad.known, &mut rep.known), DSD2PCM_E_INVALID_ARGUMENT);
+    assert_eq!(
+        call(
+            (&raw const bad).cast::<dsd2pcm_file_options>(),
+            (&raw mut rep).cast::<dsd2pcm_file_report>()
+        ),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
     assert!(!out.exists(), "refused before converting");
     let o = newer(good, 0);
     assert_eq!(
-        call(&o.known, &mut rep.known),
+        call(
+            (&raw const o).cast::<dsd2pcm_file_options>(),
+            (&raw mut rep).cast::<dsd2pcm_file_report>()
+        ),
         DSD2PCM_OK,
         "{}",
         last_error()
