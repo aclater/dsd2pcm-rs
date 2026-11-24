@@ -229,7 +229,7 @@ Each with what to change in a caller. The C interface stays ABI version 1, with 
   window of its own) prints how to run it from PowerShell or Terminal and waits for Enter
   instead of closing at once; it then exits with 2, as for missing arguments. Started from a
   shell, with arguments, without a console or in a console without a window, it behaves as
-  before.
+  before ([user guide](docs/user-guide.md#windows)).
 
 ### Fixed
 
