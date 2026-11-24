@@ -65,8 +65,8 @@ int dsd2pcm_convert_file(const char *input_path, const char *output_path,
 Converts a DSF or DFF file (DSD64) to a 24-bit WAV file. `options` holds the rate (88200,
 176400, 352800), cutoff, filter, gain (-120 to +24 dB), `threads` (0: all cores, 1: the
 calling thread only, n: at most n threads, up to 256; values above 1 since 0.2.0; the
-output is the same with any value), `no_clobber` (0: replace an existing output, 1: refuse it; since
-0.1.3) and an optional progress callback:
+output is the same with any value), `no_clobber` (0: replace an existing output, 1: refuse
+it; since 0.2.0) and an optional progress callback:
 
 ```c
 typedef int (*dsd2pcm_progress_fn)(uint64_t done, uint64_t total, void *user_data);
@@ -203,9 +203,9 @@ Both run without arguments.
 
   A struct from a caller built against an older header is read for its `struct_size` bytes
   and the fields it lacks are taken as 0.
-- Appended since 0.1.0: `dsd2pcm_file_options.no_clobber` (`uint32_t`, 0.1.3), which makes
+- Appended since 0.1.0: `dsd2pcm_file_options.no_clobber` (`uint32_t`, 0.2.0), which makes
   the struct 56 bytes on 64-bit targets, 40 on i686 Linux and 48 on other 32-bit targets.
-  The status code `DSD2PCM_E_EXISTS` (9) is new in 0.1.3; the library returns it only
+  The status code `DSD2PCM_E_EXISTS` (9) is new in 0.2.0; the library returns it only
   when `no_clobber` is set.
 - `tests/struct_size.c` checks this from C, under AddressSanitizer and
   UndefinedBehaviorSanitizer too: a `dsd2pcm_file_options` of the 0.1.0 size (a heap block
@@ -221,15 +221,16 @@ library (MIT OR Apache-2.0). `--features flac` adds it back. Build it on its own
 (`-p dsd2pcm-capi`): a workspace build (`cargo build --workspace`) turns the feature on for
 it too, through the command-line tool, and its libraries then hold claxon's code.
 
-From 0.1.3 on, each release has the source as an attested archive,
+From 0.2.0 on, each release has the source as an attested archive,
 `dsd2pcm-0.1.2-src.tar.gz` for this version: the tagged commit's whole tree, made with
 `git archive --format=tar --prefix=dsd2pcm-0.1.2/ v0.1.2 | gzip -n -9` (the same command
 gives the same tar, and with GNU gzip the same bytes). To pin and check it:
 
+<!-- docs-run: skip="needs a GitHub login for gh release download and gh attestation verify, then builds with Rust" -->
 ```sh
-gh release download v0.1.2 -R aclater/dsd2pcm-rs -p 'dsd2pcm-0.1.2-src.tar.gz*'
+gh release download v0.1.2 -R dsd-toolbox/dsd2pcm-rs -p 'dsd2pcm-0.1.2-src.tar.gz*'
 sha256sum -c dsd2pcm-0.1.2-src.tar.gz.sha256
-gh attestation verify dsd2pcm-0.1.2-src.tar.gz -R aclater/dsd2pcm-rs --signer-workflow aclater/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.2 --deny-self-hosted-runners
+gh attestation verify dsd2pcm-0.1.2-src.tar.gz -R dsd-toolbox/dsd2pcm-rs --signer-workflow dsd-toolbox/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.2 --deny-self-hosted-runners
 tar -xzf dsd2pcm-0.1.2-src.tar.gz
 cd dsd2pcm-0.1.2
 cargo build --release --locked -p dsd2pcm-capi
@@ -238,6 +239,7 @@ cargo build --release --locked -p dsd2pcm-capi
 A minimal program, `crates/dsd2pcm-capi/tests/minimal.c`, converts one stereo frame of
 DSD silence. To build and run it on Linux, from the repository root:
 
+<!-- docs-run: skip="needs a checkout of this repository and a Rust toolchain; docs-run containers hold only the published release" -->
 ```sh
 cargo build --release -p dsd2pcm-capi
 cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c target/release/libdsd2pcm.a -lpthread -ldl -lm -o minimal
@@ -247,6 +249,7 @@ cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c t
 It prints `dsd2pcm 0.1.2: 2352 samples per channel, first byte 0`. To link the shared
 library instead (its SONAME is `libdsd2pcm.so.1`, so it needs that name at run time):
 
+<!-- docs-run: skip="needs a checkout of this repository and a Rust toolchain; docs-run containers hold only the published release" -->
 ```sh
 ln -sf libdsd2pcm.so target/release/libdsd2pcm.so.1
 cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c -L target/release -ldsd2pcm -o minimal
@@ -255,7 +258,7 @@ LD_LIBRARY_PATH=target/release ./minimal
 
 ## Binary releases
 
-Each GitHub release has the C library built for nine platforms (four of them from 0.1.3 on),
+Each GitHub release has the C library built for nine platforms (four of them from 0.2.0 on),
 next to the command-line tool, each with a `.sha256` file and a build provenance attestation:
 
 | Archive | Platform |
@@ -263,12 +266,12 @@ next to the command-line tool, each with a `.sha256` file and a build provenance
 | `libdsd2pcm-0.1.2-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
 | `libdsd2pcm-0.1.2-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
 | `libdsd2pcm-0.1.2-i686-linux.tar.gz` | Linux 32-bit x86, glibc 2.17 or later |
-| `libdsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | (from 0.1.3) Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later) |
-| `libdsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | (from 0.1.3) Linux aarch64, musl 1.2.3 or later |
+| `libdsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | (from 0.2.0) Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later) |
+| `libdsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | (from 0.2.0) Linux aarch64, musl 1.2.3 or later |
 | `libdsd2pcm-0.1.2-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon |
-| `libdsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.1.3) macOS 11 or later, Intel |
+| `libdsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.2.0) macOS 11 or later, Intel |
 | `libdsd2pcm-0.1.2-x86_64-windows.zip` | Windows x86_64, for MSVC |
-| `libdsd2pcm-0.1.2-x86_64-windows-gnu.zip` | (from 0.1.3) Windows x86_64, for MinGW-w64 gcc (MSYS2 MINGW64, msvcrt) |
+| `libdsd2pcm-0.1.2-x86_64-windows-gnu.zip` | (from 0.2.0) Windows x86_64, for MinGW-w64 gcc (MSYS2 MINGW64, msvcrt) |
 
 An archive holds:
 
@@ -285,15 +288,17 @@ An archive holds:
 - `lib/pkgconfig/dsd2pcm.pc` (all but MSVC), relative to wherever the archive is
   unpacked; its `Libs.private` lists the system libraries the static library needs;
 - `examples/minimal.c` (`crates/dsd2pcm-capi/tests/minimal.c`), `README.md`,
-  `LICENSE-MIT`, `LICENSE-APACHE`.
+  `LICENSE-MIT`, `LICENSE-APACHE`, `NOTICE`.
 
 The `1` in the file names is the ABI version (see [ABI](#abi)). Check a download, unpack
 it, and build the example against it, from the folder holding the archive (Linux x86_64
 shown):
 
+<!-- docs-run: skip="needs a GitHub login for gh attestation verify, and the archive downloaded as the text above says" -->
+<!-- docs-lint: ignore placeholder -- pkg-config prints the flags for wherever the archive is unpacked, and '$ORIGIN' is the linker's token for the program's folder, passed on unexpanded -->
 ```sh
 sha256sum -c libdsd2pcm-0.1.2-x86_64-linux.tar.gz.sha256
-gh attestation verify libdsd2pcm-0.1.2-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs
+gh attestation verify libdsd2pcm-0.1.2-x86_64-linux.tar.gz -R dsd-toolbox/dsd2pcm-rs
 tar -xzf libdsd2pcm-0.1.2-x86_64-linux.tar.gz
 export PKG_CONFIG_PATH=libdsd2pcm-0.1.2-x86_64-linux/lib/pkgconfig
 cc libdsd2pcm-0.1.2-x86_64-linux/examples/minimal.c $(pkg-config --cflags --libs dsd2pcm) -Wl,-rpath,'$ORIGIN/libdsd2pcm-0.1.2-x86_64-linux/lib' -o minimal
@@ -305,6 +310,8 @@ the same with the `aarch64-macos` or `x86_64-macos` archive, `shasum -a 256 -c` 
 `sha256sum -c`, and `-Wl,-rpath,@executable_path/libdsd2pcm-0.1.2-aarch64-macos/lib`.
 Static linking instead (Linux):
 
+<!-- docs-run: skip="continues the block above, in the unpacked archive" -->
+<!-- docs-lint: ignore placeholder -- pkg-config prints the flags and the static library's system libraries for this platform -->
 ```sh
 cc libdsd2pcm-0.1.2-x86_64-linux/examples/minimal.c $(pkg-config --cflags dsd2pcm) libdsd2pcm-0.1.2-x86_64-linux/lib/libdsd2pcm.a $(pkg-config --libs-only-l --static dsd2pcm | sed 's/-ldsd2pcm//') -o minimal
 ```
@@ -313,6 +320,7 @@ To install system-wide, copy `include/` and `lib/` under a prefix such as `/usr/
 pkg-config file needs no change. On Windows, in a Visual Studio developer prompt in the
 unpacked folder:
 
+<!-- docs-run: skip="Windows, in a Visual Studio developer prompt" -->
 ```bat
 cl /I include examples\minimal.c lib\dsd2pcm.dll.lib
 copy bin\dsd2pcm.dll .
@@ -323,6 +331,8 @@ With MinGW-w64, in an MSYS2 MINGW64 shell (`pacman -S mingw-w64-x86_64-gcc
 mingw-w64-x86_64-pkgconf`), in the folder holding the unpacked
 `libdsd2pcm-0.1.2-x86_64-windows-gnu` folder:
 
+<!-- docs-run: skip="Windows, in an MSYS2 MINGW64 shell" -->
+<!-- docs-lint: ignore placeholder -- pkg-config prints the flags for wherever the archive is unpacked -->
 ```sh
 export PKG_CONFIG_PATH=libdsd2pcm-0.1.2-x86_64-windows-gnu/lib/pkgconfig
 gcc libdsd2pcm-0.1.2-x86_64-windows-gnu/examples/minimal.c $(pkg-config --cflags --libs dsd2pcm) -o minimal.exe
@@ -413,4 +423,4 @@ frames, which are marked as ignored under Miri, and under ThreadSanitizer (weekl
 - [Testing](testing.md): the leak loop and sanitizers for the C library
 - [Releases](release.md): how the binary archives are built and checked
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

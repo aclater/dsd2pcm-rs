@@ -2,8 +2,10 @@
 
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
-[semantic versioning](https://semver.org/), and output bytes never change without a major
-version.
+[semantic versioning](https://semver.org/). Output is deterministic within a release (the
+same version, input and settings give the same bytes on every CPU and SIMD level); between
+releases it may change when measured quality improves, and every such change is listed here
+with its measured effect. Releases up to 0.1.2 keep their behaviour as released.
 
 ## Unreleased
 
@@ -66,6 +68,12 @@ Each with what to change in a caller. The C interface is unchanged (ABI 1, addit
   LLVM, and skipped those members.
 - CI: a check that tracked files and commit identities hold no private names or addresses
   ([testing](docs/testing.md#private-names)).
+- Docs: the shared DSD Toolbox docs checks in `docs.yml` (page and README shape, links in
+  every Markdown file, the facts regions, a docs change with every code change on pull
+  requests, and weekly the README's Quick start against the published release), and a
+  `docs-audit` workflow to run after each release
+  ([releasing](docs/release.md#after-the-release-run-the-docs-audit)). lychee now checks the
+  external links only; the shared check covers relative links and anchors.
 - Tests: golden SHA-256 hashes of whole output files (header and samples) from
   `convert_file`, for mono, stereo and six-channel input, DSF channel types 5 to 7 and
   DSDIFF files with speaker and numbered channel IDs, at every rate and cutoff and with
@@ -136,6 +144,27 @@ Each with what to change in a caller. The C interface is unchanged (ABI 1, addit
     `DSD2PCM_FILTER_DEFAULT` keeps its value, 0, and now selects the precise filter, so
     zero-initialised options (the `*_INIT` macros) do too; the other constants and every
     struct are unchanged.
+- Docs, methodology and measurement data are now CC BY 4.0; code stays MIT OR Apache-2.0.
+  Added NOTICE and CITATION.cff ([licence and credits](README.md#licence-and-credits)).
+- Output stability rule: output is deterministic within a release (the same version, input
+  and settings give the same bytes on every CPU and SIMD level). Between releases it may
+  change when measured quality improves; every such change is listed in this changelog with
+  its measured effect (`docs/quality/<version>.md`). Releases up to 0.1.2 keep their
+  behaviour as released. This replaces the rule that output bytes change only with a major
+  version ([design](docs/design.md#the-contract-deterministic-output-the-deepest-stopband-filter-by-default),
+  [AGENTS.md](AGENTS.md)).
+- Docs: the README, [performance](docs/performance.md), [PCM quality](docs/pcm-quality.md),
+  the [user guide](docs/user-guide.md) and [options](docs/options.md) lead with the
+  `precise` filter's measured quality (SINAD 142 to 145 dB with a very quiet DSD64 source,
+  151 dB or more of rejection of everything that folds into the audio band) and its cost
+  (1.3 to 1.9 times scarletbook-pcm 0.7.0's CPU time on an Intel Core i9-13900H), and name
+  `fast` as the scarletbook-pcm-identical option with lower CPU time and lower quality
+  (1.11 to 1.25 times scarletbook-pcm's speed; SINAD 122 dB with the same source).
+- The repository moved to
+  [github.com/dsd-toolbox/dsd2pcm-rs](https://github.com/dsd-toolbox/dsd2pcm-rs): links,
+  badges, the crates' `repository` field and the attestation commands
+  (`gh attestation verify -R dsd-toolbox/dsd2pcm-rs --signer-workflow dsd-toolbox/dsd2pcm-rs/.github/workflows/release.yml`)
+  use the new address. The old addresses redirect.
 - Output: DSD to WAV conversion writes the channel mask of the input's layout (DSF channel
   type, DSDIFF channel IDs) instead of the one of its channel count. The WAV header changes
   only where the two differ: a DSF of type 5 (FL FR C LFE) was labelled quad (FL FR BL BR),

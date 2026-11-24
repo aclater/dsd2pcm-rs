@@ -1,10 +1,24 @@
 # Docs stay true: links resolve, the README's Quick start works on the latest release, and
 # the version named in the manifests, lock files, changelog and docs is one version.
-# - links: lychee (pinned binary, SHA-256 checked) over README.md, CHANGELOG.md, SECURITY.md,
-#   PROVENANCE.md, AGENTS.md and docs/; relative links and anchors offline, then external
-#   links with retries (.github/lychee.toml). Weekly too: external links rot without a change.
-# - quick start: the README's Quick start block, run literally (.github/scripts/readme-quick-start.sh).
-# - versions: .github/scripts/check-doc-versions.py.
+# - lint, links, touched, facts, commands: the shared DSD Toolbox docs tools (tools/docs of
+#   dsd-toolbox/dsd-toolbox, docs/docs-tooling.md there), as reusable workflows pinned to one
+#   commit; the same commit is passed as the tools' ref. Settings in .docs.toml.
+#   - lint: page and README shape, spelling, terminology, placeholders, the release step.
+#   - links: every Markdown file's relative links, anchors and links into this repository,
+#     offline; on the weekly run and by hand also every external URL.
+#   - touched (pull requests): a change to code, options or behaviour also changes the docs, or
+#     the pull request says "Docs: none needed — <reason>".
+#   - facts: the marked facts regions (versions, install lines) equal their sources. Read-only.
+#   - commands (weekly and by hand): the marked command blocks of README.md and docs/ run in a
+#     fresh container against the published release; the rest are skipped with a reason.
+# - external links: lychee (pinned binary, SHA-256 checked) over README.md, CHANGELOG.md,
+#   SECURITY.md, PROVENANCE.md, AGENTS.md and docs/, external URLs with retries
+#   (.github/lychee.toml), on every run. Kept next to the shared links check because it also
+#   checks #fragments on external pages, which the shared tool does not.
+# - quick start: the README's Quick start block, run literally (.github/scripts/readme-quick-start.sh),
+#   on every pull request; between a version bump and its tag it passes with a notice.
+# - versions: .github/scripts/check-doc-versions.py (Cargo.toml, the lock files, CHANGELOG.md,
+#   CITATION.cff and the release references in the docs).
 # Linux only; no secrets.
 name: docs
 
@@ -29,8 +43,39 @@ env:
   LYCHEE_SHA256: 1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a
 
 jobs:
+  # The shared docs tools, pinned to one commit of dsd-toolbox/dsd-toolbox (workflow and tools).
+  lint:
+    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-lint.yml@b50a7cca297022561959ba9a2532c0673d532ada
+    with:
+      tools_ref: b50a7cca297022561959ba9a2532c0673d532ada
+
   links:
-    name: links
+    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-links.yml@b50a7cca297022561959ba9a2532c0673d532ada
+    with:
+      tools_ref: b50a7cca297022561959ba9a2532c0673d532ada
+      external: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+
+  touched:
+    if: github.event_name == 'pull_request'
+    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-touched.yml@b50a7cca297022561959ba9a2532c0673d532ada
+    with:
+      tools_ref: b50a7cca297022561959ba9a2532c0673d532ada
+
+  facts:
+    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-facts.yml@b50a7cca297022561959ba9a2532c0673d532ada
+    with:
+      tools-ref: b50a7cca297022561959ba9a2532c0673d532ada
+
+  # Against the published release, so not on pull requests: between a version bump and its tag
+  # the README names a release that does not exist yet (the quick start job handles that window).
+  commands:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-run.yml@b50a7cca297022561959ba9a2532c0673d532ada
+    with:
+      tools-ref: b50a7cca297022561959ba9a2532c0673d532ada
+
+  external-links:
+    name: external links
     runs-on: ubuntu-24.04
     container:
       # UBI 10 (ubi10/ubi 10.3), pinned by digest.
@@ -53,10 +98,6 @@ jobs:
           tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/$name.tar.gz"
           install -m 755 "$RUNNER_TEMP/$name/lychee" "$RUNNER_TEMP/lychee"
           "$RUNNER_TEMP/lychee" --version
-      - name: Relative links and anchors (offline)
-        run: |
-          "$RUNNER_TEMP/lychee" --no-progress --offline --config .github/lychee.toml \
-            README.md CHANGELOG.md SECURITY.md PROVENANCE.md AGENTS.md 'docs/**/*.md'
       - name: External links (with retries)
         run: |
           "$RUNNER_TEMP/lychee" --no-progress --config .github/lychee.toml \

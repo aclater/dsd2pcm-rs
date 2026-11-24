@@ -1,4 +1,5 @@
 # Release quality comparison for dsd2pcm: a release against the previous one.
+# Licence: CC BY 4.0 (LICENSES/CC-BY-4.0.txt); the dsd2pcm-rs authors.
 #
 # Measurement suite: dsd-measure, https://github.com/dsd-toolbox/dsd-measure
 # Pinned: version 0.1.1, tag v0.1.1, commit d234b7a8233ccfe391776e7c6425cbf8643c47e3.
@@ -7,7 +8,7 @@
 # The two versions are installed under target/quality/ (new: the candidate, old: the
 # previous release from its tag) and measured in one run, on one machine:
 #   cargo install --locked --path crates/dsd2pcm-cli --root target/quality/new
-#   cargo install --locked --git https://github.com/aclater/dsd2pcm-rs --tag v0.1.2 --root target/quality/old dsd2pcm-cli
+#   cargo install --locked --git https://github.com/dsd-toolbox/dsd2pcm-rs --tag v0.1.2 --root target/quality/old dsd2pcm-cli
 #   dsd-measure run suites/dsd2pcm.toml --only reference_floor levels noise alias_tones
 # The null tests and the rest are in docs/release-test-plan.md, item 11.
 # --single-thread keeps the run light; the output bytes are the same with any thread count.

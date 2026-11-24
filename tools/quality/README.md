@@ -25,6 +25,7 @@ dsd2pcm crate; the decoders are run by path.
 
 From the repository root, on Linux, with Rust and Python 3 (tested with Python 3.15):
 
+<!-- docs-run: skip="needs a checkout, Rust and the quality tools in a Python venv" -->
 ```sh
 python3 -m venv venv
 venv/bin/pip install -r tools/quality/requirements.txt
@@ -59,9 +60,18 @@ Decoders run elsewhere (for example a Windows player) are measured the same way:
 WAVs in `out/dec/<decoder>/<setting>/`, named as the DSF inputs with `.wav`, and run
 `analyse.py`.
 
+## Licence
+
+The scripts and `sbpcm` are code, MIT OR Apache-2.0. This README (code snippets in it may also be used under the code licence), `signals.toml` and
+`decoders.toml` (the signal and decoder definitions) are licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+([LICENSES/CC-BY-4.0.txt](../../LICENSES/CC-BY-4.0.txt)), as is the measurement data the
+scripts publish in [docs/pcm-quality.md](../../docs/pcm-quality.md)
+([Licence and credits](../../README.md#licence-and-credits)).
+
 ## See also
 
 - [PCM quality](../../docs/pcm-quality.md): the results and what they mean
 - [Design](../../docs/design.md): the converter being measured
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

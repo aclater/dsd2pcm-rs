@@ -1,4 +1,5 @@
 # Test signal definitions for tools/quality (read by gen_signals.py).
+# Licence: CC BY 4.0 (LICENSES/CC-BY-4.0.txt); the dsd2pcm-rs authors.
 #
 # Levels are dBFS of a PCM sample where 0 dBFS = 100 % DSD modulation, so
 #   0 dB SACD (the reference level, 50 % modulation)   = -6.02 dBFS,

@@ -3,9 +3,14 @@
 - **Licence boundary.** No GPL or LGPL code, tables or coefficients. Code ported from permissively
   licensed projects (for example scarletbook-pcm, MIT OR Apache-2.0) keeps its notice; record every
   source in `PROVENANCE.md`.
-- **Output stability.** Output bytes for given input and settings never change without a major
-  version and a release note. Byte-identical across x86_64 and aarch64, SIMD levels and build
-  profiles; golden hashes in tests.
+- **Output stability.**
+  - Output is deterministic within a release: the same version, input and settings give the
+    same bytes on every CPU and SIMD level (x86_64, i686 and aarch64, every build profile);
+    golden hashes in the tests hold it.
+  - Between releases output may change when measured quality improves.
+  - Every such change is listed in the CHANGELOG with its measured effect
+    (`docs/quality/<version>.md`).
+  - Releases up to 0.1.2 keep their behaviour as released.
 - **FMA only where exactness is proven.** Fused multiply-adds only in stages whose sums the
   tests prove exact from the tables (`decimator/exact.rs`); no `mul_add` in the generic kernels.
 - **Untrusted input.** Parsers are bounds-checked, never panic on bad files, no `unsafe` without review.

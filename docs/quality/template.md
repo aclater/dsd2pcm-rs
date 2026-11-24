@@ -1,10 +1,12 @@
-[dsd2pcm-rs](../../README.md) › [Documentation](../README.md) › [Release quality comparison](README.md) › X.Y.Z
+[dsd2pcm-rs](../../README.md) › [Documentation](../README.md) › [Release quality comparison](README.md) › Quality of X.Y.Z against W.W.W
 
 # Quality of X.Y.Z against W.W.W
 
-Measured with dsd-measure 0.1.1 (commit d234b7a) and [suites/dsd2pcm.toml](../../suites/dsd2pcm.toml)
-on CPU MODEL, both versions built from their tags, on YYYY-MM-DD. Changes beyond the suite's
-repeatability (any change of 0.01 dB or more; a null that is no longer identical) are in bold.
+Measured with: dsd-measure 0.1.1 (commit d234b7a) and [suites/dsd2pcm.toml](../../suites/dsd2pcm.toml);
+dsd2pcm X.Y.Z at commit CANDIDATE-SHA and W.W.W from tag vW.W.W (commit TAG-SHA), both built
+with Rust RUST-VERSION; on CPU MODEL (the model as `lscpu` prints it, not a host name),
+on YYYY-MM-DD. Changes beyond the suite's measured run-to-run spread (any change of 0.01 dB
+or more; a null that is no longer identical) are in bold.
 
 | Filter | Cutoff | Rate (kHz) | Version | SINAD (dB) | THD+N (dB) | Noise, 20 Hz-20 kHz (dBFS) | Alias rejection (dB) | Null vs previous |
 |---|---|---:|---|---:|---:|---:|---:|---|

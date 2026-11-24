@@ -293,7 +293,7 @@ quickstart)
          grep -q "$name.tar.gz" <<< "$block"
          # The archive the release will hold, from this tree, in place of the download.
          stage=$(mktemp -d); mkdir "$stage/$name"
-         cp "$CARGO_TARGET_DIR/release/dsd2pcm" README.md LICENSE-MIT LICENSE-APACHE "$stage/$name/"
+         cp "$CARGO_TARGET_DIR/release/dsd2pcm" README.md LICENSE-MIT LICENSE-APACHE NOTICE "$stage/$name/"
          run=$(mktemp -d); tar -C "$stage" -czf "$run/$name.tar.gz" "$name"
          python3 -I .github/scripts/make-test-dsf.py "$run/01 - Track.dsf"
          cd "$run"

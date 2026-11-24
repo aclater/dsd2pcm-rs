@@ -17,12 +17,14 @@ It is a separate crate, outside the main workspace, and needs a nightly toolchai
 Its dependencies are checked with their own cargo-deny config, `fuzz/deny.toml`, which
 also allows libFuzzer's NCSA licence; from the repository root:
 
+<!-- docs-run: skip="needs a checkout of this repository and a Rust toolchain; docs-run containers hold only the published release" -->
 ```sh
 cargo deny --manifest-path fuzz/Cargo.toml check
 ```
 
 ## Setup
 
+<!-- docs-run: skip="installs a nightly Rust toolchain and cargo-fuzz with rustup, which the container does not have" -->
 ```sh
 rustup toolchain install nightly
 cargo install cargo-fuzz
@@ -34,6 +36,7 @@ Small valid files made by the crate's own writers, and the FLAC test files of
 `crates/dsd2pcm/tests/data/flac` with unknown-length and ID3 variants. From the repository
 root:
 
+<!-- docs-run: skip="needs a checkout of this repository and a Rust toolchain; docs-run containers hold only the published release" -->
 ```sh
 cd fuzz
 cargo run --release --bin make_seeds
@@ -47,6 +50,7 @@ The corpora and any `fuzz/artifacts` are not committed.
 
 From the `fuzz` directory, one target for ten minutes on four processes:
 
+<!-- docs-run: skip="needs a checkout, nightly Rust and cargo-fuzz; runs for ten minutes on four processes" -->
 ```sh
 cargo +nightly fuzz run -O dsf_read -- -fork=4 -max_total_time=600 -max_len=32768 -rss_limit_mb=2048 -malloc_limit_mb=2048 -timeout=10
 ```
@@ -59,6 +63,7 @@ replays it. Every fixed finding also gets a regression test in `crates/dsd2pcm/t
 
 ## Coverage
 
+<!-- docs-run: skip="needs a checkout, nightly Rust, cargo-fuzz and a fuzz corpus" -->
 ```sh
 rustup component add llvm-tools-preview --toolchain nightly
 cargo +nightly fuzz coverage dsf_read
@@ -73,4 +78,4 @@ This replays the corpus and writes `fuzz/coverage/dsf_read/coverage.profdata` fo
 - [Design](design.md#robustness): how the parsers guard against bad input
 - [Security policy](../SECURITY.md): reporting a vulnerability
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

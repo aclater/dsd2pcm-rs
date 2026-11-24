@@ -4,25 +4,42 @@
 
 The design decisions behind dsd2pcm's DSD-to-PCM conversion. For each one: what was chosen,
 the alternatives, and why. The measured filter responses, noise and distortion are in
-`pcm-quality.md` (in preparation); speed is in [performance.md](performance.md).
+[pcm-quality.md](pcm-quality.md); speed is in [performance.md](performance.md).
 
-## The contract: scarletbook-pcm 0.7.0's samples
+## The contract: deterministic output, the deepest-stopband filter by default
 
-**Chosen.** With the default filter, every output sample equals scarletbook-pcm 0.7.0's
-sample for the same rate, cutoff and gain. That holds on every CPU, at every SIMD level,
-in every build profile, and however the input is split into calls. The tests compare the
-two crates directly (scarletbook-pcm is a dev-dependency) and pin golden hashes at every
-level. Output bytes change only with a major version.
+**Chosen.**
+
+- Output is deterministic within a release: the same version, input and settings give the
+  same bytes on every CPU, at every SIMD level, in every build profile, and however the
+  input is split into calls. Golden hashes at every level pin it.
+- Between releases output may change when measured quality improves. Every such change is
+  listed in the [changelog](../CHANGELOG.md) with its measured effect
+  ([`docs/quality/<version>.md`](quality/README.md)).
+- Releases up to 0.1.2 keep their behaviour as released.
+- The default filter is the one with the deepest measured stopband: `precise` from 0.2.0
+  (150 dB or more where content folds into the passband, against about 110 dB; SINAD 142
+  to 145 dB against 122 dB with a very quiet DSD64 source). With `fast`, every
+  output sample equals scarletbook-pcm 0.7.0's for the same rate, cutoff and gain; the
+  tests compare the two crates directly (scarletbook-pcm is a dev-dependency).
 
 **Why.** A file converted twice, on two machines, or once whole and once frame by frame,
-gives the same bytes. Copies, caches and library scanners can then trust a hash. The
-filters are scarletbook-pcm's published, measured designs, so dsd2pcm takes over their
-quality, and a consumer can switch between the two crates with a mechanical diff.
+gives the same bytes, so copies, caches and library scanners can trust a hash within a
+release. Fixing the bytes across releases as well would have fixed the quality: the 0.1.x
+default's stopband of about 110 dB sets an audio-band floor near -128 dBFS with quiet
+sources, which `precise` removes ([PCM quality](pcm-quality.md#the-precise-filter)). A
+release that changes the bytes says so in its changelog with the measured effect, so a
+consumer that keys a cache on the output can invalidate it by version. `fast` keeps
+scarletbook-pcm's published, measured filters, for lower CPU time and for consumers that
+need its bytes; such a consumer can switch between the two crates with a mechanical diff.
 
-**Alternatives.** A converter of our own design, or pysacd's filter as the default. Either
-would need its own measurements and give other bytes. Our own converter could not be
-compared sample for sample with anything published. pysacd's filter is offered as an
-opt-in preset instead ([below](#the-pysacd-preset)).
+**Alternatives.** Output bytes fixed until a major version, the rule up to 0.1.2: it held
+the default at the 110 dB stopband. A converter of a different design with nothing to
+compare it to: `precise` keeps scarletbook-pcm's structure, exact arithmetic, cutoffs and
+centring and changes only the taps and the stage plan, so it is measured against `fast`
+directly. pysacd's filter as the default: dithered, so DSD silence no longer converts to
+exact zero, and 88.2 and 176.4 kHz only; it is offered as an opt-in preset instead
+([below](#the-pysacd-preset)).
 
 ## The filter chain
 
@@ -89,9 +106,10 @@ scarletbook-pcm: it is the lowest rate that holds every cutoff, `wide` included.
   Above that, DSD's shaped noise rises steeply.
 - **30 kHz** removes more of that noise, for playback chains that do not want ultrasonic
   content.
-- **Wide** follows the Philips blind tests, which found 80 to 100 kHz filters undetectable
-  and a 50 kHz one detectable (the decision recorded in sacdfs's
-  [PCM quality](https://github.com/aclater/sacdfs/blob/main/docs/pcm-quality.md#the-filters)
+- **Wide** follows the Philips blind tests, which report 80 to 100 kHz filters as not
+  detected by their listeners and a 50 kHz one as detected; that is the source's listening
+  result, not tested here (the decision recorded in sacdfs's
+  [PCM quality](https://github.com/dsd-toolbox/sacdfs/blob/main/docs/pcm-quality.md#the-filters)
   page).
 - **Why wide needs 176.4 kHz or more.** At 88.2 kHz the band ends at 44.1 kHz, below the
   80 kHz passband. At 176.4 kHz the stopband starts at the Nyquist frequency, 88.2 kHz, so
@@ -122,11 +140,12 @@ which uses `cos` and `exp`, never runs in the converter, so a platform's libm ca
 a sample. The gain factor `db_to_linear` uses only additions, multiplications and
 divisions in a fixed order (ported unchanged): exactly 1 at 0 dB, identical everywhere.
 
-**No dither in the default filter.** The 24-bit rounding error is far below the noise
+**No dither in `precise` and `fast`.** The 24-bit rounding error is far below the noise
 floor of DSD itself, so dither would only add noise. It would also need a seeded random
-generator in every frame, and the output would no longer equal scarletbook-pcm's. The
-pysacd preset keeps pysacd's TPDF dither, because that preset is pysacd's filter and
-quantiser ([below](#the-pysacd-preset)).
+generator in every frame, DSD silence would no longer convert to exact zero, and `fast`'s
+output would no longer equal scarletbook-pcm's. The pysacd preset keeps pysacd's TPDF
+dither, because that preset is pysacd's filter and quantiser
+([below](#the-pysacd-preset)).
 
 ## The exactness proof and FMA
 
@@ -279,11 +298,11 @@ covers 88.2 and 176.4 kHz only, with a fixed response.
 
 ## The precise filter (`Filter::Precise`)
 
-An opt-in filter on the same decimator, kernels and exactness proof as the default: integer
-taps, exact integer sums in `f64`, half-to-even rounding at each stage end, the same
-quantiser, the same centring (no delay) and linear phase. Only the tables
+The default filter from 0.2.0, on the same decimator, kernels and exactness proof as
+`fast`: integer taps, exact integer sums in `f64`, half-to-even rounding at each stage end,
+the same quantiser, the same centring (no delay) and linear phase. Only the tables
 (`decimator/tables_precise.rs`) and the stage plan differ. Its aim is a stopband of 150 dB
-wherever ultrasonic content folds into the passband; the default's is about 110 dB, which
+wherever ultrasonic content folds into the passband; `fast`'s is about 110 dB, which
 with a very quiet source sets an audio-band floor near -128 dBFS
 ([PCM quality](pcm-quality.md#the-precise-filter)).
 
@@ -305,7 +324,7 @@ and the largest partial sum of every plan).
   later stages keep (k x 352.8 kHz +- 48 kHz for the 30 and 40 kHz filters, +- 96 kHz for
   `wide`), don't-care between them, where the later stages' own stopbands remove what S1
   passes. 95 taps (a 12-byte window) for 30 and 40 kHz, 127 taps (16 bytes) for `wide`;
-  the kernels gained the 16-byte window as a constant size. Like the default S1 it has the
+  the kernels gained the 16-byte window as a constant size. Like `fast`'s S1 it has the
   factor `(1 + z^-1)^2 (1 + z^-4)`, so the idle pattern converts to exact zero.
 - **P**, a short low-pass at 352.8 kHz (25 taps), takes S1's 2^29 grid back to 2^26 and adds
   its stopband in front of the half-band (128.4 to 176.4 kHz, which folds onto 0 to 48 kHz).
@@ -327,9 +346,9 @@ and the largest partial sum of every plan).
   improved by a greedy integer search that moves one tap pair at a time while the largest
   stopband error falls and the passband stays within its ripple. Every stage's passband
   ripple is at most 1e-4 (linear). The composite's largest deviation from its DC gain to
-  20 kHz is ±0.0019 dB (±0.0022 dB at 352.8 kHz, ±0.0016 dB `wide`); the default's is
+  20 kHz is ±0.0019 dB (±0.0022 dB at 352.8 kHz, ±0.0016 dB `wide`); `fast`'s is
   ±0.0037 to ±0.0040 dB.
-- **Proof and tests.** `exact.rs` proves every plan as for the default, so FMA and the lanes
+- **Proof and tests.** `exact.rs` proves every plan as for `fast`, so FMA and the lanes
   stay exact. The proof's bound is a worst case: every input at its own bound with signs
   matched to the taps. Its largest partial sums are 2^52.95 (352.8 kHz with the 30 kHz
   filter, the final P), 2^52.59 (the same at 40 kHz) and 2^52.49 (`wide` at 352.8 kHz, the
@@ -344,16 +363,21 @@ and the largest partial sum of every plan).
   the plans against them and runs the literal plans through that computation against the
   ordered and the lanes paths; `lanes_match_ordered` and the
   S1 table tests cover the new tables; golden hashes pin the output at every level.
-- **Cost.** More taps per output than the default: see [performance](performance.md) and
+- **Cost.** More taps per output than `fast`: 1.3 to 1.9 times
+  scarletbook-pcm 0.7.0's time on an Intel Core i9-13900H; see [performance](performance.md) and
   [PCM quality](pcm-quality.md#the-precise-filter) for the measured CPU time.
 
 ## Release profiles of consumers
 
-**Finding.** The kernels rely on inlining and on the compiler seeing whole loops. A
-consumer's release profile with 16 codegen units, no LTO and overflow checks on measured
-25 % slower than dsd2pcm's own profile (`codegen-units = 1`, thin LTO). The bytes do not
-change. Making the kernels robust to such profiles is planned for 0.1.3. Until then, a
-consumer can build this crate with its own settings:
+**Finding.** The kernels rely on inlining and on the compiler seeing whole loops. Up to
+0.1.2, a consumer's release profile with 16 codegen units, no LTO and overflow checks on
+measured 25 % slower than dsd2pcm's own profile (`codegen-units = 1`, thin LTO). The bytes
+do not change.
+
+**Chosen.** From 0.2.0 the inner loops keep their speed in such a profile (see
+[speed](#speed)): `.github/scripts/profile-ab.sh` times both profiles in CI and fails a pull
+request when the consumer profile is more than 5 % slower. A consumer that stays on 0.1.2
+can build this crate with its own settings:
 
 ```toml
 [profile.release.package.dsd2pcm]
@@ -392,7 +416,7 @@ STREAMINFO must declare 1 to 6 channels and 8, 12, 16, 20 or 24 bits (claxon doe
 decode 32-bit frames: `Unsupported`). Each decoded block is checked against STREAMINFO: same
 channel count, every sample inside the declared bit depth. A `b`-bit sample `v` reads as
 `v * 2^-(b-1)`, the WAV reader's scaling, so 16 and 24-bit FLAC and WAV of the same
-samples give bit-identical `f64` (`tests/flac.rs`). Memory: one decoded block (at most
+samples give byte-identical `f64` (`tests/flac.rs`). Memory: one decoded block (at most
 65 535 frames by 6 channels of `i32`) plus the caller's output; `read_frames` returns at
 most 2^20 frames per call.
 
@@ -415,7 +439,7 @@ that do not decode as a frame (an ID3v1 tag, padding) are not audio and end the 
 `dsd64_to_pcm_with` calls its hook on the calling thread before the first block and after
 each block is written (never from the worker threads), with the output samples per channel
 done and the total; `Break` returns `Error::Cancelled` at once. Both file drivers (the
-default filter's and pysacd's) call it through `convert::report` at their block
+exact filters' and pysacd's) call it through `convert::report` at their block
 boundaries. Whole-file conversion passes the hook through. The frame-run API needs none: each call is one run.
 
 ## C interface (`crates/dsd2pcm-capi`)
@@ -610,7 +634,8 @@ file the user had, nor leave a partial WAV that a reader would take as complete.
 
 ## Known gaps
 
-The rows where dsd2pcm is not ahead of scarletbook-pcm 0.7.0 are listed in
+`precise` is slower than scarletbook-pcm 0.7.0 on every measured setting, by design. The
+rows where `fast` is not ahead of scarletbook-pcm 0.7.0 are listed in
 [performance.md](performance.md#known-gaps).
 
 ## Sources
@@ -622,11 +647,11 @@ The rows where dsd2pcm is not ahead of scarletbook-pcm 0.7.0 are listed in
   literature: Parks & McClellan 1972; Rabiner, McClellan & Parks 1975; Herrmann, Rabiner &
   Chan 1973; Crochiere & Rabiner 1981; Mintzer 1982; Vaidyanathan & Nguyen 1987; Peled &
   Liu 1974; White 1989; Goldberg 1991.
-- [pysacd](https://github.com/aclater/pysacd): `csrc/dsp.c` and the quantiser of
+- [pysacd](https://github.com/dsd-toolbox/pysacd): `csrc/dsp.c` and the quantiser of
   `process_batch()`, for the pysacd preset; Sebastian Gesemann's dsd2pcm for the byte-table
   technique it uses.
-- sacdfs's [PCM quality](https://github.com/aclater/sacdfs/blob/main/docs/pcm-quality.md)
-  and [design](https://github.com/aclater/sacdfs/blob/main/docs/design.md#pcm-conversion)
+- sacdfs's [PCM quality](https://github.com/dsd-toolbox/sacdfs/blob/main/docs/pcm-quality.md)
+  and [design](https://github.com/dsd-toolbox/sacdfs/blob/main/docs/design.md#pcm-conversion)
   pages: the reasons for the rates, cutoffs and gain, the 0 dB reference and the stateless
   frame interface, as a consumer of the same converter.
 - This repository's history: the reasons recorded with each change (lane thresholds, table
@@ -640,4 +665,4 @@ The rows where dsd2pcm is not ahead of scarletbook-pcm 0.7.0 are listed in
 - [Provenance](../PROVENANCE.md): where the ported code comes from
 - [Fuzzing](fuzzing.md): how the readers are tested against bad input
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

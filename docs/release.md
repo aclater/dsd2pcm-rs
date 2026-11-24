@@ -25,33 +25,33 @@ The GitHub release, with these assets:
 
 | Asset | Platform |
 |---|---|
-| `dsd2pcm-0.1.2-src.tar.gz` | (from 0.1.3) The source: the tagged commit's whole tree (workspace, `fuzz/`, `docs/`) |
+| `dsd2pcm-0.1.2-src.tar.gz` | (from 0.2.0) The source: the tagged commit's whole tree (workspace, `fuzz/`, `docs/`) |
 | `dsd2pcm-0.1.2-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
 | `dsd2pcm-0.1.2-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
 | `dsd2pcm-0.1.2-i686-linux.tar.gz` | Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later |
-| `dsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | (from 0.1.3) Linux x86_64, statically linked (musl): any Linux |
-| `dsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | (from 0.1.3) Linux aarch64, statically linked (musl): any Linux |
+| `dsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | (from 0.2.0) Linux x86_64, statically linked (musl): any Linux |
+| `dsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | (from 0.2.0) Linux aarch64, statically linked (musl): any Linux |
 | `dsd2pcm-0.1.2-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon; signed (Developer ID) and notarised |
-| `dsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.1.3) macOS 11 or later, Intel; signed (Developer ID) and notarised |
+| `dsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.2.0) macOS 11 or later, Intel; signed (Developer ID) and notarised |
 | `dsd2pcm-0.1.2-x86_64-windows.zip` | Windows 10 and 11, x86_64; C runtime linked in; not code-signed |
 | `libdsd2pcm-0.1.2-x86_64-linux.tar.gz` | C library, Linux x86_64, glibc 2.17 or later; static library marked for the CET shadow stack |
 | `libdsd2pcm-0.1.2-aarch64-linux.tar.gz` | C library, Linux aarch64, glibc 2.17 or later |
 | `libdsd2pcm-0.1.2-i686-linux.tar.gz` | C library, Linux 32-bit x86, glibc 2.17 or later |
-| `libdsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | (from 0.1.3) C library, Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later); static library marked for the CET shadow stack |
-| `libdsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | (from 0.1.3) C library, Linux aarch64, musl 1.2.3 or later |
+| `libdsd2pcm-0.1.2-x86_64-linux-musl.tar.gz` | (from 0.2.0) C library, Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later); static library marked for the CET shadow stack |
+| `libdsd2pcm-0.1.2-aarch64-linux-musl.tar.gz` | (from 0.2.0) C library, Linux aarch64, musl 1.2.3 or later |
 | `libdsd2pcm-0.1.2-aarch64-macos.tar.gz` | C library, macOS 11 or later, Apple silicon; `libdsd2pcm.1.dylib` signed and notarised |
-| `libdsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.1.3) C library, macOS 11 or later, Intel; `libdsd2pcm.1.dylib` signed and notarised |
+| `libdsd2pcm-0.1.2-x86_64-macos.tar.gz` | (from 0.2.0) C library, macOS 11 or later, Intel; `libdsd2pcm.1.dylib` signed and notarised |
 | `libdsd2pcm-0.1.2-x86_64-windows.zip` | C library, Windows 10 and 11, x86_64, for MSVC |
-| `libdsd2pcm-0.1.2-x86_64-windows-gnu.zip` | (from 0.1.3) C library, Windows 10 and 11, x86_64, for MinGW-w64 gcc (msvcrt) |
+| `libdsd2pcm-0.1.2-x86_64-windows-gnu.zip` | (from 0.2.0) C library, Windows 10 and 11, x86_64, for MinGW-w64 gcc (msvcrt) |
 
-A `dsd2pcm-` archive holds `dsd2pcm` (or `dsd2pcm.exe`), `README.md`, `LICENSE-MIT` and
-`LICENSE-APACHE`. A `libdsd2pcm-` archive holds `include/dsd2pcm.h`, the shared library
+A `dsd2pcm-` archive holds `dsd2pcm` (or `dsd2pcm.exe`), `README.md`, `LICENSE-MIT`,
+`LICENSE-APACHE` and `NOTICE`. A `libdsd2pcm-` archive holds `include/dsd2pcm.h`, the shared library
 under its ABI-versioned name (`libdsd2pcm.so.1` with a `libdsd2pcm.so` link, SONAME
 `libdsd2pcm.so.1`; `libdsd2pcm.1.dylib` with a `libdsd2pcm.dylib` link, install name
 `@rpath/libdsd2pcm.1.dylib`; `bin/dsd2pcm.dll` with the import library
 `lib/dsd2pcm.dll.lib`, or `lib/libdsd2pcm.dll.a` for MinGW-w64), the static library,
 `lib/pkgconfig/dsd2pcm.pc` (not for MSVC), `examples/minimal.c`, a README taken from
-[docs/c-api.md](c-api.md#binary-releases) and the licences. The C library holds no
+[docs/c-api.md](c-api.md#binary-releases), the licences and `NOTICE`. The C library holds no
 third-party code: it is built without the `flac` feature, and
 `.github/scripts/check-capi-no-claxon.sh` checks the static library of every archive but the
 MSVC one for claxon symbols with `nm` (in `check-capi-archive.sh`, after its own tests on
@@ -178,8 +178,9 @@ no token when there is nothing to publish).
    `publish-update`, for the crates `dsd2pcm` and `dsd2pcm-cli`, expiring in one day.
 2. From a clean clone of the release commit:
 
+   <!-- docs-run: skip="maintainer step: needs a crates.io token and publishes crates" -->
    ```sh
-   git clone https://github.com/aclater/dsd2pcm-rs.git
+   git clone https://github.com/dsd-toolbox/dsd2pcm-rs.git
    cd dsd2pcm-rs
    cargo publish --dry-run --locked -p dsd2pcm -p dsd2pcm-cli
    cargo login
@@ -192,7 +193,7 @@ no token when there is nothing to publish).
    depends on it.
 3. For each of `dsd2pcm` and `dsd2pcm-cli`, on crates.io, the crate's Settings, Trusted
    Publishing, Add, GitHub:
-   - Repository owner: `aclater`
+   - Repository owner: `dsd-toolbox`
    - Repository name: `dsd2pcm-rs`
    - Workflow filename: `release.yml`
    - Environment: `release`
@@ -217,6 +218,7 @@ steps 1 to 5 for that crate alone.
 3. Tag the release commit, the `main` commit that CI and a security review approved, and
    push the tag:
 
+   <!-- docs-run: skip="maintainer step: needs push rights and creates the release tag" -->
    ```sh
    git fetch origin
    git tag -a v0.1.2 -m "dsd2pcm 0.1.2" origin/main
@@ -231,20 +233,22 @@ steps 1 to 5 for that crate alone.
 5. Check: the crates on crates.io, the GitHub release with its 55 files (eighteen
    archives, their `.sha256` and `.intoto.jsonl` files, and `SHA256SUMS`), and an asset:
 
+   <!-- docs-run: skip="maintainer step: needs a GitHub login for gh" -->
    ```sh
-   gh release download v0.1.2 -R aclater/dsd2pcm-rs -p dsd2pcm-0.1.2-x86_64-linux.tar.gz
-   gh attestation verify dsd2pcm-0.1.2-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs --signer-workflow aclater/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.2 --deny-self-hosted-runners
+   gh release download v0.1.2 -R dsd-toolbox/dsd2pcm-rs -p dsd2pcm-0.1.2-x86_64-linux.tar.gz
+   gh attestation verify dsd2pcm-0.1.2-x86_64-linux.tar.gz -R dsd-toolbox/dsd2pcm-rs --signer-workflow dsd-toolbox/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.2 --deny-self-hosted-runners
    ```
 
-   From 0.1.3 on, also run the source archive's commands in [c-api.md](c-api.md) (download,
+   From 0.2.0 on, also run the source archive's commands in [c-api.md](c-api.md) (download,
    `sha256sum -c`, `gh attestation verify`, unpack, build) against the new tag.
 6. Release notes: the workflow writes the same notes for every release. Put the version's
    CHANGELOG section on top of them, from a clone of the release commit:
 
+   <!-- docs-run: skip="maintainer step: needs a GitHub login with write access to the release" -->
    ```sh
    awk '/^## 0\.1\.2 /{f=1; next} /^## /{f=0} f' CHANGELOG.md > notes.md
-   gh release view v0.1.2 -R aclater/dsd2pcm-rs --json body -q .body >> notes.md
-   gh release edit v0.1.2 -R aclater/dsd2pcm-rs --notes-file notes.md
+   gh release view v0.1.2 -R dsd-toolbox/dsd2pcm-rs --json body -q .body >> notes.md
+   gh release edit v0.1.2 -R dsd-toolbox/dsd2pcm-rs --notes-file notes.md
    ```
 
 7. Yank: when the release fixes security issues, yank the affected earlier versions of both
@@ -252,6 +256,7 @@ steps 1 to 5 for that crate alone.
    0.1.1, with a crates.io token that has the `yank` scope for both crates (Account
    Settings, API Tokens; revoke it afterwards):
 
+   <!-- docs-run: skip="maintainer step: needs a crates.io token with the yank scope" -->
    ```sh
    cargo login
    cargo yank --version 0.1.0 dsd2pcm
@@ -269,10 +274,22 @@ If a run fails after the crates job, re-run the failed jobs: published crates ar
 A tag is never moved or re-created (the ruleset forbids it); a broken release gets a new
 patch version.
 
+<!-- docs-audit:begin -->
+## After the release: run the docs audit
+
+After the release: run the docs audit. Do it once the tag, the packages and the release notes are public, and before the release is announced.
+
+1. Run the `docs-audit` workflow from the Actions tab of the repository (Run workflow). It runs the docs lint, the link check with external URLs and the docs facts check, and fails if any of them does.
+2. Open the checklist it prints: every page that mentions a version, a command-line option or a platform, to compare with the release just published. Fix each mismatch in a docs-only change, or write down why it is right.
+3. Record the result in the release notes or the release checklist: the workflow run, and how many checklist items were fixed.
+
+Every project also runs this audit each month (the `docs-monthly` workflow in the DSD Toolbox repository), so a missed audit shows up within a month.
+<!-- docs-audit:end -->
+
 ## See also
 
 - [C interface](c-api.md#binary-releases): what the C library archives hold
 - [Development](development.md): CI and the checks before a release
 - [Security policy](../SECURITY.md): supported versions
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

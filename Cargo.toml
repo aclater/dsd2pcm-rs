@@ -8,7 +8,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.83"
 publish = true
-repository = "https://github.com/aclater/dsd2pcm-rs"
+repository = "https://github.com/dsd-toolbox/dsd2pcm-rs"
 readme = "README.md"
 
 [workspace.dependencies]

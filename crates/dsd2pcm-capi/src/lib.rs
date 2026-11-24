@@ -52,7 +52,7 @@ pub const DSD2PCM_E_BUSY: c_int = 7;
 /// An internal error (a caught panic, or a handle unusable after one). Please report it.
 pub const DSD2PCM_E_INTERNAL: c_int = 8;
 /// The output file exists and `dsd2pcm_file_options.no_clobber` is set: it is left as it
-/// was. (Since 0.1.3.)
+/// was. (Since 0.2.0.)
 pub const DSD2PCM_E_EXISTS: c_int = 9;
 
 /// Output layout: packed 3-byte little-endian samples (24-bit WAV and FLAC).
@@ -133,7 +133,7 @@ pub struct dsd2pcm_file_options {
     pub user_data: *mut c_void,
     /// 0: replace an existing output file. 1: refuse it with `DSD2PCM_E_EXISTS` and leave
     /// it as it was; the result is put in place without ever replacing a file that appears
-    /// during the conversion. Other values are reserved. Appended in 0.1.3: a caller built
+    /// during the conversion. Other values are reserved. Appended in 0.2.0: a caller built
     /// against an older header passes the 0.1.0 size, and this reads as 0.
     pub no_clobber: u32,
 }
@@ -329,7 +329,7 @@ versioned!(dsd2pcm_file_report, 88, 88, 88, unchanged);
 versioned!(dsd2pcm_frames_config, 32, 28, 32, unchanged);
 versioned!(dsd2pcm_run, 80, 44, 48, unchanged);
 versioned!(dsd2pcm_stats, 64, 64, 64, unchanged);
-// Fields appended to dsd2pcm_file_options: `no_clobber` (0.1.3) starts where the 0.1.0
+// Fields appended to dsd2pcm_file_options: `no_clobber` (0.2.0) starts where the 0.1.0
 // layout ended.
 const _: () = assert!(
     std::mem::offset_of!(dsd2pcm_file_options, no_clobber)

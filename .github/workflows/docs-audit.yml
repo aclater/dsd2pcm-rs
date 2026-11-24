@@ -1,0 +1,26 @@
+# The docs audit: the docs lint, the link check with external URLs and the docs facts check,
+# then the checklist of every page that names a version, an option or a platform, to compare
+# with the release (docs/release.md, "After the release: run the docs audit"). By hand after
+# each release, and monthly. It also runs the marked command blocks against the new release.
+# It opens nothing: a failing run is the signal, and the dated result is kept as an artifact.
+# The shared reusable workflows of dsd-toolbox/dsd-toolbox, pinned to one commit (.docs.toml).
+name: docs-audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 6 4 * *"  # the 4th of every month, 06:41 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-audit.yml@b50a7cca297022561959ba9a2532c0673d532ada
+    with:
+      tools_ref: b50a7cca297022561959ba9a2532c0673d532ada
+
+  commands:
+    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-run.yml@b50a7cca297022561959ba9a2532c0673d532ada
+    with:
+      tools-ref: b50a7cca297022561959ba9a2532c0673d532ada

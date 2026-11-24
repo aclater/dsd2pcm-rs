@@ -32,6 +32,7 @@ A Linux x86_64 machine whose CPU has SSE2, AVX2 and FMA, about 16 threads, 32 GB
 memory, 60 GB of disk, podman (rootless is fine) and a systemd user session
 (`systemd-run --user`). Then:
 
+<!-- docs-run: skip="installs packages with sudo on the release test machine" -->
 ```sh
 sudo dnf install gcc clang compiler-rt python3 podman file
 rustup toolchain install stable
@@ -45,8 +46,9 @@ lychee 0.24.2 from its GitHub release (the version and SHA-256 pinned in
 `.github/workflows/docs.yml`), on the `PATH` or named by `LYCHEE`. Clone the candidate and
 record its SHA:
 
+<!-- docs-run: skip="clones the release candidate; BRANCH is the candidate branch, named at release time" -->
 ```sh
-git clone https://github.com/aclater/dsd2pcm-rs.git
+git clone https://github.com/dsd-toolbox/dsd2pcm-rs.git
 cd dsd2pcm-rs
 git checkout BRANCH
 git rev-parse HEAD
@@ -60,6 +62,7 @@ configuration or credentials file there stays out of the container. The script r
 
 ## 1 and 2. Test suite on every platform; golden hashes and identity
 
+<!-- docs-run: skip="release test on the test machine: needs a checkout, Rust toolchains for three targets and podman" -->
 ```sh
 .github/scripts/release-test.sh simd
 .github/scripts/release-test.sh i686
@@ -98,6 +101,7 @@ and the three CI jobs are green on the candidate's head.
 
 ## 3. Fuzzing
 
+<!-- docs-run: skip="release test: needs a checkout, nightly Rust and cargo-fuzz; fuzzes for 1800 seconds" -->
 ```sh
 .github/scripts/release-test.sh fuzz 1800
 ```
@@ -115,6 +119,7 @@ finding. A finding is a FAIL: its input is in `fuzz/artifacts/TARGET/`.
 
 ## 4. Leak soak
 
+<!-- docs-run: skip="release test: needs a checkout and Rust; runs for an hour" -->
 ```sh
 .github/scripts/release-test.sh soak 3600
 ```
@@ -128,6 +133,7 @@ live-heap and resident-set figures it prints.
 
 ## 5. Miri
 
+<!-- docs-run: skip="release test: needs a checkout and nightly Rust with Miri" -->
 ```sh
 .github/scripts/release-test.sh miri
 ```
@@ -149,6 +155,7 @@ that the set has:
 - files that end in a partial 4704-byte frame;
 - 5.1 DFF files (made from 5.1 DSF rips when there are none) and a DSF made from a DFF rip:
 
+  <!-- docs-run: skip="needs a checkout and real DSD rips (IN.dsf, IN.dff) of the tester" -->
   ```sh
   python3 -I .github/scripts/dsd-transform.py dsf2dff IN.dsf OUT.dff
   python3 -I .github/scripts/dsd-transform.py dff2dsf IN.dff OUT.dsf
@@ -158,6 +165,7 @@ that the set has:
   rips has one), stereo and 5.1, with 1, 3, 5 and 7 padding bits set to zero, two of
   them with a silent end (the last two frames of each channel set to the idle pattern):
 
+  <!-- docs-run: skip="needs a checkout and real DSD rips (IN.dsf) of the tester" -->
   ```sh
   python3 -I .github/scripts/dsd-transform.py odd IN.dsf OUT.dsf 3
   python3 -I .github/scripts/dsd-transform.py odd IN.dsf OUT.dsf 5 9408
@@ -170,6 +178,7 @@ that the set has:
 List the inputs one per line in a file, the container pairs (a rip and the copy made from
 it, `A B` per line) in another, and run:
 
+<!-- docs-run: skip="needs a checkout, Rust and the corpus of real DSD rips listed in corpus.txt" -->
 ```sh
 RTP_PAIRS=pairs.txt .github/scripts/release-test.sh corpus corpus.txt WORKDIR
 ```
@@ -200,6 +209,7 @@ silent-end copies end in zeros.
 
 ## 7. C interface under the sanitizers
 
+<!-- docs-run: skip="release test: needs a checkout, Rust, clang and the sanitizers" -->
 ```sh
 .github/scripts/release-test.sh capi
 ```
@@ -215,6 +225,7 @@ passed under the sanitizers, no leaks".
 
 ## 8. README Quick start in a fresh container
 
+<!-- docs-run: skip="release test: needs a checkout, Rust and podman (it runs its own containers)" -->
 ```sh
 .github/scripts/release-test.sh quickstart
 ```
@@ -230,6 +241,7 @@ Pass: the commands succeed and `01 - Track.wav` is a 176.4 kHz, 24-bit WAV.
 
 After the release, the same check runs with the real download (the `curl` line too):
 
+<!-- docs-run: skip="needs a checkout; the README Quick start itself is a docs-run block" -->
 ```sh
 .github/scripts/readme-quick-start.sh
 ```
@@ -240,6 +252,7 @@ must print "Quick start: OK".
 
 ## 9. Docs
 
+<!-- docs-run: skip="release test: needs a checkout and lychee" -->
 ```sh
 .github/scripts/release-test.sh docs
 ```
@@ -261,6 +274,7 @@ Record each command and its result.
 
 ## 10. File safety
 
+<!-- docs-run: skip="release test: needs a checkout and Rust" -->
 ```sh
 .github/scripts/release-test.sh safety
 ```
@@ -301,21 +315,25 @@ Measures the candidate and the previous release with
 `docs/quality/X.Y.Z.md` ([how the comparison is made](quality/README.md)). Nothing is timed,
 so it runs in parallel with the other items. It needs Python 3.11 or later, a C compiler
 and about 15 minutes with the builds (the measurements take 5 minutes and 1.7 GB of memory
-on an AMD Ryzen AI Max+ 395). The example is the first comparison, 0.1.3 against 0.1.2; for
+on an AMD Ryzen AI Max+ 395). The example is the first comparison, 0.2.0 against 0.1.2; for
 a later release, change the two tags and the file name.
 
 Install the pinned measurement suite and build the two versions under `target/quality/`
 (the candidate from its branch, the previous release from its tag):
 
+<!-- docs-run: skip="needs a checkout, Rust and pipx; builds the candidate and the previous release" -->
 ```sh
 pipx install git+https://github.com/dsd-toolbox/dsd-measure@d234b7a8233ccfe391776e7c6425cbf8643c47e3
 dsd-measure --version
 cargo install --locked --path crates/dsd2pcm-cli --root target/quality/new
-cargo install --locked --git https://github.com/aclater/dsd2pcm-rs --tag v0.1.2 --root target/quality/old dsd2pcm-cli
+# facts:release repo=dsd-toolbox/dsd2pcm-rs fmt="cargo install --locked --git https://github.com/{repo} --tag {tag} --root target/quality/old dsd2pcm-cli"
+cargo install --locked --git https://github.com/dsd-toolbox/dsd2pcm-rs --tag v0.1.2 --root target/quality/old dsd2pcm-cli
+# /facts
 ```
 
 `dsd-measure --version` must print `0.1.1`. Measure both, from the repository root:
 
+<!-- docs-run: skip="needs a checkout, dsd-measure and the two builds from the block above" -->
 ```sh
 dsd-measure run suites/dsd2pcm.toml --only reference_floor levels noise alias_tones
 ```
@@ -325,6 +343,7 @@ old, on the suite's multitone signal (`fast` is 0.1.x's default; the precise fil
 default from 0.2.0, has no null test until the previous release has it too). Its SHA-256 must be
 `100d1ba2cb46d98374ee5b8591b995712d12cd21c7d9370d50a1d68da3c030fc`:
 
+<!-- docs-run: skip="needs a checkout, dsd-measure and the two builds from the block above" -->
 ```sh
 dsd-measure signals target/quality/signals --profile quick --only multitone
 sha256sum target/quality/signals/multitone.dsf
@@ -337,12 +356,16 @@ dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/mul
 dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old pysacd 176400" --device "new pysacd 176400" -o target/quality/null/pysacd-176400
 ```
 
-Copy [the template](quality/template.md) to `docs/quality/0.1.3.md` and fill it from
+Copy [the template](quality/template.md) to `docs/quality/0.2.0.md` and fill it from
 `target/quality/report/<device>/results.json` (the keys are listed at the top of the suite
-file) and the first line of each `target/quality/null/*/index.md`.
+file) and the first line of each `target/quality/null/*/index.md`. Fill its "Measured with"
+line: the candidate's commit (`git rev-parse --short HEAD`), the previous tag's commit
+(`git rev-parse --short v0.1.2^{commit}`), the Rust version (`rustc --version`), the
+dsd-measure version and commit, and the CPU model (`lscpu`, the "Model name" line), never
+the host name.
 
 Pass: every command exits 0, and either nothing changed (every figure the same to
-0.01 dB, the suite's measured repeatability being 0.00 dB, and every null "identical"), or
+0.01 dB, the suite's measured run-to-run spread being 0.00 dB, and every null "identical"), or
 each change is accepted. A worse figure is a FAIL unless it is accepted. An accepted change
 or regression is recorded, with its reason, in that version's `docs/quality/X.Y.Z.md` page
 and in its CHANGELOG entry.
@@ -385,4 +408,4 @@ Release: X.Y.Z    Candidate: BRANCH at SHA    Date:    Tester:
 - [Release quality comparison](quality/README.md): the item 11 pages
 - [Development](development.md): the checks CI runs on every pull request
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

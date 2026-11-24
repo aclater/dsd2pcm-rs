@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use dsd2pcm in your work, please cite it as below."
+title: "dsd2pcm"
+type: software
+authors:
+  - name: "The dsd2pcm-rs authors"
+repository-code: "https://github.com/dsd-toolbox/dsd2pcm-rs"
+url: "https://github.com/dsd-toolbox/dsd2pcm-rs"
+abstract: "DSD to 24-bit PCM conversion (DSF, DFF and SACD frames) as a Rust crate, a C library and a command-line tool."
+# The code is MIT OR Apache-2.0 (README.md, "Licence and credits"). Only one licence is
+# given here: Zenodo, which archives each GitHub release from this file, reads `license`
+# as a single string and fails on a list, and "MIT OR Apache-2.0" is not a valid value.
+license: Apache-2.0
+# The workspace version (Cargo.toml); .github/scripts/check-doc-versions.py checks it.
+version: "0.1.2"
+keywords:
+  - DSD
+  - PCM
+  - SACD
+  - DSF
+  - DSDIFF
+  - audio
+  - decimation
+  - Rust
