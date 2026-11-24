@@ -523,8 +523,7 @@ pub fn check_options(opts: &PcmOptions) -> Result<()> {
 }
 
 /// Converts DSD64 to 24-bit PCM with `opts.filter` into `w` (sample-identical to
-/// scarletbook-pcm 0.7.0 with [`Filter::Fast`], to pysacd's reference with
-/// [`Filter::Pysacd`]). `w` is not finished.
+/// scarletbook-pcm 0.7.0 with [`Filter::Fast`]). `w` is not finished.
 ///
 /// Every output sample depends only on a fixed window of input bytes, so each block of
 /// input is cut into pieces (per channel and per range of outputs) that run on all cores;

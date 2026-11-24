@@ -125,8 +125,8 @@ divisions in a fixed order (ported unchanged): exactly 1 at 0 dB, identical ever
 **No dither in the default filter.** The 24-bit rounding error is far below the noise
 floor of DSD itself, so dither would only add noise. It would also need a seeded random
 generator in every frame, and the output would no longer equal scarletbook-pcm's. The
-pysacd preset keeps pysacd's TPDF dither, because that preset reproduces pysacd
-([below](#the-pysacd-preset)).
+pysacd preset keeps pysacd's TPDF dither, because that preset is pysacd's filter and
+quantiser ([below](#the-pysacd-preset)).
 
 ## The exactness proof and FMA
 
@@ -229,31 +229,53 @@ whole-area conversion. Only the neighbour bytes nearest the run matter (`context
 
 ## The pysacd preset
 
-**Chosen.** `Filter::Pysacd` (`--filter pysacd`) is pysacd's filter as an opt-in preset. It
-uses three Kaiser-windowed FIR stages in `f32` and a TPDF-dithered quantiser (`csrc/dsp.c`,
-relicensed MIT OR Apache-2.0 by its author). Its bytes equal pysacd's reference build
-(`-O2 -ffp-contract=off`, no SIMD dispatch) on every CPU and SIMD level. It covers 88.2 and
-176.4 kHz only, with a fixed response.
+**Chosen.** `Filter::Pysacd` (`--filter pysacd`) is pysacd's filter as an opt-in preset:
+three Kaiser-windowed FIR stages and a TPDF-dithered quantiser (`csrc/dsp.c`, relicensed
+MIT OR Apache-2.0 by its author), with pysacd's taps, response, dither and seeding. Since
+0.2.0 it computes in `f64`, where pysacd computes in `f32`. Its bytes equal a C reference,
+pysacd's `dsp.c` changed to `double` (`tests/pysacd-ref/`), on every CPU and SIMD level. It
+covers 88.2 and 176.4 kHz only, with a fixed response.
 
-- **Why the reference build, not pysacd's wheels.** pysacd's wheels use `-ffast-math`, FMA
-  contraction and per-CPU clones, so their output varies by CPU, up to 7 LSB apart on its
-  test vectors. pysacd also seeds its dither per batch of frames, so its bytes depend on how
-  the input was batched. Neither is a target that can be reproduced. The reference build is.
-  This preset differs from pysacd's wheels, and old pysacd output, by those few LSB.
-- **Exact `f32`.** Each output is `((0 + h0 x0) + h1 x1) + ...`, every product rounded
-  before it is added, as in the C loop. The kernels compute 32 outputs at a time, one per
-  vector lane, and never reassociate a sum or fuse a multiply-add, so every level gives the
-  same bits.
+- **`f64` signal path.** The stage 1 byte tables stay in `f64`, as pysacd's
+  `dsd2pcm_init` computes them before it rounds them to `f32`. The signals between stages
+  are `f64`. Each stage 2 and 3 output is `((0 + h0 x0) + h1 x1) + ...` in `f64`, with
+  pysacd's `f32` taps widened exactly, every product rounded before it is added. The
+  quantiser is `round_ties_even(y × 8388607·db_to_linear(gain) + dither)` in `f64`, with
+  the same `db_to_linear` series as the default filter, not libm. The kernels compute 32
+  outputs at a time, one per vector lane, and never reassociate a sum or fuse a
+  multiply-add, so every level gives the same bits.
+- **Why `f64`.** In `f32`, strictly in tap order (dsd2pcm 0.1.x, and pysacd's reference
+  build), the rounding error grows with the signal, about 133 dB below it. With dsd-measure
+  0.1.1, 1 kHz at 0 dB SACD, the `f64` path measures 127.97 dB SINAD at 88.2 kHz and
+  128.13 dB at 176.4 kHz: +0.72 and +0.25 dB over the `f32` path (127.25 and 127.88 dB), and
+  above pysacd's 0.5.x wheels (127.81 and 128.07 dB). The wheels gain part of that through
+  `-ffast-math`, whose vectorised partial sums shorten each sum, but their bytes differ by
+  CPU. More precision than `f64` gains nothing: the noise floor (-130.7 dBFS at 88.2 kHz)
+  comes from the 110 dB Kaiser stopbands letting DSD64's noise fold into the audio band, and
+  an all-`f64` filter with `f64` taps measures the same. The precise filter, a different
+  response, measures 141.9 and 143.8 dB.
+- **Cost.** A whole conversion on one core takes 1.2 to 1.3 times as long as on the `f32`
+  path at the AVX2 level, and 1.5 to 1.8 times at the generic level
+  ([numbers](pcm-quality.md#comparisons)): an `f64` vector holds half as many lanes.
+- **Why not pysacd's wheels.** pysacd's wheels use `-ffast-math`, FMA contraction and
+  per-CPU clones, so their output varies by CPU, up to 7 LSB apart on its test vectors.
+  pysacd also seeds its dither per batch of frames, so its bytes depend on how the input was
+  batched. Neither is a target that can be reproduced. This preset's bytes differ from
+  every pysacd build, including 0.1.x of this crate, which matched pysacd's `f32` reference
+  build.
 - **Dither seeded per frame.** The generator is seeded at the start of each frame of 4704
   bytes per channel from the frame's index in the area (`0x9E3779B9 ^ (index × 2654435761)`,
   32-bit wrapping). The bytes are then independent of how the area is split: files, threads
   and frame runs agree.
 - **Stream.** Each area is one stream of the C filter started at its first byte. The first
   outputs (52 at 88.2 kHz, 26 at 176.4 kHz) are dropped to remove the delay, and the length
-  equals the default path's.
+  equals the other filters'. The filter's group delay is not a whole number of output
+  samples, so a fraction remains: +0.27 samples at 88.2 kHz and -0.47 at 176.4 kHz.
 - **Tests.** SHA-256 of the C reference's output (`tests/pysacd-ref/`), for silence, all-ones,
   synthetic and random input, 2 and 6 channels, both rates, three gains and large frame
-  indices, at every SIMD level, through files, whole runs and split runs.
+  indices, at every SIMD level, through files, whole runs and split runs; the outputs
+  before quantising are checked too. `gen.sh` builds the reference with
+  `-O2 -ffp-contract=off`, since a fused multiply-add changes the bits.
 
 ## The precise filter (`Filter::Precise`)
 

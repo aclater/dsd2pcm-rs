@@ -32,6 +32,15 @@ Each with what to change in a caller. The C interface is unchanged (ABI 1, addit
   outside the crate can no longer implement them. `io::DsdRead` stays open, since
   `dsd64_to_pcm` converts callers' own sources.
 
+### Changed (output)
+
+- `Filter::Pysacd` (`--filter pysacd`) computes pysacd's filter in `f64`: SINAD +0.72 /
+  +0.25 dB at 88.2 / 176.4 kHz (now 127.97 / 128.13 dB, above pysacd 0.5.x's 127.81 /
+  128.07 dB; dsd-measure 0.1.1, 1 kHz at 0 dB SACD). Output bytes change; they are the
+  same on every CPU and SIMD level. pysacd's taps, response, dither and seeding are
+  unchanged. A conversion on one core takes 1.2 to 1.3 times as long at the AVX2 level and
+  1.5 to 1.8 times at the generic level ([design](docs/design.md#the-pysacd-preset)).
+
 ### Added
 
 - No-clobber output: the tool's `-n` / `--no-clobber`, the library's `convert_file_to` with

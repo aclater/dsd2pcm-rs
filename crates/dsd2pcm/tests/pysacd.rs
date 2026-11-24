@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! `Filter::Pysacd` gives the bytes of pysacd's reference (tests/pysacd-ref: pysacd's
-//! dsp.c built with `-O2 -ffp-contract=off`, fed each area as one stream) at every SIMD
-//! level, through every entry point and however the work is split.
+//! `Filter::Pysacd` gives the bytes of its C reference (tests/pysacd-ref: pysacd's dsp.c
+//! computed in double, built with `-O2 -ffp-contract=off`, fed each area as one stream) at
+//! every SIMD level, through every entry point and however the work is split.
 
 #[path = "pysacd-ref/inputs.rs"]
 mod inputs;

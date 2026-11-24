@@ -1,18 +1,19 @@
 /* SPDX-License-Identifier: MIT OR Apache-2.0 */
 /*
- * Reference for dsd2pcm's `Filter::Pysacd`: pysacd's filter (pysacd/dsp.c, unchanged) run as
- * one stream per area, and the 24-bit quantiser of pysacd's process_batch() with the dither
- * seeded per frame. Built by gen.sh with `-O2 -ffp-contract=off` (pysacd's `ref` build).
+ * Reference for dsd2pcm's `Filter::Pysacd`: pysacd's filter (pysacd/dsp.c, computed in double:
+ * see PROVENANCE.md) run as one stream per area, and the 24-bit quantiser of pysacd's
+ * process_batch() in double, with the dither seeded per frame. Built by gen.sh with
+ * `-O2 -ffp-contract=off`: no fused multiply-add, which would change the bits.
  *
  *   pysacd_ref taps
  *       Rust source of the filter constants (src/filters/pysacd_taps.rs).
  *   pysacd_ref gen KIND CH FRAMES OUT.dsd
  *       Test input: FRAMES Super Audio CD frames of CH channels, interleaved byte by byte.
  *       KIND: silence, ff, music (two integer sines through a 1-bit modulator), random.
- *   pysacd_ref run IN.dsd CH RATE GAIN_DB TC0 OUT.i32 OUT.f32 [batch]
+ *   pysacd_ref run IN.dsd CH RATE GAIN_DB TC0 OUT.i32 OUT.f64 [batch]
  *       Converts the input as one area starting at frame TC0. OUT.i32: the kept samples,
- *       interleaved, little-endian int32. OUT.f32: the same samples before quantising, as
- *       float32. `batch` seeds the dither once at TC0 (pysacd's process_batch() with the
+ *       interleaved, little-endian int32. OUT.f64: the same samples before quantising, as
+ *       little-endian float64. `batch` seeds the dither once at TC0 (pysacd's process_batch() with the
  *       whole input as one batch) instead of once per frame.
  */
 #include <stdio.h>
@@ -20,6 +21,19 @@
 #include <string.h>
 
 #include "pysacd/dsp.c"
+
+/* dsd2pcm's decimator::db_to_linear: 10^(db/20) by a fixed series, no libm */
+static double db_to_linear(double db)
+{
+    double r = fabs(db) * (M_LN10 / 20.0) / 32.0, term = 1, sum = 1;
+    for (int k = 1; k <= 25; k++) {
+        term = term * r / (double)k;
+        sum += term;
+    }
+    for (int i = 0; i < 5; i++)
+        sum *= sum;
+    return db < 0 ? 1.0 / sum : sum;
+}
 
 static inline uint32_t xorshift(uint32_t *s)
 {
@@ -41,9 +55,9 @@ static void put32(FILE *f, uint32_t v)
     fwrite(b, 1, 4, f);
 }
 
-static uint64_t fnv(uint64_t h, uint32_t v)
+static uint64_t fnv(uint64_t h, uint64_t v)
 {
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 8; i++) {
         h ^= (v >> (8 * i)) & 0xff;
         h *= 0x100000001b3ull;
     }
@@ -60,7 +74,7 @@ static int taps(void)
     uint64_t h = 0xcbf29ce484222325ull;
     for (int j = 0; j < S1_BYTES; j++)
         for (int v = 0; v < 256; v++) {
-            union { float f; uint32_t u; } w = {d88->s1_lut[j][v]};
+            union { double f; uint64_t u; } w = {d88->s1_lut[j][v]};
             h = fnv(h, w.u);
         }
     printf("// SPDX-License-Identifier: MIT OR Apache-2.0\n"
@@ -83,7 +97,7 @@ static int taps(void)
         union { float f; uint32_t u; } w = {d88->s3[0].h[i]};
         printf("    0x%08x,\n", w.u);
     }
-    printf("];\n\n/// FNV-1a (64-bit) of the stage 1 byte tables' `float` bits, table by table.\n"
+    printf("];\n\n/// FNV-1a (64-bit) of the stage 1 byte tables' `double` bits, table by table.\n"
            "#[cfg(test)]\npub(super) const LUT_FNV: u64 = 0x%016llx;\n\n", (unsigned long long)h);
     printf("/// Group delay in output samples at 88.2 kHz and 176.4 kHz.\n"
            "pub(super) const DELAY: [usize; 2] = [%d, %d];\n", d88->delay, d176->delay);
@@ -170,12 +184,13 @@ static int run(int argc, char **argv)
         return 1;
 
     /* process_batch() of pysacd's sacdconv.c, as one stream (no reset), with the dither
-       seeded at the start of every frame of output (or once, with `batch`). */
+       seeded at the start of every frame of output (or once, with `batch`). The scale and
+       the sum are in double; db_to_linear is dsd2pcm's series, so every gain matches. */
     int opf = dsp->out_per_frame;
     uint32_t skip = (uint32_t)dsp->delay;
     uint32_t keep = (uint32_t)nf * opf, got = 0, pos = 0;
     uint32_t rng = seed(tc0);
-    const float scale = 8388607.0f * (float)pow(10.0, gain_db / 20.0);
+    const double scale = 8388607.0 * db_to_linear(gain_db);
     const float lsb = 1.0f / 4294967296.0f;
     for (int i = 0; got < keep; i++) {
         dsd2pcm_frame(dsp, i < nf ? dsd + (size_t)i * fb : silence);
@@ -189,10 +204,11 @@ static int run(int argc, char **argv)
                 uint32_t a = xorshift(&rng);
                 uint32_t b = xorshift(&rng);
                 float dith = ((float)a - (float)b) * lsb;
-                long v = lrintf(dsp->out[c][s] * scale + dith);
+                long v = lrint((double)dsp->out[c][s] * scale + (double)dith);
                 put32(fq, (uint32_t)(int32_t)(v > 8388607 ? 8388607 : v < -8388608 ? -8388608 : v));
-                union { float f; uint32_t u; } w = {dsp->out[c][s]};
-                put32(ff, w.u);
+                union { double f; uint64_t u; } w = {dsp->out[c][s]};
+                put32(ff, (uint32_t)w.u);
+                put32(ff, (uint32_t)(w.u >> 32));
             }
             got++;
         }

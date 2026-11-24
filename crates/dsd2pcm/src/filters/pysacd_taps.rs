@@ -144,9 +144,9 @@ pub(super) const H3: [u32; 161] = [
     0xb40d04cb,
 ];
 
-/// FNV-1a (64-bit) of the stage 1 byte tables' `float` bits, table by table.
+/// FNV-1a (64-bit) of the stage 1 byte tables' `double` bits, table by table.
 #[cfg(test)]
-pub(super) const LUT_FNV: u64 = 0x6d47cb869cd40aad;
+pub(super) const LUT_FNV: u64 = 0x77ecbe1161745489;
 
 /// Group delay in output samples at 88.2 kHz and 176.4 kHz.
 pub(super) const DELAY: [usize; 2] = [52, 26];

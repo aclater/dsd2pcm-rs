@@ -53,10 +53,11 @@ it lowers the audio-band floor from about -128 dBFS to the 24-bit output's own, 
 from scarletbook-pcm's ([PCM quality](pcm-quality.md#the-precise-filter)).
 
 `--filter pysacd` (`Filter::Pysacd` in `PcmOptions` and `frames::PcmConfig`) uses pysacd's
-filter instead: three Kaiser-windowed FIR stages in `f32` and a TPDF-dithered quantiser,
-bit-exact with pysacd's reference build on every CPU and SIMD level; 88.2 and 176.4 kHz
-only, with a fixed response (leave `--cutoff` at the default). [design.md](design.md)
-gives the reasons for each filter.
+filter instead: three Kaiser-windowed FIR stages and a TPDF-dithered quantiser, with
+pysacd's response, computed in `f64` (pysacd computes in `f32`; `f64` measures 0.7 dB more
+SINAD at 88.2 kHz), the same bytes on every CPU and SIMD level; 88.2 and 176.4 kHz
+only, with a fixed response (leave `--cutoff` at the default).
+[design.md](design.md) gives the reasons for each filter.
 
 ## Output
 

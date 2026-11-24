@@ -21,8 +21,8 @@ Filters (figures from docs/pcm-quality.md and docs/performance.md):
   fast     lower CPU, lower quality: scarletbook-pcm 0.7.0's filters, the same bytes
            (dsd2pcm 0.1.x's default); SINAD about 122 dB (116 dB with wide), at about
            0.55 times precise's CPU time on one core (0.44 to 0.67).
-  pysacd   pysacd's filter and dithered quantiser, bit-exact with its reference;
-           88200 and 176400 only, fixed response.
+  pysacd   pysacd's filter and dithered quantiser, computed in f64 (pysacd computes
+           in f32); 88200 and 176400 only, fixed response.
 --single-thread: convert on the calling thread only (default: all cores).
 -n, --no-clobber: fail if OUT exists, and never replace a file that appears at OUT
 during the conversion (default: replace OUT).

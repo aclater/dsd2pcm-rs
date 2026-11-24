@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! pysacd's DSD64 to PCM filter ([`super::Filter::Pysacd`]), bit-exact with its reference
-//! build.
+//! pysacd's DSD64 to PCM filter ([`super::Filter::Pysacd`]), computed in `f64`, bit-exact
+//! with the C reference in `tests/pysacd-ref`.
 //!
 //! Ported from pysacd (commit 94b2c53), `csrc/dsp.c` and `csrc/dsp.h`, MIT OR Apache-2.0
 //! (relicensed by their copyright holder; Copyright (c) 2026 the pysacd authors), and the
@@ -8,16 +8,21 @@
 //! with lookup tables indexed by whole DSD bytes, a technique credited to Sebastian
 //! Gesemann's dsd2pcm (BSD-3-Clause, 2009). See PROVENANCE.md.
 //!
-//! Three linear-phase Kaiser-windowed FIR stages, in `f32`:
+//! Three linear-phase Kaiser-windowed FIR stages:
 //! 1. 2.8224 MHz to 352.8 kHz (/8), 96 taps, as 12 byte tables summed in order;
 //! 2. 352.8 kHz to 176.4 kHz (/2), 95 taps (pass to 60 kHz, stop from 88.2 kHz);
 //! 3. 176.4 kHz to 88.2 kHz (/2), 161 taps (pass to 40 kHz, stop from 48 kHz), 88.2 kHz only.
 //!
 //! The taps are the bits `dsd2pcm_init` computes (`pysacd_taps.rs`, generated from the C
-//! code by `tests/pysacd-ref/gen.sh`). Each output is the sum of its products in tap order,
-//! each product rounded to `f32` and then added (no fused multiply-add), exactly as the C
-//! loop compiled with `-ffp-contract=off`. The SIMD builds compute several outputs at once,
-//! each in that order, so every SIMD level gives the same bits.
+//! code by `tests/pysacd-ref/gen.sh`): pysacd's response, unchanged. The arithmetic is
+//! `f64` throughout, where pysacd computes in `f32`: the stage 1 byte tables are kept in
+//! `f64` (`dsd2pcm_init` builds them in `double` before it rounds them to `float`), the
+//! signals between stages are `f64`, and each stage 2 and 3 output is the sum in tap order
+//! of `f64(h) x x`, with the `f32` taps widened exactly. Each product is rounded and then
+//! added (no fused multiply-add), as the C reference compiled with `-ffp-contract=off`. The
+//! SIMD builds compute several outputs at once, each in that order, so every SIMD level
+//! gives the same bits. Strict `f32` sums lose about 0.7 dB of SINAD at 88.2 kHz (see
+//! docs/design.md).
 //!
 //! Each area is one stream: the C filter started at the area's start (stage 1 history of
 //! DSD silence, 0x69; zeros in the later stages' histories) and fed every frame without a
@@ -25,9 +30,10 @@
 //! dropped. So every output is a function of its absolute position and the input around
 //! it, and any split of the work gives the same bytes.
 //!
-//! Quantiser: `scale = 8388607 x 10^(gain/20)` in `f32`; TPDF dither
-//! `(x() - x()) x 2^-32` from xorshift32, two draws per sample, channel by channel within
-//! each sample; added after scaling, rounded half to even and clamped to 24 bits. The
+//! Quantiser, in `f64`: `scale = 8388607 x 10^(gain/20)` (the series of
+//! [`decimator::db_to_linear`], not libm); TPDF dither `(x() - x()) x 2^-32` in `f32` from
+//! xorshift32, two draws per sample, channel by channel within each sample; added after
+//! scaling, rounded half to even and clamped to 24 bits. The
 //! generator is seeded at the start of every Super Audio CD frame (1/75 s) from its index
 //! `tc` in the area: `0x9E3779B9 ^ (tc x 2654435761)` (wrapping, 32 bits).
 
@@ -44,15 +50,16 @@ use std::sync::Mutex;
 /// Stage 1: bytes per output (12 tables of 8 taps).
 const S1_BYTES: usize = 12;
 /// One table per byte of the stage 1 window, oldest first.
-pub(crate) type Lut = [[f32; 256]; S1_BYTES];
+pub(crate) type Lut = [[f64; 256]; S1_BYTES];
 
 /// The filter for one output rate.
 pub(crate) struct Pysacd {
     /// Three stages (88.2 kHz) or two (176.4 kHz).
     three: bool,
     lut: Box<Lut>,
-    h2: [f32; 95],
-    h3: [f32; 161],
+    /// pysacd's `f32` taps, widened (exact).
+    h2: [f64; 95],
+    h3: [f64; 161],
     /// Group delay in output samples: outputs before it are dropped.
     delay: i64,
     isa: Isa,
@@ -88,7 +95,7 @@ impl Pysacd {
             ));
         }
         let h1 = taps::H1.map(f64::from_bits);
-        let mut lut = Box::new([[0f32; 256]; S1_BYTES]);
+        let mut lut = Box::new([[0f64; 256]; S1_BYTES]);
         for (j, t) in lut.iter_mut().enumerate() {
             for (v, e) in t.iter_mut().enumerate() {
                 // As dsd2pcm_init: in double, bits MSB first, 1 -> +1, 0 -> -1.
@@ -97,14 +104,14 @@ impl Pysacd {
                     let s = if (v >> (7 - i)) & 1 == 1 { 1.0 } else { -1.0 };
                     acc += h1[j * 8 + i] * s;
                 }
-                *e = acc as f32;
+                *e = acc;
             }
         }
         Ok(Pysacd {
             three,
             lut,
-            h2: taps::H2.map(f32::from_bits),
-            h3: taps::H3.map(f32::from_bits),
+            h2: taps::H2.map(|b| f64::from(f32::from_bits(b))),
+            h3: taps::H3.map(|b| f64::from(f32::from_bits(b))),
             delay: taps::DELAY[usize::from(!three)] as i64,
             isa: Isa::current(),
         })
@@ -160,7 +167,7 @@ impl Pysacd {
         src0: i64,
         area_start: Option<i64>,
         n0: i64,
-        out: &mut [f32],
+        out: &mut [f64],
         sc: &mut Scratch,
     ) {
         let n = out.len();
@@ -208,7 +215,7 @@ impl Pysacd {
 }
 
 /// `out[o] = sum over k of h[k] x[2o + k]`, in tap order, through even and odd halves.
-fn dec2(isa: Isa, h: &[f32], x: &[f32], xe: &mut Vec<f32>, xo: &mut Vec<f32>, out: &mut [f32]) {
+fn dec2(isa: Isa, h: &[f64], x: &[f64], xe: &mut Vec<f64>, xo: &mut Vec<f64>, out: &mut [f64]) {
     debug_assert_eq!(x.len(), 2 * out.len() + h.len() - 2);
     xe.clear();
     xo.clear();
@@ -221,29 +228,29 @@ fn dec2(isa: Isa, h: &[f32], x: &[f32], xe: &mut Vec<f32>, xo: &mut Vec<f32>, ou
 #[derive(Debug, Default)]
 pub(crate) struct Scratch {
     bytes: Vec<u8>,
-    t1: Vec<f32>,
-    t2: Vec<f32>,
-    xe: Vec<f32>,
-    xo: Vec<f32>,
+    t1: Vec<f64>,
+    t2: Vec<f64>,
+    xe: Vec<f64>,
+    xo: Vec<f64>,
     /// Outputs per channel, back to back.
-    f: Vec<f32>,
+    f: Vec<f64>,
     /// Quantised samples, interleaved.
     q: Vec<i32>,
     /// Clamped samples per frame and channel.
     clips: Vec<u64>,
 }
 
-/// Outputs per block of the kernels: 4 AVX vectors, or 8 SSE vectors.
+/// Outputs per block of the kernels: 8 AVX vectors, or 16 SSE vectors.
 pub(crate) const L: usize = 32;
 
 /// Stage 1: `out[i] = sum over j of lut[j][bytes[i + j]]`, in table order.
 #[inline(always)]
-pub(crate) fn s1_kernel(lut: &Lut, bytes: &[u8], out: &mut [f32]) {
+pub(crate) fn s1_kernel(lut: &Lut, bytes: &[u8], out: &mut [f64]) {
     let n = out.len();
     debug_assert!(bytes.len() >= n + S1_BYTES - 1);
     let mut o = 0;
     while o + L <= n {
-        let mut acc = [0f32; L];
+        let mut acc = [0f64; L];
         for (j, t) in lut.iter().enumerate() {
             let b = &bytes[o + j..][..L];
             for i in 0..L {
@@ -254,7 +261,7 @@ pub(crate) fn s1_kernel(lut: &Lut, bytes: &[u8], out: &mut [f32]) {
         o += L;
     }
     for (i, d) in out.iter_mut().enumerate().skip(o) {
-        let mut acc = 0f32;
+        let mut acc = 0f64;
         for (j, t) in lut.iter().enumerate() {
             acc += t[usize::from(bytes[i + j])];
         }
@@ -265,14 +272,14 @@ pub(crate) fn s1_kernel(lut: &Lut, bytes: &[u8], out: &mut [f32]) {
 /// A decimate-by-2 stage: `out[o] = sum over k of h[k] x[2o + k]` with `xe[i] = x[2i]` and
 /// `xo[i] = x[2i + 1]`, each product rounded and then added, in tap order (`h` odd length).
 #[inline(always)]
-pub(crate) fn dec2_kernel(h: &[f32], xe: &[f32], xo: &[f32], out: &mut [f32]) {
+pub(crate) fn dec2_kernel(h: &[f64], xe: &[f64], xo: &[f64], out: &mut [f64]) {
     let n = out.len();
     let pairs = h.len() / 2;
     debug_assert!(h.len() % 2 == 1 && xe.len() > n + pairs - 1 && xo.len() >= n + pairs - 1);
     let last = h[2 * pairs];
     let mut o = 0;
     while o + L <= n {
-        let mut acc = [0f32; L];
+        let mut acc = [0f64; L];
         for p in 0..pairs {
             let (he, ho) = (h[2 * p], h[2 * p + 1]);
             let e = &xe[o + p..][..L];
@@ -292,7 +299,7 @@ pub(crate) fn dec2_kernel(h: &[f32], xe: &[f32], xo: &[f32], out: &mut [f32]) {
         o += L;
     }
     for (i, d) in out.iter_mut().enumerate().skip(o) {
-        let mut acc = 0f32;
+        let mut acc = 0f64;
         for p in 0..pairs {
             acc += h[2 * p] * xe[i + p];
             acc += h[2 * p + 1] * xo[i + p];
@@ -318,14 +325,15 @@ fn seed(tc: u64) -> u32 {
 
 /// Quantises the outputs `chans` (one slice per channel, equal lengths), the first of which
 /// is output `n0` of frame `tc0 + n0 / per_frame`, into `out` (interleaved), and counts the
-/// clamped samples into `clips[(frame - n0 / per_frame) x channels + c]`.
+/// clamped samples into `clips[(frame - n0 / per_frame) x channels + c]`. In `f64`, but for
+/// the dither, which is pysacd's `f32` value.
 #[inline(always)]
 pub(crate) fn quantise_kernel(
-    chans: &[&[f32]],
+    chans: &[&[f64]],
     n0: u64,
     tc0: u64,
     per_frame: usize,
-    scale: f32,
+    scale: f64,
     out: &mut [i32],
     clips: &mut [u64],
 ) {
@@ -350,7 +358,7 @@ pub(crate) fn quantise_kernel(
             let a = xorshift(&mut rng) as f32;
             let b = xorshift(&mut rng) as f32;
             let dith = (a - b) * LSB;
-            let v = (chans[c][i] * scale + dith).round_ties_even();
+            let v = (chans[c][i] * scale + f64::from(dith)).round_ties_even();
             *d = if v > 8_388_607.0 {
                 clips[fi + c] += 1;
                 8_388_607
@@ -365,10 +373,10 @@ pub(crate) fn quantise_kernel(
     }
 }
 
-/// `8388607 x 10^(gain/20)` as `f32`, as pysacd computes it (the factor in `f64` rounded
-/// once to `f32`).
-pub(crate) fn scale(gain_db: f64) -> f32 {
-    8_388_607.0f32 * decimator::db_to_linear(gain_db) as f32
+/// `8388607 x 10^(gain/20)` in `f64`, with [`decimator::db_to_linear`]'s series (not libm,
+/// so that it is the same everywhere).
+pub(crate) fn scale(gain_db: f64) -> f64 {
+    8_388_607.0 * decimator::db_to_linear(gain_db)
 }
 
 impl Pysacd {
@@ -384,7 +392,7 @@ impl Pysacd {
         n0: i64,
         n: usize,
         tc0: u64,
-        scale: f32,
+        scale: f64,
         sc: &mut Scratch,
     ) {
         let ch = chans.len();
@@ -398,7 +406,7 @@ impl Pysacd {
         sc.clips.clear();
         sc.clips.resize(frames * ch, 0);
         sc.q.resize(n * ch, 0);
-        let per: [&[f32]; 6] =
+        let per: [&[f64]; 6] =
             std::array::from_fn(|c| if c < ch { &f[c * n..][..n] } else { &[][..] });
         self.isa.pysacd_quantise(
             &per[..ch],
@@ -540,7 +548,7 @@ const BLOCK_FRAMES: usize = 4;
 #[derive(Debug)]
 pub(crate) struct FrameState {
     eng: Pysacd,
-    scale: f32,
+    scale: f64,
     sc: Scratch,
     bytes: Vec<u8>,
 }
@@ -642,11 +650,11 @@ mod tests {
                             let p = Pysacd::new(rate, Cutoff::Standard).unwrap();
                             let n = 5 * p.per_frame();
                             let mut sc = Scratch::default();
-                            let f: Vec<Vec<f32>> = (0..ch)
+                            let f: Vec<Vec<f64>> = (0..ch)
                                 .map(|c| {
                                     let src: Vec<u8> =
                                         area.iter().skip(c).step_by(ch).copied().collect();
-                                    let mut f = vec![0f32; n];
+                                    let mut f = vec![0f64; n];
                                     p.render(&src, 0, Some(0), 0, &mut f, &mut sc);
                                     f
                                 })
@@ -657,7 +665,7 @@ mod tests {
                                     h.update(fc[i].to_bits().to_le_bytes());
                                 }
                             }
-                            let name = format!("f32_{kind}_{ch}ch_{}", rate.hz());
+                            let name = format!("f64_{kind}_{ch}ch_{}", rate.hz());
                             let got = format!("{:x}", h.finalize());
                             assert_eq!(got, test_inputs::reference(&name), "{name} {level:?}");
                         }
@@ -695,12 +703,14 @@ mod tests {
 
     #[test]
     fn scale_matches_pow() {
-        // The factor rounded to f32 equals that of the C library's pow on this machine, at
-        // every 0.01 dB step.
+        // The series is within 2^-45 (relative) of the C library's pow at every 0.01 dB
+        // step, -120 to +24 dB (the worst is about 102 ulp, at -120 dB); the golden hashes
+        // pin the series' own bits at 0, -3 and +6 dB.
+        assert_eq!(scale(0.0), 8_388_607.0);
         for i in -12_000..=2_400 {
             let db = f64::from(i) / 100.0;
-            let c = 8_388_607.0f32 * 10f64.powf(db / 20.0) as f32;
-            assert_eq!(scale(db).to_bits(), c.to_bits(), "{db} dB");
+            let c = 8_388_607.0 * 10f64.powf(db / 20.0);
+            assert!((scale(db) - c).abs() <= c / 35_184_372_088_832.0, "{db} dB");
         }
     }
 
@@ -728,17 +738,17 @@ mod tests {
                 (1000, 2000),
                 (3000, 528),
             ] {
-                let mut got = vec![0f32; n];
+                let mut got = vec![0f64; n];
                 p.render(&src, 0, Some(0), n0 as i64, &mut got, &mut sc);
-                let w: Vec<u32> = want[n0..n0 + n].iter().map(|v| v.to_bits()).collect();
-                let g: Vec<u32> = got.iter().map(|v| v.to_bits()).collect();
+                let w: Vec<u64> = want[n0..n0 + n].iter().map(|v| v.to_bits()).collect();
+                let g: Vec<u64> = got.iter().map(|v| v.to_bits()).collect();
                 assert_eq!(g, w, "{rate:?} {n0} {n}");
             }
         }
     }
 
     /// The C stream, transcribed directly: outputs after the delay.
-    fn stream(p: &Pysacd, src: &[u8]) -> Vec<f32> {
+    fn stream(p: &Pysacd, src: &[u8]) -> Vec<f64> {
         let byte = |i: i64| -> u8 {
             if i < 0 || i >= src.len() as i64 {
                 IDLE
@@ -747,19 +757,19 @@ mod tests {
             }
         };
         let total = src.len() + 4704;
-        let t1: Vec<f32> = (0..total as i64)
+        let t1: Vec<f64> = (0..total as i64)
             .map(|t| {
-                let mut acc = 0f32;
+                let mut acc = 0f64;
                 for j in 0..12 {
                     acc += p.lut[j][usize::from(byte(t + j as i64 - 11))];
                 }
                 acc
             })
             .collect();
-        let fir = |h: &[f32], x: &[f32]| -> Vec<f32> {
+        let fir = |h: &[f64], x: &[f64]| -> Vec<f64> {
             (0..x.len() / 2)
                 .map(|o| {
-                    let mut acc = 0f32;
+                    let mut acc = 0f64;
                     for (k, &hk) in h.iter().enumerate() {
                         let i = 2 * o as i64 + 1 + k as i64 - (h.len() as i64 - 1);
                         let v = if i < 0 { 0.0 } else { x[i as usize] };

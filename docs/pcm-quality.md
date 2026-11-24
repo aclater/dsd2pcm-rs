@@ -218,7 +218,7 @@ steep linear-phase low-pass has; it mirrors before the step.*
 | 40 kHz passband, 48 kHz stopband (default) | yes | Flat far past hearing; removes DSD64's noise from 48 kHz up, where it rises steeply. The Scarlet Book recommends a low-pass around 50 kHz for DSD64 playback (Annex D, as cited by Archimago, 2022). |
 | 30 kHz passband, 36 kHz stopband | yes | Less of DSD64's ultrasonic noise in the file, for amplifiers or tweeters that dislike it. |
 | wide: 80 kHz passband (176.4 and 352.8 kHz) | yes | Keeps everything a DSD64 stream holds to 80 kHz, for listeners who want the ultrasonic band. It follows the Philips blind tests cited in [sacdfs's filter decision](https://github.com/aclater/sacdfs/blob/main/docs/pcm-quality.md#the-filters), which found 80 to 100 kHz filters undetectable and a 50 kHz one detectable; 40 kHz stays the default. |
-| pysacd preset | yes | pysacd's own filter, for byte-identical output with pysacd. |
+| pysacd preset | yes | pysacd's own filter and dithered quantiser, computed in `f64`, for output that matches pysacd's response. |
 | minimum phase, apodizing, "slow" roll-off | no | They trade passband phase or treble response for less pre-ringing, which here is ultrasonic and not excited by music (see the questions at the end). |
 | dither | no | See [resolution](#resolution-noise-dynamic-range-rounding). |
 
@@ -338,8 +338,8 @@ the DSD64 versions of the 24/88.2 test signals.
 | dsd2pcm 352.8 kHz, 30 kHz | -117.8 | 107.0 | 0.00023 | -106.0 | 0.00059 | 0.00073 | -161.0 | -0.003, +0.002 |
 | dsd2pcm 352.8 kHz, 40 kHz | -117.8 | 107.0 | 0.00023 | -106.0 | 0.00059 | 0.00073 | -161.3 | -0.002, +0.003 |
 | dsd2pcm 352.8 kHz, wide | -115.2 | 106.9 | 0.00023 | -105.6 | 0.00059 | 0.00072 | -159.7 | -0.003, +0.001 |
-| pysacd preset 88.2 kHz | -116.8 | 107.1 | 0.00022 | -106.1 | 0.00056 | 0.00089 | -158.8 | -0.001, +0.002 |
-| pysacd preset 176.4 kHz | -116.8 | 107.0 | 0.00022 | -106.1 | 0.00057 | 0.00083 | -159.1 | -0.001, +0.002 |
+| pysacd preset 88.2 kHz | -116.8 | 107.1 | 0.00022 | -106.1 | 0.00056 | 0.00089 | -159.0 | -0.001, +0.002 |
+| pysacd preset 176.4 kHz | -116.8 | 107.0 | 0.00022 | -106.1 | 0.00058 | 0.00083 | -159.1 | -0.001, +0.002 |
 
 - **Every dsd2pcm row is within 0.4 dB of the source row**, except the wide filter's noise
   (explained under [bandwidth](#bandwidth-and-ultrasonic-noise)). The numbers describe the
@@ -399,7 +399,7 @@ bitstream, is -146.9 dB, a residual of -152.9 dBFS.
 | The source itself (bitstream) | 146.9 dB | -152.9 | -163.5 |
 | dsd2pcm, 30 or 40 kHz filter, any rate | 122.0 to 122.1 dB | -128.1 to -128.2 | -146 to -154 |
 | dsd2pcm, wide filter (176.4 or 352.8 kHz) | 116.1 dB | -122.1 | -139 to -143 |
-| pysacd preset, 88.2 / 176.4 kHz | 127.3 / 127.8 dB | -133.3 / -133.9 | -151 to -152 |
+| pysacd preset, 88.2 / 176.4 kHz | 127.9 / 128.1 dB | -134.0 / -134.1 | -152 to -154 |
 | The same taps in 64-bit floating point, no rounding, no word length (176.4 kHz: 30, 40, wide, pysacd) | 122.1, 122.1, 116.1, 128.3 dB | -128.2, -128.2, -122.1, -134.3 | -142 to -152 |
 
 (scarletbook-pcm 0.7.0 gives the same samples as dsd2pcm here too.)
@@ -596,9 +596,10 @@ at every rate and cutoff: 272 of 272 outputs had the same samples (equal SHA-256
 decoded samples). Every measurement on this page therefore applies to scarletbook-pcm 0.7.0, and to
 programs that use it, unchanged.
 
-**The pysacd preset (`--filter pysacd`).** pysacd's own filter, ported bit for bit: three
-Kaiser-windowed linear-phase FIR stages in 32-bit floating point and a TPDF-dithered
-24-bit quantiser, at 88.2 and 176.4 kHz. Measured the same way:
+**The pysacd preset (`--filter pysacd`).** pysacd's own filter, with its taps and response:
+three Kaiser-windowed linear-phase FIR stages and a TPDF-dithered 24-bit quantiser, at 88.2
+and 176.4 kHz. Since 0.2.0 it computes in 64-bit floating point, where pysacd computes in
+32-bit ([design](design.md#the-pysacd-preset)). Measured the same way:
 
 | | pysacd preset 88.2 kHz | pysacd preset 176.4 kHz | dsd2pcm default filter |
 |---|---:|---:|---:|
@@ -619,8 +620,36 @@ Kaiser-windowed linear-phase FIR stages in 32-bit floating point and a TPDF-dith
   into noise; at 176.4 kHz it passes DSD64's noise up to about 80 kHz (-54 dBFS above 20 kHz,
   16 dB more than the 40 kHz filter); and its output is offset from the DSD timeline by a
   fraction of a sample (constant, the same in both channels, inaudible).
-- **Neither difference is audible.** Use the preset when files must match pysacd's byte for
-  byte.
+- **Neither difference is audible.** Use the preset for pysacd's response. Its bytes are
+  this crate's own: 0.1.x matched pysacd's 32-bit reference build, and pysacd's released
+  builds differ by CPU.
+
+**Its arithmetic.** In 32-bit floating point, summed strictly in tap order (dsd2pcm 0.1.x),
+the filter loses SINAD at high levels. Measured with dsd-measure 0.1.1 (quick profile, 1 kHz
+at 0 dB SACD, three dither draws each, spread at most 0.05 dB):
+
+| | 88.2 kHz | 176.4 kHz |
+|---|---:|---:|
+| 0.1.x, 32-bit | 127.25 dB | 127.88 dB |
+| pysacd 0.5.x wheels (the same signals, through pysacd's own converter) | 127.81 dB | 128.07 dB |
+| 0.2.0, 64-bit | 127.97 dB | 128.13 dB |
+| precise filter, for scale | 141.91 dB | 143.79 dB (wide: 143.73 dB) |
+
+The noise floor does not move (-130.7 / -130.8 dBFS in that measurement): it comes from the
+Kaiser stopbands, not from the arithmetic. The 64-bit path costs CPU time. Real time per
+core, one thread, a 180 s synthetic track, whole conversion (best of three repeats of best
+of five; the machine was shared, so read these as rough):
+
+| Channels, rate, level | 0.1.x, 32-bit | 0.2.0, 64-bit | precise |
+|---|---:|---:|---:|
+| 2, 88.2 kHz, AVX2 | 273× | 209× | 208× |
+| 2, 88.2 kHz, generic | 193× | 108× | 143× |
+| 2, 176.4 kHz, AVX2 | 295× | 248× | 178× |
+| 2, 176.4 kHz, generic | 221× | 147× | 123× |
+| 6, 88.2 kHz, AVX2 | 88× | 69× | 68× |
+| 6, 88.2 kHz, generic | 65× | 36× | 48× |
+| 6, 176.4 kHz, AVX2 | 95× | 81× | 59× |
+| 6, 176.4 kHz, generic | 76× | 50× | 41× |
 
 **sacd_extract.** The sacd_extract build available to us (the commonly distributed
 command-line tool, run as a black box) has no PCM output: it writes DSF, DSDIFF or an ISO
@@ -803,6 +832,10 @@ venv/bin/python tools/quality/filters.py --tables crates/dsd2pcm/src/decimator/t
 venv/bin/python tools/quality/plot.py --filters out/filters.json --results out/results.json --curves out/curves.json --out docs/assets/quality
 venv/bin/python tools/quality/report.py --filters out/filters.json --results out/results.json
 ```
+
+The pysacd preset's rows were measured again for 0.2.0 (its `f64` arithmetic) with the
+same scripts and signals, the pysacd decoder only (`decode.py ... --decoders pysacd`), at
+commit 4504b6e; the 0.1.x build gave the old rows again.
 
 The [precise filter](#the-precise-filter)'s figures were made with the same tools, ffmpeg 9.0.2 (Fedora 45) and only the signals they
 use:
