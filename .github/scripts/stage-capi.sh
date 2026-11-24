@@ -85,7 +85,7 @@ includedir=\${prefix}/include
 
 Name: dsd2pcm
 Description: DSD to PCM conversion (C interface, ABI $abi)
-URL: https://github.com/aclater/dsd2pcm-rs
+URL: https://github.com/dsd-toolbox/dsd2pcm-rs
 Version: $version
 Libs: -L\${libdir} -ldsd2pcm
 Libs.private: $static_libs
@@ -97,7 +97,7 @@ fi
 {
     echo "# libdsd2pcm $version ($name)"
     echo
-    echo "The C library of dsd2pcm-rs (https://github.com/aclater/dsd2pcm-rs), ABI version $abi."
+    echo "The C library of dsd2pcm-rs (https://github.com/dsd-toolbox/dsd2pcm-rs), ABI version $abi."
     echo "The interface is documented in include/dsd2pcm.h and in docs/c-api.md in the repository."
     echo
     awk '/^## Binary releases/ {on = 1; next} on && /^## / {exit} on' docs/c-api.md
