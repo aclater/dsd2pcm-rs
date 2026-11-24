@@ -563,6 +563,25 @@ impl FrameState {
         })
     }
 
+    /// Sizes every buffer for the longest block of `ch` channels, so that no call of
+    /// [`convert`](Self::convert) allocates: a block's buffers depend on its length alone.
+    pub(crate) fn reserve(&mut self, ch: usize) {
+        let n = BLOCK_FRAMES * self.eng.per_frame();
+        let span = (self.eng.last_byte(n as i64 - 1) + 1 - self.eng.first_byte(0)) as usize;
+        let m1 = span - (S1_BYTES - 1);
+        let m2 = if self.eng.three { 2 * n + 159 } else { 0 };
+        let sc = &mut self.sc;
+        self.bytes.reserve_exact(span * ch);
+        sc.bytes.reserve_exact(span);
+        sc.t1.reserve_exact(m1);
+        sc.t2.reserve_exact(m2);
+        sc.xe.reserve_exact(m1.max(m2).div_ceil(2));
+        sc.xo.reserve_exact(m1.max(m2) / 2);
+        sc.f.reserve_exact(n * ch);
+        sc.q.reserve_exact(n * ch);
+        sc.clips.reserve_exact(BLOCK_FRAMES * ch);
+    }
+
     /// Bytes per channel of each neighbour frame that the output depends on.
     pub(crate) fn context_bytes(&self) -> usize {
         let before = -self.eng.first_byte(0);

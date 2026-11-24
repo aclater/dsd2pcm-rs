@@ -24,8 +24,8 @@
 //! - the live heap (bytes allocated and not freed, counted by a global allocator), less
 //!   what the kept converters grew by, may rise at most 64 KiB from the plateau's highest
 //!   value to the late window's: the leak measure;
-//! - the kept converters, whose buffers grow while they meet calls that need more, may grow
-//!   on at most 1 % of their calls in the late window, and by at most 4 MiB;
+//! - the kept converters, whose buffers are all allocated when they are made, grow on none
+//!   of their calls, in the whole run;
 //!
 //! and on Linux, from `/proc/self`:
 //! - the resident set size's (`VmRSS`) median in the late window is within 25 % or 64 MiB
@@ -508,10 +508,6 @@ const WARM_UP: usize = 2 * CYCLE;
 const MIN_JUDGED: usize = 1000;
 /// How far the live heap (less the kept converters' growth) may rise.
 const HEAP_SLACK: usize = 64 * 1024;
-/// How much the kept converters may grow in the second window, and on what share of their
-/// calls there (1 %).
-const KEPT_SLACK: isize = 4 << 20;
-const KEPT_GROWTH_SHARE: u64 = 100;
 
 /// The soak tests share the counters of one process: one at a time.
 static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -634,9 +630,8 @@ fn median(v: &[u64]) -> u64 {
 /// - the live heap less the kept converters' growth (the leak measure: a leak raises it
 ///   whatever the allocator does with freed memory) may rise at most `HEAP_SLACK` from the
 ///   plateau's highest value to the late window's;
-/// - the kept converters grow only while their buffers reach the sizes their calls need,
-///   which gets rarer as the run goes on: in the late window they may grow on at most 1 %
-///   of their calls and by at most `KEPT_SLACK` (a leak in a call grows on every call);
+/// - the kept converters grow on none of their calls in the whole run: `Converter::new`
+///   allocates every buffer (a leak in a call grows on every call);
 /// - the resident set's median in the late window may be at most 25 % or 64 MiB plus 2 MiB
 ///   per worker thread, whichever is larger, above its median in the plateau. Medians,
 ///   because the allocator holds on to freed memory per worker thread for a while: one
@@ -686,15 +681,15 @@ fn judge(name: &str, m: &Measured) -> Option<Verdicts> {
         if heap { "levels off" } else { "GREW" }
     );
 
-    let at = |v: &[u64], i: usize| if i == 0 { 0 } else { v[i - 1] };
-    let calls = at(&m.kept_calls, n) - at(&m.kept_calls, mid);
-    let growths = at(&m.kept_growths, n) - at(&m.kept_growths, mid);
-    let grew = m.kept_bytes[n - 1] - m.kept_bytes[mid - 1];
-    let kept = growths * KEPT_GROWTH_SHARE <= calls && grew <= KEPT_SLACK;
+    let calls = m.kept_calls[n - 1];
+    let growths = m.kept_growths[n - 1];
+    let late_growths = growths - m.kept_growths[mid - 1];
+    let grew = m.kept_bytes[n - 1];
+    let kept = growths == 0;
     println!(
-        "{name}: kept converters, late window: grew on {growths} of {calls} calls, by {grew} \
-         bytes; bound 1 % of the calls and {KEPT_SLACK} bytes: {}",
-        if kept { "levels off" } else { "GREW" }
+        "{name}: kept converters, whole run: grew on {growths} of {calls} calls ({late_growths} in the \
+         late window), by {grew} bytes; bound 0 calls: {}",
+        if kept { "never grew" } else { "GREW" }
     );
 
     let rss = m.rss.as_ref().map(|rss| {

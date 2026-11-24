@@ -36,10 +36,9 @@ rest of the run is cut in two windows, the plateau and the late one. It asserts:
 - the live heap (bytes allocated and not freed, counted by a global allocator), less what
   the kept converters grew by, rises at most 64 KiB from the plateau's highest value to
   the late window's: the leak measure, whatever the allocator does with freed memory;
-- the kept converters (one per valid setting, 72) grow on at most 1 % of their calls in
-  the late window, and by at most 4 MiB. Each one's buffers grow while it meets calls
-  that need more than it holds, which gets rarer as the run goes on; a leak in a call
-  grows on every call;
+- the kept converters (one per valid setting and gain) grow on none of their calls, in
+  the whole run: `Converter::new` allocates every buffer a converter uses, so a call that
+  succeeds allocates nothing; a leak in a call grows on every call;
 - on Linux, the median resident set size (`VmRSS`) of the late window is within 25 % or
   64 MiB plus 2 MiB per worker thread, whichever is larger, of the plateau's median. The
   resident set also holds what the allocator keeps of freed memory in the worker threads'

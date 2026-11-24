@@ -264,6 +264,21 @@ Each with what to change in a caller. The C interface stays ABI version 1, with 
   allocate (one reallocation per converter). The buffer the short runs keep is now sized
   for the long ones too. Output bytes unchanged; `tests/frames_alloc.rs` now checks every
   filter at every SIMD level.
+- `frames::Converter` and `dsd2pcm_frames`: calls after the first could still allocate,
+  against the documented promise. Buffers grew on demand, and a later call grew one for a
+  run longer than any before (any filter), a whole area after runs with neighbours (the
+  precise filter at 352.8 kHz: 19 to 22 KiB of input bytes), or a run after scratch
+  buffers had traded places with a channel's carry (the fast filter at 176.4 kHz, avx2fma
+  level: 66 KiB). The soak test's kept converters grew on 2 of 2354 calls in the late
+  window of a 1000-iteration run (+87,008 bytes). `Converter::new` (and
+  `dsd2pcm_frames_new`) now sizes every buffer for any run, and a plan builds the S1
+  tables it reads when it is made, so a call that succeeds allocates nothing, the first
+  one included: the kept converters grow on 0 of 6149 calls in a 1000-iteration run, and
+  the soak test now requires 0. A new converter holds 0.4 to 3.5 MiB (by rate, filter,
+  channels and SIMD level); before, one held 0.4 to 3.6 MiB after one 7-frame run. Output
+  bytes unchanged. `tests/frames_alloc.rs` checks every rate, cutoff, filter and channel count
+  with runs of every length, edge, layout and order from the first call
+  ([design](docs/design.md#frame-runs-threading-and-sharing)).
 
 ## 0.1.2 - 2026-11-23
 

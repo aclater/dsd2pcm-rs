@@ -389,6 +389,16 @@ impl Carry {
     }
 }
 
+/// The lengths a pass's buffers reach, in elements: `ab` of `Scratch::a` and `b`, `eo` of
+/// `even` and `odd`, `bytes` of `Scratch::bytes`, `lanes` of each lane buffer.
+#[derive(Clone, Copy, Debug, Default)]
+struct Lens {
+    ab: usize,
+    eo: usize,
+    bytes: usize,
+    lanes: usize,
+}
+
 /// Scratch buffers of one worker, reused across calls.
 #[derive(Debug, Default)]
 pub(crate) struct Scratch {
@@ -398,8 +408,8 @@ pub(crate) struct Scratch {
     even: Vec<f64>,
     odd: Vec<f64>,
     lanes: lanes::Bufs,
-    /// Whether the ordered buffers have been sized for every pass below the lane threshold.
-    ordered_sized: bool,
+    /// Whether the buffers have been sized for every pass of the plan ([`Plan::size`]).
+    sized: bool,
 }
 
 /// The stages of one rate and cutoff. Output `o` is centred on DSD byte `o k` (`k` = 4, 2
@@ -547,6 +557,12 @@ impl Plan {
             },
         };
         plan.win = plan.byte_range((0, 2), false);
+        // The plain tables, if the plan reads them, are built now rather than in its first
+        // pass, so that no pass allocates (only the level with paired tables, at their
+        // window sizes, never reads them).
+        if !matches!(plan.lanes, Some(Some(p)) if !p.needs_lut()) {
+            plan.lut.get();
+        }
         Ok(plan)
     }
 
@@ -718,22 +734,120 @@ impl Plan {
         self.pass_carry(src, src0, o0, n, sc, None)
     }
 
-    /// Sizes `c` for every pass that can use it, so that later passes allocate nothing.
+    /// The longest pass that runs ordered: every pass if the plan has no lanes.
+    fn ordered_max(&self) -> usize {
+        match self.lanes {
+            Some(_) => (self.lanes_min - 2).min(self.pass),
+            None => self.pass,
+        }
+    }
+
+    /// Whether the ordered passes take S1 at even and odd bytes as two streams (paired
+    /// tables and a first stage that decimates): the carry then holds two.
+    fn split(&self) -> bool {
+        matches!(self.lanes, Some(Some(_))) && matches!(self.ops.first(), Some(Op::Dec2(_)))
+    }
+
+    /// The lengths the buffers of a pass of `n` outputs reach, as `pass_ordered` and
+    /// `pass_lanes` resize them. Each length grows with `n` (a test checks it for every
+    /// `n`), so the longest pass of each kind bounds every pass.
+    fn lens(&self, n: usize) -> Lens {
+        let padn = |n: usize| n.div_ceil(PAD) * PAD;
+        let mut l = Lens::default();
+        let lanes = self.lanes.is_some() && n >= self.lanes_min;
+        if !lanes {
+            let levels = self.levels((0, n), true);
+            l.bytes = self.byte_range((0, n), true).1;
+            if !matches!(self.ops.first(), Some(Op::Dec2(_))) {
+                l.ab = padn(levels[0].1);
+            }
+            for (k, op) in self.ops.iter().enumerate() {
+                let n_out = levels[k + 1].1;
+                match op {
+                    Op::Fir1(_) => l.ab = l.ab.max(padn(n_out)),
+                    Op::Dec2(s) => {
+                        l.ab = l.ab.max(padn(n_out));
+                        l.eo = l.eo.max(if k == 0 && matches!(self.lanes, Some(Some(_))) {
+                            padn(levels[0].1) / 2
+                        } else {
+                            padn(n_out) + 2 * (s.even.len() - 1).max(s.odd.len())
+                        });
+                    }
+                    Op::Interp2(_) => {
+                        l.eo = l.eo.max(padn(n_out / 2));
+                        l.ab = l.ab.max(n_out);
+                    }
+                }
+            }
+            return l;
+        }
+        let q = n.div_ceil(lanes::W).div_ceil(PAD) * PAD;
+        let levels = self.levels((0, q), true);
+        let last = self.byte_range((((lanes::W - 1) * q).min(padn(n) - q) as i64, q), true);
+        l.bytes = (last.0 - self.byte_range((0, q), true).0) as usize + last.1;
+        l.ab = n;
+        l.lanes = padn(levels[0].1);
+        for (k, op) in self.ops.iter().enumerate() {
+            let n_out = levels[k + 1].1;
+            l.lanes = l.lanes.max(match op {
+                Op::Fir1(_) | Op::Dec2(_) => padn(n_out),
+                Op::Interp2(_) => 2 * padn(n_out / 2),
+            });
+        }
+        l
+    }
+
+    /// The longest of each buffer over every pass of the plan: `(ordered, lanes)`.
+    fn sizes(&self) -> (Lens, Lens) {
+        let ordered = self.lens(self.ordered_max());
+        let lanes = match self.lanes {
+            Some(_) if self.pass >= self.lanes_min => self.lens(self.pass),
+            _ => Lens::default(),
+        };
+        (ordered, lanes)
+    }
+
+    /// Sizes `sc` for every pass of the plan, ordered or in lanes, whatever its length, so
+    /// that no pass grows a buffer (the passes swap `a` and `b`, and `even` and `odd` with a
+    /// [`Carry`], so each pair gets the longer of the two).
+    pub(crate) fn size(&self, sc: &mut Scratch) {
+        if sc.sized {
+            return;
+        }
+        sc.sized = true;
+        let (o, l) = self.sizes();
+        let ab = o.ab.max(l.ab);
+        let eo = o.eo.max(l.eo);
+        for (v, n) in [
+            (&mut sc.a, ab),
+            (&mut sc.b, ab),
+            (&mut sc.even, eo),
+            (&mut sc.odd, eo),
+        ] {
+            v.reserve(n.saturating_sub(v.len()));
+        }
+        sc.bytes
+            .reserve(o.bytes.max(l.bytes).saturating_sub(sc.bytes.len()));
+        sc.lanes.reserve(l.lanes);
+    }
+
+    /// Sizes `c` for every pass that can use it, so that no pass grows it: its S1 values
+    /// trade places with the scratch buffers they came from (`a`, or `even` and `odd`),
+    /// which therefore get the same capacity.
     pub(crate) fn reserve(&self, c: &mut Carry) {
         if !matches!(self.lanes, Some(Some(_))) || c.reserved {
             return;
         }
         c.reserved = true;
-        let n = self.lanes_min - 2;
-        let (_, plen) = self.byte_range((0, n), true);
-        let s1 = self.levels((0, n), true)[0].1.div_ceil(PAD) * PAD;
-        c.bytes.reserve(plen);
-        // `keep` swaps `ev` with the scratch's `a`, which a pass in lanes then resizes to
-        // its output count (up to `pass`): `ev` must hold that too, or the first long pass
-        // after a short one with the carry grows `a` (seen with the precise filter at
-        // 176.4 kHz, avx2fma level).
-        c.ev.reserve(s1.max(self.pass));
-        c.od.reserve(s1);
+        let (o, l) = self.sizes();
+        c.bytes.reserve(o.bytes);
+        if self.split() {
+            let eo = o.eo.max(l.eo);
+            c.ev.reserve(eo);
+            c.od.reserve(eo);
+        } else {
+            c.ev.reserve(o.ab.max(l.ab));
+        }
     }
 
     /// [`pass_run`](Self::pass_run) with the channel's [`Carry`].
@@ -750,19 +864,9 @@ impl Plan {
             if let Some(c) = carry {
                 c.valid = false;
             }
-            if !sc.ordered_sized {
-                // Size the ordered buffers too, for every shorter pass, so that a caller
-                // that warmed up with a long pass allocates nothing later. S1's level is the
-                // longest of an ordered pass, so it bounds every buffer of one.
-                sc.ordered_sized = true;
-                let n = self.lanes_min - 2;
-                let longest = self.levels((0, n), true)[0].1.div_ceil(PAD) * PAD;
-                for v in [&mut sc.a, &mut sc.b, &mut sc.even, &mut sc.odd] {
-                    v.reserve(longest.saturating_sub(v.len()));
-                }
-                let plen = self.byte_range((0, n), true).1;
-                sc.bytes.reserve(plen.saturating_sub(sc.bytes.len()));
-            }
+            // Sized at the first pass in lanes, so that a caller that warmed up with a long
+            // pass allocates nothing later, whatever the pass.
+            self.size(sc);
             return self.pass_lanes(pair, src, src0, o0, n, sc);
         }
         self.pass_ordered(src, src0, o0, n, sc, carry);
@@ -1054,6 +1158,37 @@ mod tests {
     fn sym(op: &Op) -> &Sym {
         match op {
             Op::Fir1(s) | Op::Dec2(s) | Op::Interp2(s) => s,
+        }
+    }
+
+    /// `Plan::size` sizes the buffers for the longest pass of each kind: no shorter pass
+    /// needs more, at any length (every even one up to a pass), plan and level.
+    #[test]
+    fn longest_pass_bounds_every_buffer() {
+        for level in SimdLevel::available() {
+            for (rate, cutoff) in ALL {
+                for design in DESIGNS {
+                    let p = with_simd_level(level, || Plan::with_design(rate, cutoff, design))
+                        .unwrap()
+                        .unwrap();
+                    let (o, l) = p.sizes();
+                    for n in (2..=p.pass).step_by(2) {
+                        let x = p.lens(n);
+                        let m = if p.lanes.is_some() && n >= p.lanes_min {
+                            l
+                        } else {
+                            o
+                        };
+                        assert!(
+                            x.ab <= m.ab
+                                && x.eo <= m.eo
+                                && x.bytes <= m.bytes
+                                && x.lanes <= m.lanes,
+                            "{level:?} {rate:?} {cutoff:?} {design:?} n = {n}: {x:?} over {m:?}"
+                        );
+                    }
+                }
+            }
         }
     }
 

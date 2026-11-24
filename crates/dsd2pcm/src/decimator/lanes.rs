@@ -47,6 +47,15 @@ pub(super) struct Bufs {
     b: Vec<Lanes>,
 }
 
+impl Bufs {
+    /// Room for `n` vectors in each buffer.
+    pub(super) fn reserve(&mut self, n: usize) {
+        for v in [&mut self.a, &mut self.b] {
+            v.reserve(n.saturating_sub(v.len()));
+        }
+    }
+}
+
 /// One pass: what `Plan::pass_run` computes for each run.
 pub(super) struct Pass<'a> {
     pub lut: super::S1Src,
@@ -85,6 +94,15 @@ pub(super) struct S1Pair {
 }
 
 impl S1Pair {
+    /// Whether S1 in pairs falls back to the plain tables (`super::S1Src`): window sizes
+    /// other than 8, 12 and 16 bytes, as `run` and `s1_lanes` choose.
+    pub fn needs_lut(&self) -> bool {
+        let n = self.tables.len();
+        ![(8, 9), (12, 13), (16, 17)]
+            .iter()
+            .any(|&(b, joint)| self.bytes == b && n == pair_tables(joint))
+    }
+
     /// The tables for windows of `bytes` bytes whose sample `i` (0 .. 8 `bytes`, in time
     /// order: bit 7 of byte 0 first) has the tap `tap(i)`.
     pub fn new(bytes: usize, tap: impl Fn(usize) -> i32) -> S1Pair {
