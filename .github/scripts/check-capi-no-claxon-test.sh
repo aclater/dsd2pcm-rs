@@ -25,12 +25,30 @@ obj() {
     # shellcheck disable=SC2086 # CC may hold flags (gcc -m32)
     $cc -c -o "$work/$1.o" "$work/$1.c"
 }
-# lib NAME MEMBER...: libNAME.a from the members, in that order
+# lib NAME MEMBER...: libNAME.a from the members, in that order, with ar; it must hold them
+# all (Apple's ar leaves out a file that is not an object, without a word)
 lib() {
     local name=$1
     shift
     rm -f "$work/lib$name.a"
     (cd "$work" && ar rc "lib$name.a" "$@")
+    [[ "$(ar t "$work/lib$name.a" | grep -v '^__\.SYMDEF' | tr '\n' ' ')" == "$* " ]] \
+        || { echo "::error::ar did not put $* in lib$name.a"; exit 1; }
+}
+# rawlib NAME MEMBER...: libNAME.a written here byte for byte (the common ar format, names of
+# at most 15 characters), so that it can hold a member that is not an object
+rawlib() {
+    local name=$1 m size
+    shift
+    {
+        printf '!<arch>\n'
+        for m in "$@"; do
+            size=$(wc -c < "$work/$m" | tr -d ' ')
+            printf '%-16s%-12s%-6s%-6s%-8s%-10s`\n' "$m" 0 0 0 644 "$size"
+            cat "$work/$m"
+            if [[ $((size % 2)) -eq 1 ]]; then printf '\n'; fi
+        done
+    } > "$work/lib$name.a"
 }
 # expect STATUS NAME REGEX LIBRARY [VAR=VALUE...]: the check exits STATUS, its output matches REGEX
 expect() {
@@ -61,7 +79,8 @@ $cc -c -o "$work/few.o" "$work/few.c"
 lib clean a.o empty.o b.o
 lib planted a.o empty.o planted.o
 lib member a.o claxon.o
-lib junk a.o junk.o b.o
+rawlib junk a.o junk.o b.o
+rawlib raw a.o empty.o b.o
 lib few few.o
 
 # An nm that drops every line of member b.o from the archive's listing, without a word.
@@ -88,6 +107,7 @@ expect 1 "a planted claxon symbol is found" "claxon symbols" "$work/libplanted.a
 expect 1 "a member named after claxon is found" "claxon symbols" "$work/libmember.a"
 # GNU nm reports the member it cannot read and exits 1; LLVM's nm (23.1 on Linux) skips it without
 # a word, which the check finds as a member missing from the listing.
+expect 0 "a hand-written archive of objects passes (the format rawlib writes is read)" "none from claxon" "$work/libraw.a"
 expect 2 "a member nm cannot read fails the check" "cannot read|not in nm's listing" "$work/libjunk.a"
 expect 2 "a library with few symbols (stripped) fails the check" "stripped\\?" "$work/libfew.a"
 expect 2 "a missing library fails the check" "no such file" "$work/libnone.a"
