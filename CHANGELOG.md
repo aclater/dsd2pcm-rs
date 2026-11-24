@@ -214,6 +214,11 @@ Each with what to change in a caller. The C interface stays ABI version 1, with 
   size (no `no_clobber`) passed as a heap block of exactly that size and as one followed
   by a set `no_clobber` that must not be read, the current size, larger ones with zero and
   non-zero extra bytes, and the same for the other structs.
+- Windows: `dsd2pcm.exe` double-clicked in Explorer (no arguments, and alone in a console
+  window of its own) prints how to run it from PowerShell or Terminal and waits for Enter
+  instead of closing at once; it then exits with 2, as for missing arguments. Started from a
+  shell, with arguments, without a console or in a console without a window, it behaves as
+  before.
 
 ### Fixed
 
