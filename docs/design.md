@@ -380,11 +380,12 @@ then restarts at the first frame; a stream without frames is an error. If that p
 and the file ends in an ID3v1 tag (`TAG` and 125 bytes), the frames are counted again
 without those 128 bytes. A stream that ends
 before its declared length is an error (`Truncated`, after the frames that are there, as the
-reference decoder reports it). A stream with more frames than STREAMINFO declares is an
-error too (`Malformed`), raised by the first `read_frames` call after the declared frames:
-the reference decoder decodes them, so dropping them would lose audio without a word. Bytes
-after the last frame that do not decode as a frame (an ID3v1 tag, padding) are not audio and
-are ignored. Frame CRCs are checked
+reference decoder reports it). A stream with more frames than STREAMINFO declares is read
+to its end, as the reference decoder and ffmpeg do: `read_frames` goes on past the declared
+total, `FlacReader::declared_frames` keeps STREAMINFO's count, and once the stream has ended
+`info().frames` is the count delivered. No API of the crate sizes its output from the
+declared count of a PCM input, so none needs an error instead. Bytes after the last frame
+that do not decode as a frame (an ID3v1 tag, padding) are not audio and end the stream. Frame CRCs are checked
 (claxon skips the check only in `cfg(fuzzing)` builds).
 
 ## Progress and cancel
@@ -535,7 +536,7 @@ missing audio. Each rule has a test with a crafted file (`tests/containers.rs`,
 | DSDIFF `DSD ` chunk not a multiple of the channel count | The partial last turn (under one byte per channel) is not read | Every channel keeps the same length; the audio before it is intact |
 | DSF tag over 16 MiB | Not loaded; `DsfReader::skipped_metadata_len` gives its size | Bounded memory for any file; the audio still reads |
 | FLAC shorter than STREAMINFO declares | `Truncated` after the frames present | As the reference decoder |
-| FLAC longer than STREAMINFO declares | `Malformed` after the declared frames | The reference decoder decodes them; dropping them would lose audio unnoticed |
+| FLAC longer than STREAMINFO declares | Read to the end; `FlacReader::declared_frames` keeps the declared count, `info().frames` becomes the count delivered | As the reference decoder and ffmpeg; dropping the frames would lose audio unnoticed |
 
 ## Output files
 

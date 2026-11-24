@@ -84,7 +84,9 @@ Each with what to change in a caller. The C interface is unchanged (ABI 1, addit
   output bytes are the same for every count (tested from 1 to 7, all cores and above the
   cap, with every filter).
 - `WavReader::declared_frames`: the frames a WAV file's `data` size declares, which is more
-  than `info().frames` when the file is cut short. `DsfReader::skipped_metadata_len`: the
+  than `info().frames` when the file is cut short. `FlacReader::declared_frames`: the
+  frames STREAMINFO declares, which is less than `info().frames` at the end of a stream that
+  holds more. `DsfReader::skipped_metadata_len`: the
   size of a DSF tag over `MAX_METADATA` (16 MiB) that was not loaded; before, such a tag
   was dropped without a trace ([design](docs/design.md#robustness)).
 - C interface: `tests/struct_size.c` checks `struct_size` versioning from C, also under
@@ -129,11 +131,12 @@ Each with what to change in a caller. The C interface is unchanged (ABI 1, addit
   read like PCM's) is `Unsupported`, and more valid bits than the container is
   `Malformed`. Valid bits of 0 or below the container (20 in 24, as `flac -d` writes)
   read as before.
-- FLAC input: a stream with more frames than STREAMINFO declares is an error
-  (`Malformed`) after the declared frames, instead of losing the rest without a word; the
-  reference decoder decodes them. A stream with fewer stays an error (`Truncated`), as with
-  the reference decoder. Bytes after the last frame that are not a frame (an ID3v1 tag,
-  padding) are still ignored.
+- FLAC input: a stream with more frames than STREAMINFO declares is read to its end, as
+  the reference decoder and ffmpeg do; before, the frames past the declared total were
+  dropped without a word. The new `FlacReader::declared_frames` keeps STREAMINFO's count,
+  and `info().frames` is the count delivered once the stream has ended. A stream with
+  fewer frames stays an error (`Truncated`), as with the reference decoder. Bytes after the
+  last frame that are not a frame (an ID3v1 tag, padding) are still not audio.
 - Readers: the rules for files that bend their format (WAV cut short, DSDIFF `DSD ` chunk
   not a multiple of the channel count, DSF tag over 16 MiB) are documented with a test
   each ([design](docs/design.md#robustness)); their behaviour is unchanged.

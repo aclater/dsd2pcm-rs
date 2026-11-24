@@ -73,6 +73,11 @@ impl<R: Seek> Seek for Honest<R> {
 type Inner<R> = claxon::FlacReader<Honest<Chain<Cursor<Vec<u8>>, Take<Honest<R>>>>>;
 
 /// FLAC reader.
+///
+/// Length: STREAMINFO's total, or the frames counted at open when it gives none. A stream
+/// that ends before it is an error ([`crate::FormatErrorKind::Truncated`]) after the frames
+/// present. A stream that holds more frames than declared is read to its end, as the
+/// reference decoder does; [`FlacReader::declared_frames`] keeps the declared count.
 pub struct FlacReader<R: Read + Seek> {
     flac: Inner<R>,
     info: PcmInfo,
@@ -84,8 +89,12 @@ pub struct FlacReader<R: Read + Seek> {
     pend_len: usize,
     pend_pos: usize,
     remaining: u64,
-    /// Whether the stream was checked, after its declared frames, for more frames.
-    end_checked: bool,
+    /// STREAMINFO's total (or the frames counted, when it gives none).
+    declared: u64,
+    /// Frames returned so far.
+    delivered: u64,
+    /// Whether the stream ended after the declared frames.
+    ended: bool,
 }
 
 impl<R: Read + Seek> std::fmt::Debug for FlacReader<R> {
@@ -440,8 +449,18 @@ impl<R: Read + Seek> FlacReader<R> {
             pend_len: 0,
             pend_pos: 0,
             remaining: frames,
-            end_checked: false,
+            declared: frames,
+            delivered: 0,
+            ended: false,
         })
+    }
+
+    /// The frames STREAMINFO declares (or, when it gives no total, the frames counted at
+    /// open). A stream can hold more: [`PcmRead::read_frames`] delivers them too, as the
+    /// reference decoder does, and once the stream has ended [`PcmInfo::frames`] is the
+    /// count delivered, so a mismatch shows as `info().frames > declared_frames()`.
+    pub fn declared_frames(&self) -> u64 {
+        self.declared
     }
 
     /// Bits per sample.
@@ -473,52 +492,47 @@ impl<R: Read + Seek> PcmRead for FlacReader<R> {
                 "output channel count mismatch",
             ));
         }
-        if self.remaining == 0 && !self.end_checked {
-            self.end_checked = true;
-            // STREAMINFO's total is the length; audio past it would be dropped without a
-            // word, so it is an error (the reference decoder decodes it). What follows the
-            // last frame and does not decode (an ID3v1 tag, padding) is not audio.
-            let more = self.pend_pos < self.pend_len || {
-                // The spent block's buffer, so that one block is held at a time.
-                let buf = std::mem::take(&mut self.pend);
-                self.pend_len = 0;
-                self.pend_pos = 0;
-                matches!(
-                    next_block(&mut self.flac, self.info.channels, self.bits, buf),
-                    Ok(Some(_))
-                )
-            };
-            if more {
-                return format_err(
-                    FormatErrorKind::Malformed,
-                    format!(
-                        "FLAC stream has more frames than the {} its STREAMINFO declares",
-                        self.info.frames
-                    ),
-                );
-            }
-        }
-        let want = (max_frames.clamp(1, MAX_CHUNK) as u64).min(self.remaining) as usize;
+        // The declared frames first; then, as the reference decoder does, whatever frames the
+        // stream holds past STREAMINFO's total, until it ends or the bytes stop decoding
+        // (an ID3v1 tag, padding: not audio).
+        let max = max_frames.clamp(1, MAX_CHUNK);
+        let want = if self.remaining > 0 {
+            (max as u64).min(self.remaining) as usize
+        } else if self.ended {
+            0
+        } else {
+            max
+        };
         let scale = 1.0 / f64::from(1u32 << (self.bits - 1));
         let mut done = 0;
         while done < want {
             if self.pend_pos == self.pend_len {
                 let buf = std::mem::take(&mut self.pend);
-                match next_block(&mut self.flac, self.info.channels, self.bits, buf)? {
+                let block = next_block(&mut self.flac, self.info.channels, self.bits, buf);
+                let block = if self.remaining > 0 {
+                    block?
+                } else {
+                    block.unwrap_or(None)
+                };
+                match block {
                     Some((b, len)) => {
                         self.pend = b;
                         self.pend_len = len;
                         self.pend_pos = 0;
                     }
-                    None => {
+                    None if self.remaining > 0 => {
                         return format_err(
                             FormatErrorKind::Truncated,
                             format!(
                                 "FLAC stream ended after {} of {} frames",
-                                self.info.frames - self.remaining + done as u64,
-                                self.info.frames
+                                self.declared - self.remaining + done as u64,
+                                self.declared
                             ),
                         )
+                    }
+                    None => {
+                        self.ended = true;
+                        break;
                     }
                 }
                 continue;
@@ -535,7 +549,12 @@ impl<R: Read + Seek> PcmRead for FlacReader<R> {
             self.pend_pos += n;
             done += n;
         }
-        self.remaining -= done as u64;
+        self.remaining = self.remaining.saturating_sub(done as u64);
+        self.delivered += done as u64;
+        if self.ended {
+            // The stream's real length, past STREAMINFO's total.
+            self.info.frames = self.delivered;
+        }
         Ok(done)
     }
 

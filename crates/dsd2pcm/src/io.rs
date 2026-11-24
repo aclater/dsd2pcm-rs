@@ -43,7 +43,9 @@ pub struct PcmInfo {
     pub channels: u16,
     /// Sample rate in Hz.
     pub sample_rate: u32,
-    /// Frames (samples per channel).
+    /// Frames (samples per channel), as the file declares them. A FLAC stream that holds
+    /// more delivers them too, and the reader then reports the count delivered here once
+    /// the stream has ended (see `FlacReader::declared_frames`).
     pub frames: u64,
 }
 

@@ -6,7 +6,7 @@
 use dsd2pcm::flac::FlacReader;
 use dsd2pcm::io::PcmRead;
 use dsd2pcm::wav::{WavFormat, WavReader, WavWriter};
-use dsd2pcm::{open_input, Error, FormatErrorKind, Input};
+use dsd2pcm::{open_input, Error, Input};
 use std::io::Cursor;
 
 /// The sample formula of `tests/data/flac/gen.py`.
@@ -180,36 +180,32 @@ fn short_stream_is_an_error() {
         matches!(e, Error::Format(ref m) if m.message().contains("ended after 4100 of 5000")),
         "{e}"
     );
-    // Declared shorter than the stream, inside a block (2000) or at a block boundary
-    // (2304 = 2 x 1152): the declared frames are delivered, then the audio past them is an
-    // error rather than dropped (the reference decoder decodes it).
+    // Declared shorter than the stream, inside a block (2000), at a block boundary
+    // (2304 = 2 x 1152) or at one frame: every frame of the stream is delivered, as the
+    // reference decoder does; `declared_frames` keeps STREAMINFO's count and
+    // `info().frames` is the count delivered once the stream has ended.
     for total in [2000u64, 2304, 1] {
         let mut g = f.clone();
         set_total(&mut g, total);
         let mut r = FlacReader::new(Cursor::new(g)).unwrap();
-        assert_eq!(r.info().frames, total);
+        assert_eq!((r.info().frames, r.declared_frames()), (total, total));
+        let got = read_all(&mut r, 999).unwrap();
+        assert_eq!(got, expected(16, 2, 4100), "{total}");
+        assert_eq!((r.info().frames, r.declared_frames()), (4100, total));
         let mut out = vec![Vec::new(), Vec::new()];
-        let mut e = None;
-        loop {
-            match r.read_frames(999, &mut out) {
-                Ok(0) => break,
-                Ok(_) => {}
-                Err(x) => {
-                    e = Some(x);
-                    break;
-                }
-            }
-        }
-        assert_eq!(out[0], expected(16, 2, total)[0], "{total}");
-        let e = e.expect("an error after the declared frames");
-        assert!(
-            matches!(&e, Error::Format(m) if m.kind() == FormatErrorKind::Malformed
-                && m.message().contains(&format!("more frames than the {total}"))),
-            "{e}"
-        );
-        // Once: the reader then ends.
         assert_eq!(r.read_frames(999, &mut out).unwrap(), 0);
     }
+    // ... and the same with a trailing ID3v1 tag, which is not audio.
+    let mut g = f.clone();
+    set_total(&mut g, 2000);
+    g.extend_from_slice(b"TAG");
+    g.resize(g.len() + 125, b' ');
+    let mut r = FlacReader::new(Cursor::new(g)).unwrap();
+    assert_eq!(read_all(&mut r, 3000).unwrap(), expected(16, 2, 4100));
+    // A whole file declares what it holds.
+    let mut r = FlacReader::new(Cursor::new(f.clone())).unwrap();
+    read_all(&mut r, 3000).unwrap();
+    assert_eq!((r.info().frames, r.declared_frames()), (4100, 4100));
     // Truncated inside a frame.
     let mut r = FlacReader::new(Cursor::new(f[..f.len() - 100].to_vec())).unwrap();
     assert!(matches!(read_all(&mut r, 1 << 20), Err(Error::Format(_))));
