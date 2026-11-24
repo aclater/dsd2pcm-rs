@@ -1,7 +1,8 @@
 # The docs audit: the docs lint, the link check with external URLs and the docs facts check,
 # then the checklist of every page that names a version, an option or a platform, to compare
 # with the release (docs/release.md, "After the release: run the docs audit"). By hand after
-# each release, and monthly. It also runs the marked command blocks against the new release.
+# each release, and monthly. It also runs the marked command blocks against the new release,
+# and regenerates the facts regions onto the branch docs/facts-update.
 # It opens nothing: a failing run is the signal, and the dated result is kept as an artifact.
 # The shared reusable workflows of dsd-toolbox/dsd-toolbox, pinned to one commit (.docs.toml).
 name: docs-audit
@@ -16,11 +17,22 @@ permissions:
 
 jobs:
   audit:
-    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-audit.yml@b50a7cca297022561959ba9a2532c0673d532ada
+    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-audit.yml@33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
     with:
-      tools_ref: b50a7cca297022561959ba9a2532c0673d532ada
+      tools_ref: 33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
 
   commands:
-    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-run.yml@b50a7cca297022561959ba9a2532c0673d532ada
+    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-run.yml@33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
     with:
-      tools-ref: b50a7cca297022561959ba9a2532c0673d532ada
+      tools-ref: 33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
+      fail_unmarked: true
+      timeout-minutes: 60
+
+  # The facts regions regenerated for the new release, pushed to the branch docs/facts-update;
+  # a person or an agent opens the pull request. The one job with write access.
+  facts-update:
+    permissions:
+      contents: write  # pushes the branch docs/facts-update; nothing else
+    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-facts-generate.yml@33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
+    with:
+      tools-ref: 33e1b0308e4bb9890701d5e3bb857c9ce9fe110f

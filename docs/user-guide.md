@@ -28,7 +28,7 @@ what to do when a conversion fails. Every option is listed in [options.md](optio
 176.4 kHz with the 40 kHz filter, on all cores. With the tool on the `PATH` (`cargo install
 dsd2pcm-cli`, or the release archive of the [Quick start](../README.md#quick-start)):
 
-<!-- docs-run: skip="needs dsd2pcm on the PATH and a DSF file of the reader; the README Quick start runs the same conversion" -->
+<!-- docs-run: image=fedora-net setup="printf 'DSD \x1c\x00\x00\x00\x00\x00\x00\x00\x5c\x20\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00fmt \x34\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x02\x00\x00\x00\x00\x11\x2b\x00\x01\x00\x00\x00\x00\x80\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00data\x0c\x20\x00\x00\x00\x00\x00\x00' > '01 - Track.dsf' && head -c 8192 /dev/zero | tr '\000' i >> '01 - Track.dsf' && curl -fsSLO https://github.com/dsd-toolbox/dsd2pcm-rs/releases/download/v0.1.2/dsd2pcm-0.1.2-x86_64-linux.tar.gz && tar xzf dsd2pcm-0.1.2-x86_64-linux.tar.gz && mkdir -p .local/bin && cp dsd2pcm-0.1.2-x86_64-linux/dsd2pcm .local/bin/" expect="Hz -> 176400 Hz, .*clipped samples: 0" -->
 ```sh
 dsd2pcm "01 - Track.dsf" "01 - Track.wav"
 ```
@@ -53,7 +53,7 @@ linear-phase filters (`--cutoff`):
 
 For example, 88.2 kHz with the 30 kHz filter, 3 dB quieter:
 
-<!-- docs-run: skip="needs dsd2pcm on the PATH and a DSF file of the reader; the README Quick start runs the same conversion" -->
+<!-- docs-run: image=fedora-net expect="Hz -> 88200 Hz, .*clipped samples: 0" -->
 ```sh
 dsd2pcm "01 - Track.dsf" "01 - Track.wav" --rate 88200 --cutoff 30 --gain -3
 ```

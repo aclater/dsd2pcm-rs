@@ -10,7 +10,9 @@
 #     the pull request says "Docs: none needed — <reason>".
 #   - facts: the marked facts regions (versions, install lines) equal their sources. Read-only.
 #   - commands (weekly and by hand): the marked command blocks of README.md and docs/ run in a
-#     fresh container against the published release; the rest are skipped with a reason.
+#     fresh container, against the published release or (checkout=1) a copy of this commit; the
+#     rest are skipped with a reason, and an unmarked block fails.
+#   - facts-update (weekly and by hand): regenerates the facts regions onto docs/facts-update.
 # - external links: lychee (pinned binary, SHA-256 checked) over README.md, CHANGELOG.md,
 #   SECURITY.md, PROVENANCE.md, AGENTS.md and docs/, external URLs with retries
 #   (.github/lychee.toml), on every run. Kept next to the shared links check because it also
@@ -45,34 +47,49 @@ env:
 jobs:
   # The shared docs tools, pinned to one commit of dsd-toolbox/dsd-toolbox (workflow and tools).
   lint:
-    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-lint.yml@b50a7cca297022561959ba9a2532c0673d532ada
+    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-lint.yml@33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
     with:
-      tools_ref: b50a7cca297022561959ba9a2532c0673d532ada
+      tools_ref: 33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
 
   links:
-    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-links.yml@b50a7cca297022561959ba9a2532c0673d532ada
+    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-links.yml@33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
     with:
-      tools_ref: b50a7cca297022561959ba9a2532c0673d532ada
+      tools_ref: 33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
       external: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
 
   touched:
     if: github.event_name == 'pull_request'
-    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-touched.yml@b50a7cca297022561959ba9a2532c0673d532ada
+    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-touched.yml@33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
     with:
-      tools_ref: b50a7cca297022561959ba9a2532c0673d532ada
+      tools_ref: 33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
 
   facts:
-    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-facts.yml@b50a7cca297022561959ba9a2532c0673d532ada
+    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-facts.yml@33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
     with:
-      tools-ref: b50a7cca297022561959ba9a2532c0673d532ada
+      tools-ref: 33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
 
-  # Against the published release, so not on pull requests: between a version bump and its tag
-  # the README names a release that does not exist yet (the quick start job handles that window).
+  # The README and user guide blocks use the published release, so not on pull requests: between
+  # a version bump and its tag the README names a release that does not exist yet (the quick
+  # start job handles that window). Checkout-mode blocks (checkout=1) build and test a copy of
+  # this commit. Every command block is marked to run or skipped with a reason (fail_unmarked).
   commands:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-run.yml@b50a7cca297022561959ba9a2532c0673d532ada
+    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-run.yml@33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
     with:
-      tools-ref: b50a7cca297022561959ba9a2532c0673d532ada
+      tools-ref: 33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
+      fail_unmarked: true
+      timeout-minutes: 60
+
+  # Regenerates the facts regions and pushes them to the branch docs/facts-update (weekly and by
+  # hand; docs-audit.yml runs it after a release). It opens no pull request: a person or an
+  # agent does. The one job with write access, to push that branch.
+  facts-update:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write  # pushes the branch docs/facts-update; nothing else
+    uses: dsd-toolbox/dsd-toolbox/.github/workflows/docs-facts-generate.yml@33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
+    with:
+      tools-ref: 33e1b0308e4bb9890701d5e3bb857c9ce9fe110f
 
   external-links:
     name: external links

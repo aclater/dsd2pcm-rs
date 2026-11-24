@@ -162,8 +162,10 @@ Each with what to change in a caller. The C interface stays ABI version 1, with 
   ([testing](docs/testing.md#private-names)).
 - Docs: the shared DSD Toolbox docs checks in `docs.yml` (page and README shape, links in
   every Markdown file, the facts regions, a docs change with every code change on pull
-  requests, and weekly the README's Quick start against the published release), and a
-  `docs-audit` workflow to run after each release
+  requests, and weekly the documented commands: the Quick start and user guide against the
+  published release, the build, test and fuzzing commands in a copy of the commit, and a
+  refresh of the facts regions onto the branch `docs/facts-update`), and a `docs-audit`
+  workflow to run after each release
   ([releasing](docs/release.md#after-the-release-run-the-docs-audit)). lychee now checks the
   external links only; the shared check covers relative links and anchors.
 - Tests: golden SHA-256 hashes of whole output files (header and samples) from
