@@ -183,7 +183,10 @@ soak)
 miri)
     rc=0
     export RUSTUP_TOOLCHAIN=$nightly CARGO_TARGET_DIR=target/rtp-miri
-    capped cargo miri test --locked -p dsd2pcm-capi || rc=1
+    # The generic kernels, as sanitizers.yml and miri-core.sh run them (Miri runs no SIMD):
+    # without them the C interface's tests run the SSE2 kernels under Miri, not the generic ones.
+    capped env DSD2PCM_SIMD=generic MIRIFLAGS=-Zmiri-env-forward=DSD2PCM_SIMD \
+        cargo miri test --locked -p dsd2pcm-capi || rc=1
     capped .github/scripts/miri-core.sh || rc=1
     verdict $rc
     ;;
