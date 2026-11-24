@@ -145,8 +145,9 @@ jobs:
           prefix-key: v0-rust-ubi10
       - name: Tests at every SIMD level
         run: .github/scripts/test-simd-levels.sh
+      # The soak test, then its leak self-test (soak_catches_a_leak).
       - name: Soak test, short (memory levels off, worker threads end; docs/testing.md)
-        run: cargo test --locked -p dsd2pcm --test soak -- --ignored --nocapture
+        run: cargo test --locked -p dsd2pcm --test soak -- --ignored --nocapture --test-threads=1
         env:
           DSD2PCM_SOAK_ITERATIONS: "1000"
       # The release profile a consumer may build us with (codegen units 16, no LTO, overflow

@@ -80,6 +80,17 @@ version.
 
 ### Fixed
 
+- Tests: the soak test failed every run of 1000 iterations at 0.2.0's code without a leak
+  (the live heap rose 1.1 MiB from its 20 to 50 % window to the second half, all of it the
+  kept converters' buffers growing). It now judges memory after a warm-up of two rounds of
+  its cycle and only in runs of 1000 iterations or more (shorter runs report); the live
+  heap leaves out the kept converters' growth, which has its own check, and the resident
+  set is judged by its medians with a bound that grows with the worker count. A self-test,
+  `soak_catches_a_leak`, checks that leaks put in on purpose fail the checks
+  ([testing](docs/testing.md#soak-test)).
+- CI: Miri runs on every pull request in two jobs, `miri (capi)` and `miri (core)`, of
+  under 20 minutes each; the core job hit its 150-minute limit. Three tests that take over
+  50 minutes each under Miri run natively only ([testing](docs/testing.md#miri)).
 - Command line: a file name or option value that is not valid UTF-8 (possible on Linux and
   other Unix systems) no longer ends the tool with a panic. File names are passed to the
   system as they are; an option value that is not UTF-8 is a usage error (exit status 2).

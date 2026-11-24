@@ -1,15 +1,15 @@
 //! Soak test for long-lived processes: thousands of conversions in one process, and the
-//! resident memory levels off and every worker thread ends.
+//! memory levels off and every worker thread ends.
 //!
 //! Ignored by default. Run it with
 //!
 //! ```text
-//! DSD2PCM_SOAK_ITERATIONS=2000 cargo test --release -p dsd2pcm --test soak -- --ignored --nocapture
+//! DSD2PCM_SOAK_ITERATIONS=1000 cargo test --release -p dsd2pcm --test soak -- --ignored --nocapture
 //! ```
 //!
 //! `DSD2PCM_SOAK_ITERATIONS` (default 300) sets the iterations; with `DSD2PCM_SOAK_SECONDS`
-//! the run stops after that many seconds instead (the iterations, if set, are a ceiling). Each iteration converts one
-//! pseudo-random area with one setting of the cycle below (every rate, cutoff, filter and
+//! the run stops after that many seconds instead (the iterations, if set, are a ceiling).
+//! Each iteration converts one pseudo-random area with one setting of the cycle below (every rate, cutoff, filter and
 //! channel count, invalid combinations included as error paths): with a reused and a fresh
 //! `frames::Converter` (contiguous and per-frame buffers, a whole run and frame by frame),
 //! as an in-memory DSF or DFF file through `dsd64_to_pcm` (threaded and on one thread, now
@@ -17,18 +17,26 @@
 //! the readers truncated files, and every tenth iteration converts a file on disk with
 //! `convert_file_with`. The outputs of the paths are compared with each other.
 //!
-//! It checks, after the warm-up (the first 20 % of iterations):
-//! - the live heap (bytes allocated and not freed, counted by a global allocator) after
-//!   each iteration of the second half is at most 64 KiB above the highest value of 20 to
-//!   50 % of the run (`DSD2PCM_SOAK_HEAP_REPORT_ONLY` only reports it, for short sanitizer
-//!   runs; the check needs 1000 iterations or more);
+//! It judges the memory of runs of 1000 iterations or more (`MIN_JUDGED`; a shorter run,
+//! the default of 300 included, prints the figures without judging them). After a warm-up
+//! of two rounds of the cycle (216 iterations) the run is cut in two windows, the plateau
+//! and the late one, and:
+//! - the live heap (bytes allocated and not freed, counted by a global allocator), less
+//!   what the kept converters grew by, may rise at most 64 KiB from the plateau's highest
+//!   value to the late window's: the leak measure;
+//! - the kept converters, whose buffers grow while they meet calls that need more, may grow
+//!   on at most 1 % of their calls in the late window, and by at most 4 MiB;
 //!
 //! and on Linux, from `/proc/self`:
-//! - the resident set size (`VmRSS`) of the second half stays within 10 % or 32 MiB
-//!   (whichever is larger) of the highest value of 20 to 50 %
-//!   (`DSD2PCM_SOAK_RSS_REPORT_ONLY` only reports it, for sanitizer builds);
+//! - the resident set size's (`VmRSS`) median in the late window is within 25 % or 64 MiB
+//!   plus 2 MiB per worker thread (whichever is larger) of its median in the plateau;
 //! - the thread count is back at its value from before the run after every threaded
 //!   conversion.
+//!
+//! `DSD2PCM_SOAK_HEAP_REPORT_ONLY` (the live heap and the kept converters) and
+//! `DSD2PCM_SOAK_RSS_REPORT_ONLY` (the resident set, for sanitizer builds) print without
+//! checking. `soak_catches_a_leak` puts leaks in on purpose and checks that each check
+//! catches its own.
 
 use dsd2pcm::convert::{dsd64_to_pcm, dsd64_to_pcm_with};
 use dsd2pcm::dff::{DffReader, DffWriter};
@@ -264,9 +272,37 @@ struct Stats {
     threaded: u64,
     cancelled: u64,
     errors: u64,
+    /// Bytes the kept converters' calls left allocated, and how many of those calls did.
+    kept_bytes: isize,
+    kept_growths: u64,
+    kept_calls: u64,
+}
+
+/// A leak put in on purpose, for `soak_catches_a_leak`: bytes kept per iteration by the
+/// test, and per call of a kept converter (counted as the converter's own growth).
+#[derive(Clone, Copy, Default)]
+struct Leak {
+    per_iteration: usize,
+    per_kept_call: usize,
+}
+
+/// One call of a kept converter, its growth (bytes it left allocated) added to `st`. Only
+/// this thread runs: a frames converter starts no threads.
+fn kept_call<R>(st: &mut Stats, leak: Leak, held: &mut Vec<Vec<u8>>, f: impl FnOnce() -> R) -> R {
+    let before = LIVE.load(Ordering::Relaxed);
+    let r = f();
+    if leak.per_kept_call > 0 {
+        held.push(vec![1u8; leak.per_kept_call]);
+    }
+    let grew = LIVE.load(Ordering::Relaxed) as isize - before as isize;
+    st.kept_bytes += grew;
+    st.kept_growths += u64::from(grew > 0);
+    st.kept_calls += 1;
+    r
 }
 
 /// One iteration of the cycle.
+#[allow(clippy::too_many_arguments)]
 fn iteration(
     i: usize,
     rng: &mut Rng,
@@ -274,7 +310,13 @@ fn iteration(
     tmp: &std::path::Path,
     base_threads: Option<usize>,
     st: &mut Stats,
+    leak: Leak,
+    held: &mut Vec<Vec<u8>>,
 ) {
+    if leak.per_iteration > 0 {
+        // Written, so that it is resident as well.
+        held.push(vec![1u8; leak.per_iteration]);
+    }
     let s = Setting::nth(i);
     let ch = usize::from(s.channels);
     let gain = Gain::from_db([0.0, 6.0, -3.5][i % 3]).unwrap();
@@ -311,13 +353,14 @@ fn iteration(
     let spf = conv.samples_per_frame();
     let mut whole = vec![0u8; frames * spf * ch * 3];
     let mut fc = vec![0u64; frames];
-    let stats = conv
-        .convert(
+    let stats = kept_call(st, leak, held, || {
+        conv.convert(
             Run::new(&area[..]),
             PcmOut::S24le(&mut whole),
             Some(&mut fc),
         )
-        .unwrap();
+    })
+    .unwrap();
     assert_eq!(fc.iter().sum::<u64>(), stats.clipped_total());
     let mut fresh = Converter::new(cfg).unwrap();
     let mut again = vec![0u8; whole.len()];
@@ -336,7 +379,10 @@ fn iteration(
             .at_frame(f as u64)
             .with_before(f.checked_sub(1).map(|p| list[p]))
             .with_after(list.get(f + 1).copied());
-        conv.convert(run, PcmOut::I32(&mut one), None).unwrap();
+        kept_call(st, leak, held, || {
+            conv.convert(run, PcmOut::I32(&mut one), None)
+        })
+        .unwrap();
         let want = &whole[f * spf * ch * 3..][..spf * ch * 3];
         let same = one.iter().zip(want.chunks_exact(3)).all(|(v, b)| {
             let w = i32::from_le_bytes([0, b[0], b[1], b[2]]) >> 8;
@@ -444,9 +490,232 @@ fn iteration(
     }
 }
 
+/// Settings in the cycle.
+const CYCLE: usize = RATES.len() * CUTOFFS.len() * FILTERS.len() * CHANNELS.len();
+/// The warm-up: two rounds of the cycle, after which every kept converter exists and has run
+/// twice, and the library has built its tables.
+const WARM_UP: usize = 2 * CYCLE;
+/// The fewest iterations the memory is judged on: the warm-up, then two windows of about
+/// 400 iterations to compare. A shorter run reports the figures without judging them.
+const MIN_JUDGED: usize = 1000;
+/// How far the live heap (less the kept converters' growth) may rise.
+const HEAP_SLACK: usize = 64 * 1024;
+/// How much the kept converters may grow in the second window, and on what share of their
+/// calls there (1 %).
+const KEPT_SLACK: isize = 4 << 20;
+const KEPT_GROWTH_SHARE: u64 = 100;
+
+/// The soak tests share the counters of one process: one at a time.
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// What a run measured after each iteration.
+struct Measured {
+    iterations: usize,
+    /// The live heap less what the kept converters grew by: the test's own state, every
+    /// other path of the library, and the kept converters as created.
+    heap: Vec<usize>,
+    /// The kept converters' growth so far: bytes, calls that grew, all calls.
+    kept_bytes: Vec<isize>,
+    kept_growths: Vec<u64>,
+    kept_calls: Vec<u64>,
+    /// `VmRSS`, KiB, where `/proc/self/status` exists.
+    rss: Option<Vec<u64>>,
+    /// Worker threads of a threaded conversion.
+    workers: usize,
+}
+
+/// Runs the cycle for `max_iterations` or until `deadline`, with `leak` put in.
+fn soak_run(name: &str, max_iterations: usize, deadline: Option<Instant>, leak: Leak) -> Measured {
+    let tmp = std::env::temp_dir().join(format!("dsd2pcm-soak-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+    let mut reused = HashMap::new();
+    let mut held = Vec::new();
+    let mut st = Stats {
+        conversions: 0,
+        threaded: 0,
+        cancelled: 0,
+        errors: 0,
+        kept_bytes: 0,
+        kept_growths: 0,
+        kept_calls: 0,
+    };
+    let base_threads = threads();
+    // Written before the run (not zero, which the allocator can hand out as untouched
+    // pages), so their pages do not add to the resident set on the way.
+    let mut rss = vec![u64::MAX; max_iterations];
+    let mut heap = vec![usize::MAX; max_iterations];
+    let mut kept_bytes = vec![isize::MAX; max_iterations];
+    let mut kept_growths = vec![u64::MAX; max_iterations];
+    let mut kept_calls = vec![u64::MAX; max_iterations];
+    let have_rss = rss_kib().is_some();
+    let t0 = Instant::now();
+    let mut iterations = 0;
+    for i in 0..max_iterations {
+        if deadline.is_some_and(|d| Instant::now() >= d) {
+            break;
+        }
+        iteration(
+            i,
+            &mut rng,
+            &mut reused,
+            &tmp,
+            base_threads,
+            &mut st,
+            leak,
+            &mut held,
+        );
+        rss[i] = rss_kib().unwrap_or(0);
+        heap[i] = (LIVE.load(Ordering::Relaxed) as isize - st.kept_bytes) as usize;
+        kept_bytes[i] = st.kept_bytes;
+        kept_growths[i] = st.kept_growths;
+        kept_calls[i] = st.kept_calls;
+        iterations += 1;
+    }
+    std::fs::remove_dir_all(&tmp).unwrap();
+    let secs = t0.elapsed().as_secs_f64();
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let max_ch = usize::from(MAX_CHANNELS);
+    println!(
+        "{name}: {iterations} iterations in {secs:.1} s: {} conversions ({} threaded), {} cancelled, \
+         {} error paths, {} reused converters, up to {max_ch} channels, {} worker threads",
+        st.conversions,
+        st.threaded,
+        st.cancelled,
+        st.errors,
+        reused.len(),
+        workers
+    );
+    if let Some(base) = base_threads {
+        println!(
+            "{name}: threads {base} before, {} after",
+            threads().unwrap_or(0)
+        );
+    }
+    heap.truncate(iterations);
+    kept_bytes.truncate(iterations);
+    kept_growths.truncate(iterations);
+    kept_calls.truncate(iterations);
+    rss.truncate(iterations);
+    Measured {
+        iterations,
+        heap,
+        kept_bytes,
+        kept_growths,
+        kept_calls,
+        rss: have_rss.then_some(rss),
+        workers,
+    }
+}
+
+/// The checks' verdicts: true where the memory levels off.
+struct Verdicts {
+    heap: bool,
+    kept: bool,
+    rss: Option<bool>,
+}
+
+fn median(v: &[u64]) -> u64 {
+    let mut s = v.to_vec();
+    s.sort_unstable();
+    s[s.len() / 2]
+}
+
+/// Judges a run of `MIN_JUDGED` iterations or more (`None` for a shorter one), printing the
+/// figures. After the warm-up the run is cut in two windows, the plateau and the late one:
+/// - the live heap less the kept converters' growth (the leak measure: a leak raises it
+///   whatever the allocator does with freed memory) may rise at most `HEAP_SLACK` from the
+///   plateau's highest value to the late window's;
+/// - the kept converters grow only while their buffers reach the sizes their calls need,
+///   which gets rarer as the run goes on: in the late window they may grow on at most 1 %
+///   of their calls and by at most `KEPT_SLACK` (a leak in a call grows on every call);
+/// - the resident set's median in the late window may be at most 25 % or 64 MiB plus 2 MiB
+///   per worker thread, whichever is larger, above its median in the plateau. Medians,
+///   because the allocator holds on to freed memory per worker thread for a while: one
+///   block of a few tens of MiB now and then, without a leak; and a wide bound, because the
+///   medians themselves drift without one while the worker threads' arenas fill (up to 46
+///   MiB with 4 workers and 49 MiB with 16 in runs of 1000 iterations). The live heap is the
+///   precise check; this one is a coarse one for memory outside it.
+fn judge(name: &str, m: &Measured) -> Option<Verdicts> {
+    let n = m.iterations;
+    let deciles = |v: &dyn Fn(usize) -> u64| -> String {
+        (1..=10)
+            .map(|d| format!("{}", v(d * n / 10 - 1)))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    println!(
+        "{name}: live heap (less kept converters' growth) KiB at each tenth: {}",
+        deciles(&|i| m.heap[i] as u64 / 1024)
+    );
+    println!(
+        "{name}: kept converters' growth KiB at each tenth: {}",
+        deciles(&|i| (m.kept_bytes[i] / 1024) as u64)
+    );
+    if let Some(rss) = &m.rss {
+        println!(
+            "{name}: RSS MiB at each tenth: {}",
+            deciles(&|i| rss[i] / 1024)
+        );
+    }
+    if n < MIN_JUDGED {
+        println!(
+            "{name}: memory not judged: {n} iterations, the checks need {MIN_JUDGED} or more \
+             (a warm-up of {WARM_UP}, then two windows)"
+        );
+        return None;
+    }
+    let mid = WARM_UP + (n - WARM_UP) / 2;
+    let (plateau, late) = (WARM_UP..mid, mid..n);
+
+    let heap_plateau = *m.heap[plateau.clone()].iter().max().unwrap();
+    let heap_late = *m.heap[late.clone()].iter().max().unwrap();
+    let heap = heap_late <= heap_plateau + HEAP_SLACK;
+    println!(
+        "{name}: live heap: plateau (iterations {WARM_UP}-{mid}) max {heap_plateau} bytes, late \
+         max {heap_late} bytes: {:+} bytes, bound +{HEAP_SLACK}: {}",
+        heap_late as isize - heap_plateau as isize,
+        if heap { "levels off" } else { "GREW" }
+    );
+
+    let at = |v: &[u64], i: usize| if i == 0 { 0 } else { v[i - 1] };
+    let calls = at(&m.kept_calls, n) - at(&m.kept_calls, mid);
+    let growths = at(&m.kept_growths, n) - at(&m.kept_growths, mid);
+    let grew = m.kept_bytes[n - 1] - m.kept_bytes[mid - 1];
+    let kept = growths * KEPT_GROWTH_SHARE <= calls && grew <= KEPT_SLACK;
+    println!(
+        "{name}: kept converters, late window: grew on {growths} of {calls} calls, by {grew} \
+         bytes; bound 1 % of the calls and {KEPT_SLACK} bytes: {}",
+        if kept { "levels off" } else { "GREW" }
+    );
+
+    let rss = m.rss.as_ref().map(|rss| {
+        let p = median(&rss[plateau.clone()]);
+        let l = median(&rss[late.clone()]);
+        let bound = p + (p / 4).max((64 + 2 * m.workers as u64) * 1024);
+        let ok = l <= bound;
+        println!(
+            "{name}: RSS: plateau median {} MiB (max {}), late median {} MiB (max {}), bound {} \
+             MiB: {}",
+            p / 1024,
+            rss[plateau.clone()].iter().max().unwrap() / 1024,
+            l / 1024,
+            rss[late.clone()].iter().max().unwrap() / 1024,
+            bound / 1024,
+            if ok { "levels off" } else { "GREW" }
+        );
+        ok
+    });
+    if rss.is_none() {
+        println!("{name}: no /proc/self/status: RSS not checked");
+    }
+    Some(Verdicts { heap, kept, rss })
+}
+
 #[test]
 #[ignore = "soak test: minutes to hours; run with --ignored (see the file's comment)"]
 fn soak() {
+    let _one = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let env = |name: &str| -> Option<u64> {
         let v = std::env::var(name).ok()?;
         Some(v.parse().unwrap_or_else(|_| panic!("{name}: a number")))
@@ -457,106 +726,48 @@ fn soak() {
         env("DSD2PCM_SOAK_ITERATIONS").unwrap_or(if seconds.is_some() { 4_000_000 } else { 300 })
             as usize;
     let deadline = seconds.map(|s| Instant::now() + std::time::Duration::from_secs(s));
-    let tmp = std::env::temp_dir().join(format!("dsd2pcm-soak-{}", std::process::id()));
-    std::fs::create_dir_all(&tmp).unwrap();
-    let mut rng = Rng(0x2545_F491_4F6C_DD1D);
-    let mut reused = HashMap::new();
-    let mut st = Stats {
-        conversions: 0,
-        threaded: 0,
-        cancelled: 0,
-        errors: 0,
-    };
-    let base_threads = threads();
-    // Written before the run, so its pages do not add to the resident set on the way.
-    let mut rss = vec![0u64; max_iterations];
-    let mut live = vec![0usize; max_iterations];
-    let have_rss = rss_kib().is_some();
-    let t0 = Instant::now();
-    let mut iterations = 0;
-    for (i, (r, h)) in rss.iter_mut().zip(live.iter_mut()).enumerate() {
-        if deadline.is_some_and(|d| Instant::now() >= d) {
-            break;
-        }
-        iteration(i, &mut rng, &mut reused, &tmp, base_threads, &mut st);
-        *r = rss_kib().unwrap_or(0);
-        *h = LIVE.load(Ordering::Relaxed);
-        iterations += 1;
-    }
-    rss.truncate(iterations);
-    live.truncate(iterations);
-    assert!(iterations >= 50, "at least 50 iterations, ran {iterations}");
-    std::fs::remove_dir_all(&tmp).unwrap();
-    let secs = t0.elapsed().as_secs_f64();
-    let max_ch = usize::from(MAX_CHANNELS);
-    println!(
-        "soak: {iterations} iterations in {secs:.1} s: {} conversions ({} threaded), {} cancelled, \
-         {} error paths, {} reused converters, up to {max_ch} channels",
-        st.conversions,
-        st.threaded,
-        st.cancelled,
-        st.errors,
-        reused.len()
-    );
-    if let Some(base) = base_threads {
-        println!(
-            "soak: threads {base} before, {} after",
-            threads().unwrap_or(0)
-        );
-    }
-    let warm = iterations / 5;
-    let half = iterations / 2;
-    // The live heap after each iteration: the converters kept for the run and the test's
-    // own state. Once every kept converter has met its longest run it does not move.
-    let deciles: Vec<String> = (1..=10)
-        .map(|d| format!("{}", live[d * iterations / 10 - 1] / 1024))
-        .collect();
-    let live_plateau = *live[warm..half].iter().max().unwrap();
-    let live_late = *live[half..].iter().max().unwrap();
-    println!(
-        "soak: live heap KiB at each tenth of the run: {}; plateau (20-50 %) {} KiB; second-half \
-         max {} KiB",
-        deciles.join(" "),
-        live_plateau / 1024,
-        live_late / 1024
-    );
-    // A short run (the sanitizer jobs run 100 iterations) is about races and ends before
-    // the warm-up has: the kept converters are still growing in the 20 to 50 % window, so
-    // the check needs 1000 iterations or more. DSD2PCM_SOAK_HEAP_REPORT_ONLY reports the
-    // live heap without checking it.
+    let m = soak_run("soak", max_iterations, deadline, Leak::default());
     assert!(
-        live_late <= live_plateau + 64 * 1024
-            || std::env::var_os("DSD2PCM_SOAK_HEAP_REPORT_ONLY").is_some(),
-        "live heap grew: {live_late} bytes in the second half, plateau {live_plateau} bytes"
+        m.iterations >= 50,
+        "at least 50 iterations, ran {}",
+        m.iterations
     );
-    if have_rss {
-        let deciles: Vec<String> = (1..=10)
-            .map(|d| format!("{}", rss[d * iterations / 10 - 1] / 1024))
-            .collect();
-        let plateau = *rss[warm..half].iter().max().unwrap();
-        let late = *rss[half..].iter().max().unwrap();
-        let mut sorted = rss[half..].to_vec();
-        sorted.sort_unstable();
-        // Looser than the live heap's bound: the resident set also holds what the allocator
-        // keeps of freed memory, spread over the worker threads' arenas.
-        let bound = plateau + (plateau / 10).max(32 * 1024);
-        println!(
-            "soak: RSS MiB at each tenth of the run: {}; plateau (20-50 %) {} MiB; second half \
-             min {} median {} max {} MiB; bound {} MiB",
-            deciles.join(" "),
-            plateau / 1024,
-            sorted[0] / 1024,
-            sorted[sorted.len() / 2] / 1024,
-            late / 1024,
-            bound / 1024
-        );
-        // Under a sanitizer the resident set also holds its shadow memory and history,
-        // which grow with the run: DSD2PCM_SOAK_RSS_REPORT_ONLY reports without checking.
-        assert!(
-            late <= bound || std::env::var_os("DSD2PCM_SOAK_RSS_REPORT_ONLY").is_some(),
-            "RSS grew: {late} KiB in the second half, plateau {plateau} KiB"
-        );
-    } else {
-        println!("soak: no /proc/self/status: RSS not checked");
-    }
+    let Some(v) = judge("soak", &m) else { return };
+    // Under a sanitizer the resident set also holds its shadow memory and history, which
+    // grow with the run: DSD2PCM_SOAK_RSS_REPORT_ONLY reports it without the check, and
+    // DSD2PCM_SOAK_HEAP_REPORT_ONLY does the same for the live heap and kept converters.
+    let heap_only = std::env::var_os("DSD2PCM_SOAK_HEAP_REPORT_ONLY").is_some();
+    let rss_only = std::env::var_os("DSD2PCM_SOAK_RSS_REPORT_ONLY").is_some();
+    assert!(v.heap || heap_only, "live heap grew (figures above)");
+    assert!(v.kept || heap_only, "kept converters grew (figures above)");
+    assert!(
+        v.rss.unwrap_or(true) || rss_only,
+        "RSS grew (figures above)"
+    );
+}
+
+/// The checks catch a leak: runs of `MIN_JUDGED` iterations with one put in.
+#[test]
+#[ignore = "soak test: about a minute; run with --ignored (see the file's comment)"]
+fn soak_catches_a_leak() {
+    let _one = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    // 1 MiB per iteration, written: the live heap and the resident set both catch it.
+    let name = "leak of 1 MiB per iteration";
+    let leak = Leak {
+        per_iteration: 1 << 20,
+        per_kept_call: 0,
+    };
+    let v = judge(name, &soak_run(name, MIN_JUDGED, None, leak)).unwrap();
+    assert!(!v.heap, "{name}: passed the live-heap check");
+    assert!(!v.rss.unwrap_or(false), "{name}: passed the RSS check");
+    // 1 KiB per iteration, and 64 bytes per call of a kept converter: the live heap and
+    // the kept converters' check each catch theirs.
+    let name = "leak of 1 KiB per iteration and 64 bytes per kept call";
+    let leak = Leak {
+        per_iteration: 1 << 10,
+        per_kept_call: 64,
+    };
+    let v = judge(name, &soak_run(name, MIN_JUDGED, None, leak)).unwrap();
+    assert!(!v.heap, "{name}: passed the live-heap check");
+    assert!(!v.kept, "{name}: passed the kept converters' check");
 }
