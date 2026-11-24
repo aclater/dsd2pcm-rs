@@ -9,6 +9,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+#[cfg_attr(not(windows), allow(dead_code))]
+mod windows;
+
 const USAGE: &str = "usage: dsd2pcm [OPTIONS] [--] IN.dsf|IN.dff OUT.wav
 options: [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter default|precise|pysacd] [--single-thread] [-n|--no-clobber]
 
@@ -99,6 +102,11 @@ fn parse(args: Vec<OsString>) -> Result<(PathBuf, PathBuf, PcmOptions, OutputOpt
 }
 
 fn main() -> ExitCode {
+    #[cfg(windows)]
+    if windows::this_process() == windows::Action::Pause {
+        windows::explain_and_wait();
+        return ExitCode::from(2);
+    }
     let (inp, out, opts, out_opts) = match parse(std::env::args_os().skip(1).collect()) {
         Ok(v) => v,
         Err(e) if e.is_empty() => {

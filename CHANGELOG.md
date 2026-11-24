@@ -53,6 +53,11 @@ version.
   rate (frequency response, aliasing, ringing, noise, ultrasonic noise, headroom, an
   RMAA-style summary; the pysacd preset, scarletbook-pcm 0.7.0 and the foobar2000 SACD
   plug-in compared), with the measurement scripts in `tools/quality`.
+- Windows: `dsd2pcm.exe` double-clicked in Explorer (no arguments, and alone in a console
+  window of its own) prints how to run it from PowerShell or Terminal and waits for Enter
+  instead of closing at once; it then exits with 2, as for missing arguments. Started from a
+  shell, with arguments, without a console or in a console without a window, it behaves as
+  before.
 
 ### Changed
 
