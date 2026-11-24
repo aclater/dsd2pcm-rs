@@ -64,24 +64,29 @@ unsafe fn path<'a>(p: *const c_char, name: &str) -> Result<&'a Path, Fail> {
     }
 }
 
-/// Reads a struct that starts with its `struct_size`, after checking that size: only the
-/// fields this version knows are read.
+/// Reads a struct that starts with its `struct_size`, after checking that size: the
+/// smaller of the caller's size and ours is copied into a zeroed `T`, so a field the
+/// caller's (older) layout lacks reads as 0, and fields of a newer layout are not read.
 ///
 /// # Safety
 /// `p` is NULL or points to a readable `u32` and, if that is at least `T::V1_SIZE`, to
 /// that many readable bytes.
-unsafe fn read_struct<T: Versioned>(p: *const T, name: &str) -> Result<T, Fail> {
+pub(crate) unsafe fn read_struct<T: Versioned>(p: *const T, name: &str) -> Result<T, Fail> {
     if p.is_null() {
         return Err(null(name));
     }
     // SAFETY: not NULL; every such struct starts with a readable `u32` (contract).
     let size = unsafe { p.cast::<u32>().read_unaligned() };
     check_struct_size::<T>(size, name)?;
-    // SAFETY: at least `size_of::<T>()` bytes are readable (checked size, contract); any
-    // bit pattern is valid for these plain-data structs (integers, floats, raw pointers,
-    // and an `Option` of a function pointer, for which every non-NULL value is taken as
-    // the caller's function).
-    Ok(unsafe { p.read_unaligned() })
+    let n = (size as usize).min(size_of::<T>());
+    let mut v = std::mem::MaybeUninit::<T>::zeroed();
+    // SAFETY: `p` is readable for `size >= n` bytes (checked size, contract); `v` is a
+    // local of `size_of::<T>() >= n` bytes, so they cannot overlap.
+    unsafe { std::ptr::copy_nonoverlapping(p.cast::<u8>(), v.as_mut_ptr().cast::<u8>(), n) };
+    // SAFETY: all zeros and any bit pattern are valid for these plain-data structs
+    // (integers, floats, raw pointers, and an `Option` of a function pointer, NULL being
+    // `None` and every non-NULL value taken as the caller's function).
+    Ok(unsafe { v.assume_init() })
 }
 
 /// The bytes to write to an output struct that starts with its `struct_size`: the smaller
@@ -89,7 +94,10 @@ unsafe fn read_struct<T: Versioned>(p: *const T, name: &str) -> Result<T, Fail> 
 ///
 /// # Safety
 /// `p` is NULL or points to a readable `u32`.
-unsafe fn out_struct<T: Versioned>(p: *mut T, name: &str) -> Result<Option<usize>, Fail> {
+pub(crate) unsafe fn out_struct<T: Versioned>(
+    p: *mut T,
+    name: &str,
+) -> Result<Option<usize>, Fail> {
     if p.is_null() {
         return Ok(None);
     }
@@ -104,7 +112,7 @@ unsafe fn out_struct<T: Versioned>(p: *mut T, name: &str) -> Result<Option<usize
 /// # Safety
 /// `p` is valid for writes of `n` bytes, `n <= size_of::<T>()`, and `p` does not overlap
 /// any reference in use.
-unsafe fn write_struct<T: Versioned>(p: *mut T, mut v: T, n: usize) {
+pub(crate) unsafe fn write_struct<T: Versioned>(p: *mut T, mut v: T, n: usize) {
     // SAFETY: the caller's `struct_size` is readable (checked by `out_struct`).
     let size = unsafe { p.cast::<u32>().read_unaligned() };
     v.set_struct_size(size);
@@ -167,8 +175,12 @@ unsafe fn slice_mut<'a, T>(p: *mut T, len: usize) -> &'a mut [T] {
 /// Converts a DSF or DFF file (DSD64) to a 24-bit WAV file.
 ///
 /// `input_path` and `output_path` are NUL-terminated paths: on Unix raw bytes (any encoding
-/// the file system accepts), elsewhere UTF-8. An existing output file is replaced; on any
-/// error it may be left incomplete. `report` may be NULL; it is written on success only.
+/// the file system accepts), elsewhere UTF-8. The WAV is written to a temporary file in the
+/// output's directory and renamed over `output_path` on success; on any error, including a
+/// cancel, the temporary file is removed and an existing output file is left as it was. An
+/// output that is the input file (also through a link), a directory, or an existing device,
+/// FIFO or socket is refused before anything is written. `report` may be NULL; it is
+/// written on success only.
 /// The progress callback in `options`, if any, is called on this thread.
 ///
 /// Returns `DSD2PCM_OK` or a `DSD2PCM_E_*` code; `dsd2pcm_last_error` gives the message.

@@ -117,7 +117,7 @@ One frame per call (`run 1`): 1.03x to 1.14x on the P-core, 1.06x to 1.12x on th
 
 ## aarch64 (GitHub-hosted runners, indicative)
 
-From `.github/workflows/bench.yml` on dsd2pcm 0.1.1: generated 60 s test files (not SACD
+From `.github/workflows/bench.yml` on dsd2pcm 0.1.1, with generated 60 s test files (not SACD
 rips), one thread, median ratio of dsd2pcm's speed to scarletbook-pcm 0.7.0's over the
 rounds (lowest to highest in brackets). Linux: `ubuntu-24.04-arm` (Neoverse N2, 4 rounds, the
 round-to-round spread under 0.02). macOS: `macos-15` (Apple M1, virtual, 5 rounds; shared

@@ -40,7 +40,7 @@ pub const DSD2PCM_E_NULL: c_int = 1;
 pub const DSD2PCM_E_INVALID_ARGUMENT: c_int = 2;
 /// An operating-system I/O error.
 pub const DSD2PCM_E_IO: c_int = 3;
-/// The input is not a valid DSF, DFF, WAV or FLAC file, or is truncated.
+/// The input is not a valid DSF or DFF file, or is truncated.
 pub const DSD2PCM_E_FORMAT: c_int = 4;
 /// The input or a setting is valid but not supported by this version.
 pub const DSD2PCM_E_UNSUPPORTED: c_int = 5;
@@ -262,30 +262,46 @@ impl dsd2pcm_frames {
 /// smallest a caller may pass.
 pub(crate) trait Versioned: Copy {
     const NAME: &'static str;
+    /// The size of the 0.1.0 (ABI 1) layout on this target. Fixed: it stays the same when
+    /// fields are appended, so callers built against 0.1.0 keep working.
     const V1_SIZE: usize;
     fn set_struct_size(&mut self, size: u32);
 }
 
+/// The 0.1.0 size of a struct on this target: 64-bit; 32-bit where `uint64_t` and `double`
+/// are 4-byte aligned in structs (i686 Linux); 32-bit where they are 8-byte aligned (for
+/// example 32-bit Arm and Windows).
+pub(crate) const fn v1_size(b64: usize, b32_align4: usize, b32_align8: usize) -> usize {
+    assert!(std::mem::align_of::<u64>() == std::mem::align_of::<f64>());
+    match (size_of::<usize>(), std::mem::align_of::<u64>()) {
+        (8, _) => b64,
+        (4, 4) => b32_align4,
+        (4, 8) => b32_align8,
+        _ => panic!("unsupported target layout"),
+    }
+}
+
 macro_rules! versioned {
-    ($t:ident, $v1_64:expr) => {
+    ($t:ident, $v1_64:expr, $v1_32a4:expr, $v1_32a8:expr) => {
         impl Versioned for $t {
             const NAME: &'static str = stringify!($t);
-            const V1_SIZE: usize = std::mem::size_of::<$t>();
+            const V1_SIZE: usize = v1_size($v1_64, $v1_32a4, $v1_32a8);
             fn set_struct_size(&mut self, size: u32) {
                 self.struct_size = size;
             }
         }
-        // The 0.1.0 layout is a contract: these sizes never shrink or change.
-        #[cfg(target_pointer_width = "64")]
-        const _: () = assert!(std::mem::size_of::<$t>() == $v1_64);
+        // The 0.1.0 layout is a contract: fields are only appended. While none has been,
+        // the struct is exactly its 0.1.0 size.
+        const _: () = assert!(std::mem::size_of::<$t>() == <$t as Versioned>::V1_SIZE);
     };
 }
 
-versioned!(dsd2pcm_file_options, 48);
-versioned!(dsd2pcm_file_report, 88);
-versioned!(dsd2pcm_frames_config, 32);
-versioned!(dsd2pcm_run, 80);
-versioned!(dsd2pcm_stats, 64);
+// 0.1.0 sizes: 64-bit, 32-bit (i686 Linux), 32-bit with 8-byte aligned 64-bit fields.
+versioned!(dsd2pcm_file_options, 48, 36, 40);
+versioned!(dsd2pcm_file_report, 88, 88, 88);
+versioned!(dsd2pcm_frames_config, 32, 28, 32);
+versioned!(dsd2pcm_run, 80, 44, 48);
+versioned!(dsd2pcm_stats, 64, 64, 64);
 
 /// Checks a caller's `struct_size`.
 pub(crate) fn check_struct_size<T: Versioned>(size: u32, what: &str) -> Result<(), Fail> {

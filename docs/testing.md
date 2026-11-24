@@ -43,23 +43,30 @@ DSD2PCM_SOAK_ITERATIONS=1000 cargo test --release -p dsd2pcm --test soak -- --ig
 DSD2PCM_SOAK_SECONDS=3600 cargo test --release -p dsd2pcm --test soak -- --ignored --nocapture
 ```
 
-`DSD2PCM_SOAK_RSS_REPORT_ONLY=1` prints the memory figures without the check, for sanitizer
-builds, whose shadow memory grows with the run.
+The live-heap check needs 1000 iterations or more: in shorter runs, the default of 300
+included, the kept converters are still growing in the 20 to 50 % window, and the check
+fails without a leak (0.1.3 moves the window). Set `DSD2PCM_SOAK_ITERATIONS` as above.
+`DSD2PCM_SOAK_RSS_REPORT_ONLY=1` prints the resident set without the check, for sanitizer
+builds, whose shadow memory grows with the run; `DSD2PCM_SOAK_HEAP_REPORT_ONLY=1` does the
+same for the live heap, for short sanitizer runs.
 
-Before 0.1.2, on an Intel Core i9-13900H, 4 cores (`taskset -c 0-3`, so 4 worker threads):
+Before 0.1.2, with the live-heap check, one hour each:
 
-| Run | Iterations | Conversions (threaded) | Live heap | Resident set (MiB, each tenth of the run) | Threads |
+| CPU, worker threads | Iterations | Conversions (threaded) | Live heap | Resident set (MiB, each tenth of the run) | Threads |
 |---|---|---|---|---|---|
-| 1 hour | 387 206 | 2 690 931 (236 628) | not yet measured | 150 155 166 166 166 172 178 159 188 185; second half 147 to 193, median 174 | 2 before, 2 after, and after every threaded run |
-| 20 minutes | 129 548 | 901 448 (79 170) | 119 277 KiB at every tenth of the run, to the byte | 165 150 166 166 166 171 171 175 172 172; second half 155 to 190, median 175 | 2 before, 2 after, and after every threaded run |
+| AMD Ryzen AI Max+ 395, 16 (`taskset -c 0-15`) | 511 238 | 3 551 370 (312 425) | 119 277 KiB at every tenth of the run, to the byte | 324 316 361 366 380 376 380 380 393 393; second half 353 to 407, median 384 | 2 before, 2 after, and after every threaded run |
+
+Shorter runs on an Intel Core i9-13900H with 4 worker threads agree: 20 minutes (129 548
+iterations), the same live heap to the byte, resident set 150 to 190 MiB; and one hour
+before the live-heap check (387 206 iterations), resident set 147 to 193 MiB.
 
 The live heap is the 40 converters the test keeps (one per valid setting and gain, their
 buffers grown to the longest run they met, 230 frames) and the test's own arrays of
 samples (64 MiB, allocated before the run): it stops moving once every kept converter has
-met its longest run, and stays there to the byte. The one-hour run predates the live-heap
-check; its resident set passed the earlier, tighter bound (5 % or 16 MiB). The peak
-resident set (`time -v`) was 286 MiB and 282 MiB, during the 230-frame six-channel
-iterations.
+met its longest run, and stays there to the byte. The resident set grows with the number of
+worker threads (each has its own allocator arena) and wanders within them; the peak (`time
+-v`) was 497 MiB with 16 workers and 282 to 286 MiB with 4, during the 230-frame
+six-channel iterations.
 
 ## C leak loop
 
@@ -110,12 +117,17 @@ and 12 for the core crate on a Ryzen AI Max+ 395 (one core each):
 ## ThreadSanitizer
 
 ```
-RUSTFLAGS=-Zsanitizer=thread DSD2PCM_SOAK_ITERATIONS=100 DSD2PCM_SOAK_RSS_REPORT_ONLY=1 \
+export CARGO_PROFILE_DEV_OPT_LEVEL=2
+RUSTFLAGS=-Zsanitizer=thread DSD2PCM_SOAK_ITERATIONS=100 DSD2PCM_SOAK_RSS_REPORT_ONLY=1 DSD2PCM_SOAK_HEAP_REPORT_ONLY=1 \
   cargo +nightly-2026-11-01 test -Zbuild-std --target x86_64-unknown-linux-gnu \
   -p dsd2pcm --test progress --test frames --test soak -- --include-ignored
 RUSTFLAGS=-Zsanitizer=thread \
   cargo +nightly-2026-11-01 test -Zbuild-std --target x86_64-unknown-linux-gnu -p dsd2pcm-capi --lib
 ```
+
+The two flags make the soak test print its memory figures without checking them: TSan's
+shadow memory grows the resident set with the run, and 100 iterations end before the live
+heap's warm-up does, so this run looks for races, not leaks.
 
 Standard library and crates are rebuilt instrumented, so the scoped worker threads of the
 whole-file path, their atomics and mutexes, and the C interface's busy-handle checks are all

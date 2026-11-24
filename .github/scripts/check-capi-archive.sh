@@ -9,6 +9,8 @@
 #   install name @rpath/libdsd2pcm.1.dylib on macOS, and the program depends on that name;
 # - the same program links against the static library with Libs.private and runs.
 set -euo pipefail
+# Pipelines end in `grep PATTERN >/dev/null`, not `grep -q`: grep -q stops at the first
+# match, and the writer's SIGPIPE would then fail the pipeline under pipefail.
 
 dir=$(cd "$1" && pwd)
 cc=${CC:-cc}
@@ -36,14 +38,14 @@ case "$(uname -s)" in
         soname=$(readelf -d "$so" | sed -n 's/.*(SONAME).*\[\(.*\)\]/\1/p')
         echo "SONAME: $soname"
         [[ "$soname" == "libdsd2pcm.so.$abi" ]] || { echo "::error::SONAME is '$soname', not libdsd2pcm.so.$abi"; exit 1; }
-        readelf -d "$work/minimal" | grep -q "NEEDED.*\[libdsd2pcm.so.$abi\]" \
+        readelf -d "$work/minimal" | grep "NEEDED.*\[libdsd2pcm.so.$abi\]" >/dev/null \
             || { echo "::error::the program does not depend on libdsd2pcm.so.$abi"; exit 1; }
         ;;
     Darwin)
         id=$(otool -D "$dir/lib/libdsd2pcm.$abi.dylib" | tail -n 1)
         echo "install name: $id"
         [[ "$id" == "@rpath/libdsd2pcm.$abi.dylib" ]] || { echo "::error::install name is '$id'"; exit 1; }
-        otool -L "$work/minimal" | grep -q "@rpath/libdsd2pcm.$abi.dylib" \
+        otool -L "$work/minimal" | grep "@rpath/libdsd2pcm.$abi.dylib" >/dev/null \
             || { echo "::error::the program does not depend on @rpath/libdsd2pcm.$abi.dylib"; exit 1; }
         ;;
 esac

@@ -12,7 +12,7 @@
 
 dsd2pcm converts DSD (DSF and DSDIFF files, or Super Audio CD frames) to 24-bit PCM, as a Rust
 crate, a C library and a command-line tool. Its output is the same, byte for byte, on every
-CPU, and on most workloads it is faster than scarletbook-pcm 0.7.0, whose output it
+CPU (with SSE2 floating point on x86), and on most workloads it is faster than scarletbook-pcm 0.7.0, whose output it
 reproduces ([performance](docs/performance.md)).
 
 ## Platforms
@@ -32,9 +32,9 @@ Intel Core i9-13900H (P- and E-cores) and an AMD Ryzen 9 3950X.
 On Linux x86_64, with a DSF file named `01 - Track.dsf` in the current directory:
 
 ```
-curl -LO https://github.com/aclater/dsd2pcm-rs/releases/download/v0.1.1/dsd2pcm-0.1.1-x86_64-linux.tar.gz
-tar xzf dsd2pcm-0.1.1-x86_64-linux.tar.gz
-./dsd2pcm-0.1.1-x86_64-linux/dsd2pcm "01 - Track.dsf" "01 - Track.wav"
+curl -LO https://github.com/aclater/dsd2pcm-rs/releases/download/v0.1.2/dsd2pcm-0.1.2-x86_64-linux.tar.gz
+tar xzf dsd2pcm-0.1.2-x86_64-linux.tar.gz
+./dsd2pcm-0.1.2-x86_64-linux/dsd2pcm "01 - Track.dsf" "01 - Track.wav"
 ```
 
 This writes a 176.4 kHz, 24-bit WAV and prints the duration, the speed and the number of

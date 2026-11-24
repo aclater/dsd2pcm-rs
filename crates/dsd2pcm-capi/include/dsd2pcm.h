@@ -41,7 +41,7 @@ template <typename T> static inline T dsd2pcm_init_() {
 // An operating-system I/O error.
 #define DSD2PCM_E_IO 3
 
-// The input is not a valid DSF, DFF, WAV or FLAC file, or is truncated.
+// The input is not a valid DSF or DFF file, or is truncated.
 #define DSD2PCM_E_FORMAT 4
 
 // The input or a setting is valid but not supported by this version.
@@ -240,8 +240,12 @@ const char *dsd2pcm_status_str(int status);
 // Converts a DSF or DFF file (DSD64) to a 24-bit WAV file.
 //
 // `input_path` and `output_path` are NUL-terminated paths: on Unix raw bytes (any encoding
-// the file system accepts), elsewhere UTF-8. An existing output file is replaced; on any
-// error it may be left incomplete. `report` may be NULL; it is written on success only.
+// the file system accepts), elsewhere UTF-8. The WAV is written to a temporary file in the
+// output's directory and renamed over `output_path` on success; on any error, including a
+// cancel, the temporary file is removed and an existing output file is left as it was. An
+// output that is the input file (also through a link), a directory, or an existing device,
+// FIFO or socket is refused before anything is written. `report` may be NULL; it is
+// written on success only.
 // The progress callback in `options`, if any, is called on this thread.
 //
 // Returns `DSD2PCM_OK` or a `DSD2PCM_E_*` code; `dsd2pcm_last_error` gives the message.

@@ -1,9 +1,9 @@
 # Releasing
 
-A release is one annotated tag, `v` plus the workspace version (for example `v0.1.1`), on a
+A release is one annotated tag, `v` plus the workspace version (for example `v0.1.2`), on a
 commit on `main`. Pushing the tag runs `.github/workflows/release.yml`, which builds, tests,
 publishes to crates.io and creates the GitHub release. Everything else on this page is done by
-a person (the Orchestrator, who holds the tag, crates.io and repository-admin rights).
+the maintainer, who holds the tag, crates.io and repository-admin rights.
 
 ## What a release publishes
 
@@ -23,16 +23,16 @@ The GitHub release, with these assets:
 
 | Asset | Platform |
 |---|---|
-| `dsd2pcm-0.1.1-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
-| `dsd2pcm-0.1.1-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
-| `dsd2pcm-0.1.1-i686-linux.tar.gz` | Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later |
-| `dsd2pcm-0.1.1-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon; signed (Developer ID) and notarised |
-| `dsd2pcm-0.1.1-x86_64-windows.zip` | Windows 10 and 11, x86_64; C runtime linked in; not code-signed |
-| `libdsd2pcm-0.1.1-x86_64-linux.tar.gz` | C library, Linux x86_64, glibc 2.17 or later |
-| `libdsd2pcm-0.1.1-aarch64-linux.tar.gz` | C library, Linux aarch64, glibc 2.17 or later |
-| `libdsd2pcm-0.1.1-i686-linux.tar.gz` | C library, Linux 32-bit x86, glibc 2.17 or later |
-| `libdsd2pcm-0.1.1-aarch64-macos.tar.gz` | C library, macOS 11 or later, Apple silicon; `libdsd2pcm.1.dylib` signed and notarised |
-| `libdsd2pcm-0.1.1-x86_64-windows.zip` | C library, Windows 10 and 11, x86_64 |
+| `dsd2pcm-0.1.2-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
+| `dsd2pcm-0.1.2-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
+| `dsd2pcm-0.1.2-i686-linux.tar.gz` | Linux 32-bit x86 (Pentium 4 and later), glibc 2.17 or later |
+| `dsd2pcm-0.1.2-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon; signed (Developer ID) and notarised |
+| `dsd2pcm-0.1.2-x86_64-windows.zip` | Windows 10 and 11, x86_64; C runtime linked in; not code-signed |
+| `libdsd2pcm-0.1.2-x86_64-linux.tar.gz` | C library, Linux x86_64, glibc 2.17 or later |
+| `libdsd2pcm-0.1.2-aarch64-linux.tar.gz` | C library, Linux aarch64, glibc 2.17 or later |
+| `libdsd2pcm-0.1.2-i686-linux.tar.gz` | C library, Linux 32-bit x86, glibc 2.17 or later |
+| `libdsd2pcm-0.1.2-aarch64-macos.tar.gz` | C library, macOS 11 or later, Apple silicon; `libdsd2pcm.1.dylib` signed and notarised |
+| `libdsd2pcm-0.1.2-x86_64-windows.zip` | C library, Windows 10 and 11, x86_64 |
 
 A `dsd2pcm-` archive holds `dsd2pcm` (or `dsd2pcm.exe`), `README.md`, `LICENSE-MIT` and
 `LICENSE-APACHE`. A `libdsd2pcm-` archive holds `include/dsd2pcm.h`, the shared library
@@ -48,7 +48,7 @@ all.
 ## How the workflow runs
 
 1. **version and tag**: every crate has the workspace version (in `Cargo.toml` and
-   `Cargo.lock`), crates that use `dsd2pcm` pin it exactly (`=0.1.1`, through
+   `Cargo.lock`), crates that use `dsd2pcm` pin it exactly (`=0.1.2`, through
    `dsd2pcm.workspace = true`), the tag is `v` plus that version, it is an annotated tag on
    the run's commit, and that commit is on `main` (`git merge-base --is-ancestor` against a
    fresh fetch of `main`). Then `cargo publish --dry-run` packages and verifies every crate.
@@ -88,10 +88,10 @@ Permissions: every workflow reads only (`contents: read`). Only `sign and notari
 `id-token: write` and `attestations: write` (the attestation). Every action is pinned by
 commit SHA; checkouts keep no credentials.
 
-## One-time setup on GitHub (Orchestrator)
+## One-time setup on GitHub (maintainer)
 
 1. **Environment `release`** (Settings, Environments, New environment, `release`):
-   - Required reviewers: the Orchestrator (and the owner if wanted). Leave "Prevent
+   - Required reviewers: the maintainer (and other reviewers if wanted). Leave "Prevent
      self-review" off if one person both pushes tags and approves.
    - Deployment branches and tags: "Selected branches and tags", add the tag rule `v*`.
    - Secrets for macOS signing and notarisation (crates.io's trusted publishing needs none):
@@ -113,7 +113,7 @@ commit SHA; checkouts keep no credentials.
      the Apple team ID of the Developer ID certificate (the 10 characters in brackets in
      `MACOS_SIGN_IDENTITY`). The signature checks accept only that team. It is not secret.
 2. **Tag ruleset** (Settings, Rules, Rulesets, New tag ruleset): target `v*`; restrict
-   creations to the Orchestrator (bypass list), restrict updates, restrict deletions.
+   creations to the maintainer (bypass list), restrict updates, restrict deletions.
    Release tags are not signed: this ruleset and the build provenance attestations are what
    make a tag trustworthy.
 3. **Branch ruleset for `main`**: pull requests required, branches up to date, with these required
@@ -125,7 +125,7 @@ commit SHA; checkouts keep no credentials.
    repositories); "Allow GitHub Actions to create and approve pull requests" off.
 5. **Code scanning** (CodeQL, Scorecard) needs the repository to be public.
 
-## First publish to crates.io (Orchestrator, launch morning)
+## First publish to crates.io (maintainer, first release)
 
 crates.io can configure trusted publishing only for a crate that already exists ("Your crate
 must already be published to crates.io (initial publish requires an API token)",
@@ -163,20 +163,23 @@ no token when there is nothing to publish).
 A later new crate (for example `dsd2pcm-capi` when it becomes publishable) needs the same
 steps 1 to 5 for that crate alone.
 
-## Each release (Orchestrator)
+## Each release (maintainer)
 
 1. On `main`, through a pull request: set `version` under `[workspace.package]` and the
    `version` of `dsd2pcm` under `[workspace.dependencies]` in `Cargo.toml` to the new
-   version (`"0.1.1"` and `"=0.1.1"` for 0.1.1), run `cargo update --workspace`, and update
-   README and docs. CI must be green on that commit.
+   version (`"0.1.2"` and `"=0.1.2"` for 0.1.2), run `cargo update --workspace` and
+   `cargo update --manifest-path fuzz/Cargo.toml -p dsd2pcm`, give the `## Unreleased`
+   section of CHANGELOG.md the version, and update the version in README and docs (the
+   `versions` check of `docs.yml` lists every place). CI must be green on that commit; the
+   Quick start check skips with a notice until the tag is released.
 2. Optional: a dry run of the release workflow on `main` (Actions, release, Run workflow).
-3. Tag the release commit, the `main` commit that CI and the Security Auditor approved, and
+3. Tag the release commit, the `main` commit that CI and a security review approved, and
    push the tag:
 
    ```
    git fetch origin
-   git tag -a v0.1.1 -m "dsd2pcm 0.1.1" origin/main
-   git push origin v0.1.1
+   git tag -a v0.1.2 -m "dsd2pcm 0.1.2" origin/main
+   git push origin v0.1.2
    ```
 
    Check first that `git log -1 origin/main` is the approved commit.
@@ -188,9 +191,35 @@ steps 1 to 5 for that crate alone.
    archives, their `.sha256` and `.intoto.jsonl` files, and `SHA256SUMS`), and an asset:
 
    ```
-   gh release download v0.1.1 -R aclater/dsd2pcm-rs -p dsd2pcm-0.1.1-x86_64-linux.tar.gz
-   gh attestation verify dsd2pcm-0.1.1-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs --signer-workflow aclater/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.1 --deny-self-hosted-runners
+   gh release download v0.1.2 -R aclater/dsd2pcm-rs -p dsd2pcm-0.1.2-x86_64-linux.tar.gz
+   gh attestation verify dsd2pcm-0.1.2-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs --signer-workflow aclater/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.1.2 --deny-self-hosted-runners
    ```
+6. Release notes: the workflow writes the same notes for every release. Put the version's
+   CHANGELOG section on top of them, from a clone of the release commit:
+
+   ```
+   awk '/^## 0\.1\.2 /{f=1; next} /^## /{f=0} f' CHANGELOG.md > notes.md
+   gh release view v0.1.2 -R aclater/dsd2pcm-rs --json body -q .body >> notes.md
+   gh release edit v0.1.2 -R aclater/dsd2pcm-rs --notes-file notes.md
+   ```
+
+7. Yank: when the release fixes security issues, yank the affected earlier versions of both
+   crates on crates.io, after the checks in step 5 passed. For 0.1.2, which fixes 0.1.0 and
+   0.1.1, with a crates.io token that has the `yank` scope for both crates (Account
+   Settings, API Tokens; revoke it afterwards):
+
+   ```
+   cargo login
+   cargo yank --version 0.1.0 dsd2pcm
+   cargo yank --version 0.1.1 dsd2pcm
+   cargo yank --version 0.1.0 dsd2pcm-cli
+   cargo yank --version 0.1.1 dsd2pcm-cli
+   cargo logout
+   ```
+
+   A yanked version stays downloadable for lock files that already name it; new
+   dependency resolution skips it. The CHANGELOG section of the release says which versions
+   are yanked.
 
 If a run fails after the crates job, re-run the failed jobs: published crates are skipped.
 A tag is never moved or re-created (the ruleset forbids it); a broken release gets a new

@@ -79,7 +79,7 @@ done
 echo "C smoke test passed (${#programs[@]} program(s))"
 
 if [[ -n "${ASAN_CC:-}" ]]; then
-    "$ASAN_CC" --version | head -n 1
+    "$ASAN_CC" --version | sed -n 1p  # sed reads all: no SIGPIPE under pipefail
     for src in "${programs[@]}"; do
         exe="$work/asan-$(basename "$src" .c)"
         "$ASAN_CC" -std=c99 "${flags[@]}" -O1 -g -fno-omit-frame-pointer \

@@ -22,7 +22,7 @@ int main(int argc, char **argv) {
     int rc = dsd2pcm_convert_file(argv[1], argv[2], &opts, &report);
     fprintf(stderr, "\n");
     if (rc != DSD2PCM_OK) {
-        fprintf(stderr, "dsd2pcm: %s: %s\n", dsd2pcm_status_str(rc), dsd2pcm_last_error());
+        fprintf(stderr, "dsd2pcm: %s\n", dsd2pcm_last_error());
         return 1;
     }
     printf("%.2f s, %llu samples per channel, %llu clipped\n", report.seconds,

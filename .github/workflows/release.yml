@@ -160,7 +160,10 @@ jobs:
             if [[ "$(printf '%s\n' "$max" "$GLIBC_MAX" | sort -V | tail -n 1)" != "$GLIBC_MAX" ]]; then
               echo "::error::$bin needs glibc $max, newer than $GLIBC_MAX"; exit 1
             fi
-            if readelf -S "$bin" | grep -q '\.symtab'; then
+            # grep without -q: under pipefail, grep -q exits at the first match, the writer
+            # can die of SIGPIPE and the pipeline then fails although it matched (here: a
+            # binary with a symbol table would pass as stripped). grep reads all its input.
+            if readelf -S "$bin" | grep '\.symtab' >/dev/null; then
               echo "::error::$bin is not stripped"; exit 1
             fi
           done

@@ -9,14 +9,20 @@
 
 ## Rules
 
+- The header needs C99 or later (`stdint.h`, `//` comments, designated initialisers in the
+  `*_INIT` macros) or C++.
+
 - Every function that can fail returns an `int` status: `DSD2PCM_OK` (0) or a
   `DSD2PCM_E_*` code. `dsd2pcm_last_error()` gives the message of the last failure on the
-  calling thread (owned by the library, valid until the next failure on that thread);
-  `dsd2pcm_status_str()` names a code.
+  calling thread (owned by the library, valid until the next failure on that thread); it
+  starts with the kind of failure (for example `unsupported: ...`), so print it alone rather
+  than after `dsd2pcm_status_str()`, which names a code.
 - Every pointer is checked for NULL (`DSD2PCM_E_NULL`). A buffer always comes with its
-  length; a NULL buffer is allowed only with length 0 where the function says so.
+  length; a NULL buffer is allowed only with length 0 where the function says so. A
+  non-NULL pointer must be aligned for its type even with length 0.
 - Output buffers must not overlap each other or any input; the library checks and returns
-  `DSD2PCM_E_INVALID_ARGUMENT`. On any error nothing is written to the outputs.
+  `DSD2PCM_E_INVALID_ARGUMENT`. On any error nothing is written to the output buffers and
+  structs, and `dsd2pcm_convert_file` leaves an existing output file as it was.
 - No panic crosses the interface: each entry point catches it and returns
   `DSD2PCM_E_INTERNAL`.
 - The only memory the caller frees is a converter, with `dsd2pcm_frames_free`. Strings
@@ -59,7 +65,22 @@ typedef int (*dsd2pcm_progress_fn)(uint64_t done, uint64_t total, void *user_dat
 It is called on the calling thread, once before the first block and after each block, with
 the output samples per channel done and in all; a non-zero return stops the conversion with
 `DSD2PCM_E_CANCELLED`. It must not unwind (C++ exceptions, `longjmp`) into the library.
-After an error the output file may exist and be incomplete.
+
+The input, its rate, the options, the output size and the output path are checked before
+anything is written. Refused with `DSD2PCM_E_INVALID_ARGUMENT`: an output that is the input
+file (the same path, a symbolic link to it, or on Unix a hard link), a directory or a path
+ending in a separator, and an existing device, FIFO or socket. An existing output file that
+is not writable, or an output directory that is not, gives `DSD2PCM_E_IO`.
+
+The WAV is then written to a new temporary file `.dsd2pcm-PID-N.tmp` in the output's
+directory (created exclusively), synced, given the permissions of the file it replaces, and
+renamed over `output_path` only on success; on Unix the directory is then synced too. On
+any error, including a cancel, the temporary file is removed and an existing output file is
+left as it was, so a partial WAV never appears under `output_path`. A symbolic link at
+`output_path` is replaced by the new file, not followed. The owner, ACLs and extended
+attributes of a replaced file are not kept. If the process is killed (SIGKILL, power loss),
+a `.dsd2pcm-PID-N.tmp` file may remain; it is safe to delete. The library installs no
+signal handlers.
 
 `crates/dsd2pcm-capi/examples/convert.c` is a complete program:
 
@@ -76,7 +97,7 @@ opts.progress = progress;
 dsd2pcm_file_report report = DSD2PCM_FILE_REPORT_INIT;
 int rc = dsd2pcm_convert_file(argv[1], argv[2], &opts, &report);
 if (rc != DSD2PCM_OK)
-    fprintf(stderr, "dsd2pcm: %s: %s\n", dsd2pcm_status_str(rc), dsd2pcm_last_error());
+    fprintf(stderr, "dsd2pcm: %s\n", dsd2pcm_last_error());
 ```
 
 ## Frame runs
@@ -137,11 +158,25 @@ Both run without arguments.
   0.1.0 size (`DSD2PCM_E_INVALID_ARGUMENT`, before reading or writing anything), reads only
   the fields it knows from a larger struct (a newer header), and writes only
   `min(struct_size, its size)` bytes of an output struct.
-- 0.1.0 sizes on 64-bit platforms: `dsd2pcm_file_options` 48, `dsd2pcm_file_report` 88,
-  `dsd2pcm_frames_config` 32, `dsd2pcm_run` 80, `dsd2pcm_stats` 64 bytes (checked when the
-  library is built).
+- 0.1.0 sizes, fixed for ABI 1 whatever fields are appended later (checked when the
+  library is built, and by its tests):
+
+  | Struct | 64-bit | 32-bit x86 Linux (i686) | other 32-bit (8-byte aligned `uint64_t`, e.g. Arm) |
+  |---|---|---|---|
+  | `dsd2pcm_file_options` | 48 | 36 | 40 |
+  | `dsd2pcm_file_report` | 88 | 88 | 88 |
+  | `dsd2pcm_frames_config` | 32 | 28 | 32 |
+  | `dsd2pcm_run` | 80 | 44 | 48 |
+  | `dsd2pcm_stats` | 64 | 64 | 64 |
+
+  A struct from a caller built against an older header is read for its `struct_size` bytes
+  and the fields it lacks are taken as 0.
 
 ## Building from source
+
+The C library is built without the crate's `flac` feature: its whole-file conversion takes
+DSD input only, and without FLAC reading it holds no third-party code, only Rust's standard
+library (MIT OR Apache-2.0). `--features flac` adds it back.
 
 A minimal program, `crates/dsd2pcm-capi/tests/minimal.c`, converts one stereo frame of
 DSD silence. To build and run it on Linux, from the repository root:
@@ -152,7 +187,7 @@ cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c t
 ./minimal
 ```
 
-It prints `dsd2pcm 0.1.1: 2352 samples per channel, first byte 0`. To link the shared
+It prints `dsd2pcm 0.1.2: 2352 samples per channel, first byte 0`. To link the shared
 library instead (its SONAME is `libdsd2pcm.so.1`, so it needs that name at run time):
 
 ```
@@ -164,7 +199,7 @@ LD_LIBRARY_PATH=target/release ./minimal
 ## Binary releases
 
 Each GitHub release has the C library built for five platforms, next to the command-line
-tool: `libdsd2pcm-0.1.1-x86_64-linux.tar.gz`, `-aarch64-linux.tar.gz`, `-i686-linux.tar.gz`
+tool: `libdsd2pcm-0.1.2-x86_64-linux.tar.gz`, `-aarch64-linux.tar.gz`, `-i686-linux.tar.gz`
 (glibc 2.17 or later), `-aarch64-macos.tar.gz` (macOS 11 or later) and
 `-x86_64-windows.zip`, each with a `.sha256` file and a build provenance attestation.
 An archive holds:
@@ -188,20 +223,20 @@ it, and build the example against it, from the folder holding the archive (Linux
 shown):
 
 ```
-sha256sum -c libdsd2pcm-0.1.1-x86_64-linux.tar.gz.sha256
-gh attestation verify libdsd2pcm-0.1.1-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs
-tar -xzf libdsd2pcm-0.1.1-x86_64-linux.tar.gz
-export PKG_CONFIG_PATH=libdsd2pcm-0.1.1-x86_64-linux/lib/pkgconfig
-cc libdsd2pcm-0.1.1-x86_64-linux/examples/minimal.c $(pkg-config --cflags --libs dsd2pcm) -Wl,-rpath,'$ORIGIN/libdsd2pcm-0.1.1-x86_64-linux/lib' -o minimal
+sha256sum -c libdsd2pcm-0.1.2-x86_64-linux.tar.gz.sha256
+gh attestation verify libdsd2pcm-0.1.2-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs
+tar -xzf libdsd2pcm-0.1.2-x86_64-linux.tar.gz
+export PKG_CONFIG_PATH=libdsd2pcm-0.1.2-x86_64-linux/lib/pkgconfig
+cc libdsd2pcm-0.1.2-x86_64-linux/examples/minimal.c $(pkg-config --cflags --libs dsd2pcm) -Wl,-rpath,'$ORIGIN/libdsd2pcm-0.1.2-x86_64-linux/lib' -o minimal
 ./minimal
 ```
 
 On macOS the same with the `aarch64-macos` archive, `shasum -a 256 -c` in place of
-`sha256sum -c`, and `-Wl,-rpath,@executable_path/libdsd2pcm-0.1.1-aarch64-macos/lib`.
+`sha256sum -c`, and `-Wl,-rpath,@executable_path/libdsd2pcm-0.1.2-aarch64-macos/lib`.
 Static linking instead (Linux):
 
 ```
-cc libdsd2pcm-0.1.1-x86_64-linux/examples/minimal.c $(pkg-config --cflags dsd2pcm) libdsd2pcm-0.1.1-x86_64-linux/lib/libdsd2pcm.a $(pkg-config --libs-only-l --static dsd2pcm | sed 's/-ldsd2pcm//') -o minimal
+cc libdsd2pcm-0.1.2-x86_64-linux/examples/minimal.c $(pkg-config --cflags dsd2pcm) libdsd2pcm-0.1.2-x86_64-linux/lib/libdsd2pcm.a $(pkg-config --libs-only-l --static dsd2pcm | sed 's/-ldsd2pcm//') -o minimal
 ```
 
 To install system-wide, copy `include/` and `lib/` under a prefix such as `/usr/local`; the

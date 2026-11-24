@@ -48,7 +48,7 @@ dependencies = [
 
 [[package]]
 name = "dsd2pcm"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "claxon",
 ]

@@ -82,6 +82,7 @@ jobs:
       CARGO_PROFILE_DEV_OPT_LEVEL: "2"
       DSD2PCM_SOAK_ITERATIONS: "100"
       DSD2PCM_SOAK_RSS_REPORT_ONLY: "1"  # TSan's shadow memory grows with the run
+      DSD2PCM_SOAK_HEAP_REPORT_ONLY: "1"  # 100 iterations end before the warm-up (docs/testing.md)
     steps:
       - name: Packages
         run: dnf -y -q --setopt=install_weak_deps=False install git-core gcc && dnf clean all

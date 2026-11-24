@@ -20,5 +20,7 @@ doc = false
 dsd2pcm.workspace = true
 
 [features]
-default = ["flac"]
+# Off by default: the C interface converts DSD input only, and without it the library
+# contains no third-party code (only Rust's standard library).
+default = []
 flac = ["dsd2pcm/flac"]
