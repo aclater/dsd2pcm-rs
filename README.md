@@ -71,10 +71,23 @@ The [documentation index](docs/README.md) lists every page.
 
 ## Licence and credits
 
-Dual-licensed under either of the Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-or the MIT licence ([LICENSE-MIT](LICENSE-MIT)), at your option. Unless you state otherwise, any
-contribution you intentionally submit for inclusion in this work, as defined in the Apache-2.0
-licence, is dual-licensed as above, without any additional terms or conditions.
+**Code** is dual-licensed under either of the Apache License, Version 2.0
+([LICENSE-APACHE](LICENSE-APACHE)) or the MIT licence ([LICENSE-MIT](LICENSE-MIT)), at your
+option. [NOTICE](NOTICE) holds the attributions to keep with it. Unless you state otherwise, any
+code contribution you intentionally submit for inclusion in this work, as defined in the
+Apache-2.0 licence, is dual-licensed as above, without any additional terms or conditions.
+
+**Documentation and measurement data** are licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+([LICENSES/CC-BY-4.0.txt](LICENSES/CC-BY-4.0.txt)): the pages under `docs/` (the methodology
+and the quality pages, `docs/quality/`, included), the charts under `docs/assets/quality/`, the
+measurement suite `suites/`, and the signal and decoder definitions and the README of
+`tools/quality/`. Code examples and commands in these pages may also be used under the code
+licence. Not covered: the icon files in `docs/assets/` (MIT OR Apache-2.0, as the code), and
+facts and figures cited from other sources, which keep their own terms. Suggested attribution:
+"dsd2pcm documentation, the dsd2pcm-rs authors, https://github.com/dsd-toolbox/dsd2pcm-rs,
+CC BY 4.0". Documentation contributions are licensed the same way.
+[CITATION.cff](CITATION.cff) says how to cite the software.
 
 Credits ([PROVENANCE.md](PROVENANCE.md) has the details):
 

@@ -44,14 +44,14 @@ The GitHub release, with these assets:
 | `libdsd2pcm-0.1.2-x86_64-windows.zip` | C library, Windows 10 and 11, x86_64, for MSVC |
 | `libdsd2pcm-0.1.2-x86_64-windows-gnu.zip` | (from 0.2.0) C library, Windows 10 and 11, x86_64, for MinGW-w64 gcc (msvcrt) |
 
-A `dsd2pcm-` archive holds `dsd2pcm` (or `dsd2pcm.exe`), `README.md`, `LICENSE-MIT` and
-`LICENSE-APACHE`. A `libdsd2pcm-` archive holds `include/dsd2pcm.h`, the shared library
+A `dsd2pcm-` archive holds `dsd2pcm` (or `dsd2pcm.exe`), `README.md`, `LICENSE-MIT`,
+`LICENSE-APACHE` and `NOTICE`. A `libdsd2pcm-` archive holds `include/dsd2pcm.h`, the shared library
 under its ABI-versioned name (`libdsd2pcm.so.1` with a `libdsd2pcm.so` link, SONAME
 `libdsd2pcm.so.1`; `libdsd2pcm.1.dylib` with a `libdsd2pcm.dylib` link, install name
 `@rpath/libdsd2pcm.1.dylib`; `bin/dsd2pcm.dll` with the import library
 `lib/dsd2pcm.dll.lib`, or `lib/libdsd2pcm.dll.a` for MinGW-w64), the static library,
 `lib/pkgconfig/dsd2pcm.pc` (not for MSVC), `examples/minimal.c`, a README taken from
-[docs/c-api.md](c-api.md#binary-releases) and the licences. The C library holds no
+[docs/c-api.md](c-api.md#binary-releases), the licences and `NOTICE`. The C library holds no
 third-party code: it is built without the `flac` feature, and
 `.github/scripts/check-capi-no-claxon.sh` checks the static library of every archive but the
 MSVC one for claxon symbols with `nm` (in `check-capi-archive.sh`). The command-line tool

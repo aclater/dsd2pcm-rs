@@ -1,4 +1,5 @@
 # Release quality comparison for dsd2pcm: a release against the previous one.
+# Licence: CC BY 4.0 (LICENSES/CC-BY-4.0.txt); the dsd2pcm-rs authors.
 #
 # Measurement suite: dsd-measure, https://github.com/dsd-toolbox/dsd-measure
 # Pinned: version 0.1.1, tag v0.1.1, commit d234b7a8233ccfe391776e7c6425cbf8643c47e3.

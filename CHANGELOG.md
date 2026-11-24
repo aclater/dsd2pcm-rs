@@ -58,6 +58,8 @@ with its measured effect. Releases up to 0.1.2 keep their behaviour as released.
 
 ### Changed
 
+- Docs, methodology and measurement data are now CC BY 4.0; code stays MIT OR Apache-2.0.
+  Added NOTICE and CITATION.cff ([licence and credits](README.md#licence-and-credits)).
 - Output stability rule: output is deterministic within a release (the same version, input
   and settings give the same bytes on every CPU and SIMD level). Between releases it may
   change when measured quality improves; every such change is listed in this changelog with

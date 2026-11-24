@@ -16,7 +16,7 @@
 #   bin/dsd2pcm.dll, lib/libdsd2pcm.dll.a (import library)             Windows, MinGW-w64
 #   lib/libdsd2pcm.a (lib/dsd2pcm.lib on Windows, MSVC)                the static library
 #   lib/pkgconfig/dsd2pcm.pc                                           all but MSVC: prefix-relative
-#   examples/minimal.c, README.md (docs/c-api.md, "Binary releases"), LICENSE-MIT, LICENSE-APACHE
+#   examples/minimal.c, README.md (docs/c-api.md, "Binary releases"), LICENSE-MIT, LICENSE-APACHE, NOTICE
 set -euo pipefail
 
 version=$1 name=$2 target=$3 libdir=$4 outdir=$5 static_libs=$6
@@ -30,7 +30,7 @@ dir=$outdir/$pkg
 rm -rf "$dir"
 mkdir -p "$dir/include" "$dir/lib"
 cp crates/dsd2pcm-capi/include/dsd2pcm.h "$dir/include/"
-cp LICENSE-MIT LICENSE-APACHE "$dir/"
+cp LICENSE-MIT LICENSE-APACHE NOTICE "$dir/"
 mkdir -p "$dir/examples"
 cp crates/dsd2pcm-capi/tests/minimal.c "$dir/examples/"
 
@@ -102,7 +102,7 @@ fi
     echo
     awk '/^## Binary releases/ {on = 1; next} on && /^## / {exit} on' docs/c-api.md
     echo
-    echo "Licence: MIT OR Apache-2.0 (LICENSE-MIT, LICENSE-APACHE)."
+    echo "Licence: MIT OR Apache-2.0 (LICENSE-MIT, LICENSE-APACHE); attributions in NOTICE."
 } > "$dir/README.md"
 grep -q 'pkg-config' "$dir/README.md" || { echo "::error::docs/c-api.md has no \"Binary releases\" section"; exit 1; }
 

@@ -26,8 +26,12 @@ rules every change follows are in [AGENTS.md](AGENTS.md).
 
 ## Licence
 
-Unless you state otherwise, any contribution you intentionally submit for inclusion in this
-work, as defined in the Apache-2.0 licence, is dual-licensed under the MIT licence and the
-Apache License, Version 2.0, without any additional terms or conditions.
+Unless you state otherwise, any code contribution you intentionally submit for inclusion in
+this work, as defined in the Apache-2.0 licence, is dual-licensed under the MIT licence and the
+Apache License, Version 2.0, without any additional terms or conditions. Contributions to the
+documentation and measurement data (the parts the README's
+[Licence and credits](README.md#licence-and-credits) lists) are licensed under CC BY 4.0
+([LICENSES/CC-BY-4.0.txt](LICENSES/CC-BY-4.0.txt)). Material taken from elsewhere keeps its
+own terms: name its source and licence in the change and in [PROVENANCE.md](PROVENANCE.md).
 
 Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

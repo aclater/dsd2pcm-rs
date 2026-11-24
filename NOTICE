@@ -1,0 +1,26 @@
+dsd2pcm — DSD Toolbox, https://github.com/dsd-toolbox/dsd2pcm-rs
+Copyright 2026 The dsd2pcm-rs authors
+
+The code is licensed under MIT OR Apache-2.0 (LICENSE-MIT, LICENSE-APACHE). The
+documentation, methodology, quality pages and measurement data are licensed under
+CC BY 4.0 (LICENSES/CC-BY-4.0.txt); README.md, section "Licence and credits", lists
+what that covers.
+
+This product includes code ported from or copied from:
+
+- scarletbook-pcm 0.7.0 (https://crates.io/crates/scarletbook-pcm),
+  Copyright (c) 2026 The scarletbook-rs authors, MIT OR Apache-2.0: the fast filter's
+  taps (copied unchanged), the decimator's stage plan, kernels, quantiser and SIMD
+  dispatch, the frame-run interface, the exactness bounds, and the Remez exchange and
+  half-band design used to generate the precise filter's taps.
+- scarletbook-rs .github/scripts/clib-shstk.py, Copyright (c) 2026 The scarletbook-rs
+  authors, MIT OR Apache-2.0 (release workflow only).
+- pysacd csrc/dsp.c and csrc/dsp.h (https://github.com/dsd-toolbox/pysacd, commit
+  94b2c53), Copyright (c) 2026 the pysacd authors, relicensed from GPL-2.0-or-later to
+  MIT OR Apache-2.0 by their copyright holder: the pysacd filter, its taps and its
+  quantiser and dither.
+
+The pysacd filter's first stage uses the byte lookup-table technique of Sebastian
+Gesemann's dsd2pcm (2009, BSD-3-Clause); no code is taken from it.
+
+PROVENANCE.md has the file-by-file details.

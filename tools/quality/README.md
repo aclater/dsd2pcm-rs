@@ -59,6 +59,15 @@ Decoders run elsewhere (for example a Windows player) are measured the same way:
 WAVs in `out/dec/<decoder>/<setting>/`, named as the DSF inputs with `.wav`, and run
 `analyse.py`.
 
+## Licence
+
+The scripts and `sbpcm` are code, MIT OR Apache-2.0. This README, `signals.toml` and
+`decoders.toml` (the signal and decoder definitions) are licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+([LICENSES/CC-BY-4.0.txt](../../LICENSES/CC-BY-4.0.txt)), as is the measurement data the
+scripts publish in [docs/pcm-quality.md](../../docs/pcm-quality.md)
+([Licence and credits](../../README.md#licence-and-credits)).
+
 ## See also
 
 - [PCM quality](../../docs/pcm-quality.md): the results and what they mean

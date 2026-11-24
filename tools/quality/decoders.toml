@@ -1,4 +1,5 @@
 # Decoders for decode.py. Each is a black box: a DSD file in, a PCM WAV out.
+# Licence: CC BY 4.0 (LICENSES/CC-BY-4.0.txt); the dsd2pcm-rs authors.
 #
 # command: an argument list; {input}, {output}, {rate}, {cutoff}, {gain} and {tool:NAME}
 #   (a path given with --tool NAME=PATH) are filled in.

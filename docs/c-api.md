@@ -268,7 +268,7 @@ An archive holds:
 - `lib/pkgconfig/dsd2pcm.pc` (all but MSVC), relative to wherever the archive is
   unpacked; its `Libs.private` lists the system libraries the static library needs;
 - `examples/minimal.c` (`crates/dsd2pcm-capi/tests/minimal.c`), `README.md`,
-  `LICENSE-MIT`, `LICENSE-APACHE`.
+  `LICENSE-MIT`, `LICENSE-APACHE`, `NOTICE`.
 
 The `1` in the file names is the ABI version (see [ABI](#abi)). Check a download, unpack
 it, and build the example against it, from the folder holding the archive (Linux x86_64

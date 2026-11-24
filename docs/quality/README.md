@@ -24,6 +24,14 @@ the page layout in the [template](template.md). Every page states, in its "Measu
 line, the two dsd2pcm commits, the dsd-measure version and commit and the CPU model. The
 figures are what the suite reads; they make no claim about audibility.
 
+## Licence
+
+The published pages here, the suite and the figures they hold are licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+([LICENSES/CC-BY-4.0.txt](../../LICENSES/CC-BY-4.0.txt)), like the rest of the documentation;
+the code stays MIT OR Apache-2.0
+([Licence and credits](../../README.md#licence-and-credits)).
+
 ## See also
 
 - [Template](template.md)

@@ -218,7 +218,7 @@ jobs:
           pkg="dsd2pcm-$VERSION-$NAME"
           mkdir -p "dist/$pkg"
           install -m 0755 "target/$TARGET/release/dsd2pcm" "dist/$pkg/dsd2pcm"
-          install -m 0644 README.md LICENSE-MIT LICENSE-APACHE "dist/$pkg/"
+          install -m 0644 README.md LICENSE-MIT LICENSE-APACHE NOTICE "dist/$pkg/"
           # The C library's archive (.github/scripts/stage-capi.sh).
           cpkg=$(.github/scripts/stage-capi.sh "$VERSION" "$NAME" "$TARGET" "target/$TARGET/release" dist "$(cat "$RUNNER_TEMP/static-libs")")
           # Reproducible: fixed order, owner and times (the commit's), no gzip timestamp.
@@ -477,7 +477,7 @@ jobs:
             pkg="dsd2pcm-$VERSION-$name"
             mkdir -p "dist/$name/$pkg"
             install -m 0755 "$out/dsd2pcm" "dist/$name/$pkg/"
-            install -m 0644 README.md LICENSE-MIT LICENSE-APACHE "dist/$name/$pkg/"
+            install -m 0644 README.md LICENSE-MIT LICENSE-APACHE NOTICE "dist/$name/$pkg/"
             # The C library's archive (.github/scripts/stage-capi.sh).
             cpkg=$(.github/scripts/stage-capi.sh "$VERSION" "$name" "$target" "$out" "dist/$name" "$(cat "$out/static-libs")")
             for p in "$pkg" "$cpkg"; do
@@ -630,7 +630,7 @@ jobs:
         run: |
           pkg="dsd2pcm-$VERSION-$NAME"
           mkdir -p "dist/$pkg"
-          cp target/release/dsd2pcm.exe README.md LICENSE-MIT LICENSE-APACHE "dist/$pkg/"
+          cp target/release/dsd2pcm.exe README.md LICENSE-MIT LICENSE-APACHE NOTICE "dist/$pkg/"
           # The C library's archive (.github/scripts/stage-capi.sh).
           cpkg=$(.github/scripts/stage-capi.sh "$VERSION" "$NAME" x86_64-pc-windows-msvc target/release dist "$(cat "$RUNNER_TEMP/static-libs")")
           for p in "$pkg" "$cpkg"; do
@@ -800,7 +800,7 @@ jobs:
           (cd dist && sha256sum "$src.tar.gz" > "$src.tar.gz.sha256" && cat "$src.tar.gz.sha256")
           # Each of these files is in it (grep alone would pass on any one of them).
           tar -tzf "dist/$src.tar.gz" > "$RUNNER_TEMP/src-files"
-          for f in Cargo.lock LICENSE-MIT LICENSE-APACHE fuzz/Cargo.toml docs/c-api.md crates/dsd2pcm-capi/include/dsd2pcm.h; do
+          for f in Cargo.lock LICENSE-MIT LICENSE-APACHE NOTICE LICENSES/CC-BY-4.0.txt CITATION.cff fuzz/Cargo.toml docs/c-api.md crates/dsd2pcm-capi/include/dsd2pcm.h; do
             grep -qxF "dsd2pcm-$VERSION/$f" "$RUNNER_TEMP/src-files" || { echo "::error::$f is not in the source archive"; exit 1; }
           done
           echo "$(wc -l < "$RUNNER_TEMP/src-files") entries"
