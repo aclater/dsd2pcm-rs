@@ -311,20 +311,21 @@ Pass: every line is `ok`.
 ## 11. Quality comparison with the previous release
 
 Measures the candidate and the previous release with
-[dsd-measure](https://github.com/dsd-toolbox/dsd-measure) 0.1.1 and
+[dsd-measure](https://github.com/dsd-toolbox/dsd-measure) 0.1.2 and
 [suites/dsd2pcm.toml](../suites/dsd2pcm.toml), on one machine, and writes
 `docs/quality/X.Y.Z.md` ([how the comparison is made](quality/README.md)). Nothing is timed,
 so it runs in parallel with the other items. It needs Python 3.11 or later, a C compiler
-and about 15 minutes with the builds (the measurements take 5 minutes and 1.7 GB of memory
-on an AMD Ryzen AI Max+ 395). The example is the first comparison, 0.2.0 against 0.1.2; for
-a later release, change the two tags and the file name.
+and about 15 minutes with the builds (the 19 devices take about 8 minutes on an AMD Ryzen AI
+Max+ 395, and the null tests can run beside them; the 0.1.1 suite's run used 1.7 GB of
+memory). The example is the first comparison, 0.2.0 against 0.1.2; for a later release,
+change the two tags and the file name.
 
 Install the pinned measurement suite and build the two versions under `target/quality/`
 (the candidate from its branch, the previous release from its tag):
 
 <!-- docs-run: checkout=1 -->
 ```sh
-pipx install git+https://github.com/dsd-toolbox/dsd-measure@d234b7a8233ccfe391776e7c6425cbf8643c47e3
+pipx install git+https://github.com/dsd-toolbox/dsd-measure@3eaec2df13634f3bfc3968326a1dd7604ddfaf08
 dsd-measure --version
 cargo install --locked --path crates/dsd2pcm-cli --root target/quality/new
 # facts:release repo=dsd-toolbox/dsd2pcm-rs fmt="cargo install --locked --git https://github.com/{repo} --tag {tag} --root target/quality/old dsd2pcm-cli"
@@ -332,7 +333,7 @@ cargo install --locked --git https://github.com/dsd-toolbox/dsd2pcm-rs --tag v0.
 # /facts
 ```
 
-`dsd-measure --version` must print `0.1.1`. Measure both, from the repository root:
+`dsd-measure --version` must print `0.1.2`. Measure both, from the repository root:
 
 <!-- docs-run: checkout=1 -->
 ```sh
@@ -340,8 +341,9 @@ dsd-measure run suites/dsd2pcm.toml --only reference_floor levels noise alias_to
 ```
 
 Then the null test of each filter, rate and cutoff that both versions have, new against
-old, on the suite's multitone signal (`fast` is 0.1.x's default; the precise filter, the
-default from 0.2.0, has no null test until the previous release has it too). Its SHA-256 must be
+old, on the suite's multitone signal (`fast` is 0.1.x's default), and of the precise filter,
+the default from 0.2.0, against the previous release's default (fast) at the same cutoff and
+rate, until the previous release has the precise filter too. Its SHA-256 must be
 `100d1ba2cb46d98374ee5b8591b995712d12cd21c7d9370d50a1d68da3c030fc`:
 
 <!-- docs-run: checkout=1 -->
@@ -355,11 +357,19 @@ dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/mul
 dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old fast wide 352800" --device "new fast wide 352800" -o target/quality/null/fast-wide-352800
 dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old pysacd 88200" --device "new pysacd 88200" -o target/quality/null/pysacd-88200
 dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old pysacd 176400" --device "new pysacd 176400" -o target/quality/null/pysacd-176400
+dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old fast 40 88200" --device "new precise 40 88200" -o target/quality/null/precise-40-88200
+dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old fast 40 176400" --device "new precise 40 176400" -o target/quality/null/precise-40-176400
+dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old fast 40 352800" --device "new precise 40 352800" -o target/quality/null/precise-40-352800
+dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old fast wide 176400" --device "new precise wide 176400" -o target/quality/null/precise-wide-176400
+dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device "old fast wide 352800" --device "new precise wide 352800" -o target/quality/null/precise-wide-352800
 ```
 
 Copy [the template](quality/template.md) to `docs/quality/0.2.0.md` and fill it from
 `target/quality/report/<device>/results.json` (the keys are listed at the top of the suite
-file) and the first line of each `target/quality/null/*/index.md`. Fill its "Measured with"
+file) and the first line of each `target/quality/null/*/index.md`, and copy the raw results
+(each `results.json` and `provenance.json` under `target/quality/report/` and
+`target/quality/null/`) to `docs/quality/data/0.2.0/`, with the absolute paths in them made
+relative to the repository root ([how](quality/README.md#raw-data)). Fill its "Measured with"
 line: the candidate's commit (`git rev-parse --short HEAD`), the previous tag's commit
 (`git rev-parse --short v0.1.2^{commit}`), the Rust version (`rustc --version`), the
 dsd-measure version and commit, and the CPU model (`lscpu`, the "Model name" line), never

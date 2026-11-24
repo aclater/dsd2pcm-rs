@@ -1,0 +1,331 @@
+{
+ "headline": "Result: new pysacd 88200 measures 126 dB below a reference-level tone in its weakest figure in the audio band, background noise, A-weighted; every concluded figure is at least 120 dB down. Not judged in this version: filter and ringing.",
+ "conclusions": [
+  {
+   "id": "overall",
+   "verdict": "margin-120",
+   "label": "At least 120 dB down",
+   "text": "In every test concluded here, distortion, noise and images stay at least 126 dB below a reference-level tone (the weakest is background noise, A-weighted), above the 120 dB reference line (docs/conclusions.md gives its source and status). This is a measurement, not a listening test.",
+   "metrics": [
+    "dynamic_range.dr_a_db",
+    "filter_summary.stopband_worst_db",
+    "noise.a_weighted_dbfs",
+    "tone_0dbsacd.sinad_db"
+   ],
+   "evidence": [
+    {
+     "metric": "tone_0dbsacd.sinad_db",
+     "label": "distortion plus noise on a 1 kHz tone (SINAD)",
+     "value": "127 dB below the reference level"
+    },
+    {
+     "metric": "dynamic_range.dr_a_db",
+     "label": "dynamic range, A-weighted",
+     "value": "130 dB below the reference level"
+    },
+    {
+     "metric": "noise.a_weighted_dbfs",
+     "label": "background noise, A-weighted",
+     "value": "126 dB below the reference level"
+    },
+    {
+     "metric": "filter_summary.stopband_worst_db",
+     "label": "image rejection (an upper bound on the images)",
+     "value": "132 dB below the reference level"
+    }
+   ],
+   "thresholds": [
+    "range_120_db"
+   ]
+  },
+  {
+   "id": "stopband",
+   "verdict": "fact",
+   "label": "Finding",
+   "text": "Image rejection: tones from 68.2 to 78.2 kHz come back as images at least 133 dB below the tone. The figure includes the device's own noise, so it is an upper bound on the images.",
+   "metrics": [
+    "filter_summary.stopband_tested_hz",
+    "filter_summary.stopband_worst_db"
+   ],
+   "evidence": [
+    {
+     "metric": "filter_summary.stopband_worst_db",
+     "label": "worst image of the tones tested",
+     "value": "133 dB below the tone"
+    },
+    {
+     "metric": "filter_summary.stopband_tested_hz",
+     "label": "tones tested",
+     "value": "68.2 to 78.2 kHz"
+    }
+   ],
+   "thresholds": []
+  },
+  {
+   "id": "ultrasonic",
+   "verdict": "no-threshold",
+   "label": "No agreed threshold",
+   "text": "Ultrasonic noise: -72 dBFS between 20 and 44.1 kHz. Noise shaping puts noise there by design. There is no agreed limit, so no verdict is given.",
+   "metrics": [
+    "noise.bands.20000-40000",
+    "noise.bands.40000-44100.0"
+   ],
+   "evidence": [
+    {
+     "metric": "noise.bands.20000-40000",
+     "label": "noise from 20 to 40 kHz",
+     "value": "-79 dBFS"
+    },
+    {
+     "metric": "noise.bands.40000-44100.0",
+     "label": "noise from 40 to 44.1 kHz",
+     "value": "-73 dBFS"
+    },
+    {
+     "metric": "noise.bands.20000-40000",
+     "label": "sum from 20 to 44.1 kHz",
+     "value": "-72 dBFS"
+    }
+   ],
+   "thresholds": [
+    "ultrasonic"
+   ]
+  },
+  {
+   "id": "level",
+   "verdict": "fact",
+   "label": "Finding",
+   "text": "Level: unity gain within 0.01 dB and quiet signals keep their level down to -126 dBFS.",
+   "metrics": [
+    "gain_error_db",
+    "linearity.lowest_level_within_0p5_db"
+   ],
+   "evidence": [
+    {
+     "metric": "gain_error_db",
+     "label": "gain error at 0 dB SACD",
+     "value": "0.01 dB"
+    },
+    {
+     "metric": "linearity.lowest_level_within_0p5_db",
+     "label": "lowest level reproduced within 0.5 dB",
+     "value": "-126 dBFS"
+    }
+   ],
+   "thresholds": [
+    "flat_db"
+   ]
+  },
+  {
+   "id": "pending",
+   "verdict": "pending",
+   "label": "Not concluded",
+   "text": "Not concluded in this version: filter and ringing and peak-level SINAD. These figures are either not validated yet or not used by any rule in this version, so they are in the table for reference only and are not part of any verdict here. The peak-level SINAD is shown with the floor of the reference modulator at that level.",
+   "metrics": [
+    "filter_summary",
+    "tone_peak"
+   ],
+   "evidence": [
+    {
+     "metric": "filter_summary",
+     "label": "filter and ringing",
+     "value": "measured, not concluded"
+    },
+    {
+     "metric": "tone_peak",
+     "label": "peak-level SINAD",
+     "value": "measured, not concluded"
+    }
+   ],
+   "thresholds": []
+  }
+ ],
+ "device_versions": {
+  "adapter": "cli",
+  "declared_version": "0.2.0",
+  "program": "target/quality/new/bin/dsd2pcm",
+  "path": "target/quality/new/bin/dsd2pcm",
+  "sha256": "0e5b63b8114ede2bbbf38afdbaae5067ba29114ce5814a019b35618434659141",
+  "version": null
+ },
+ "metrics": {
+  "analysis_version": 2,
+  "device_class": "A",
+  "dsd_rate": 2822400,
+  "reference_floor": {
+   "dsd_rate": 2822400,
+   "target_db": -140.0,
+   "margin_db": 6.0,
+   "ntf": "order 8, max gain 1.45",
+   "ntf_fallbacks": 0,
+   "chain": {
+    "thdn_db": -146.99,
+    "thd_db": -163.28,
+    "thdn_a_db": -150.37,
+    "sinad_db": 146.99,
+    "noise_dbfs": -159.06,
+    "noise_a_dbfs": -162.45,
+    "dr_db": 148.46,
+    "dr_a_db": 151.8,
+    "metric_floors": {
+     "lobe_noise_db": -183.5,
+     "imd_smpte_db": -144.78,
+     "imd_ccif_db": -134.89,
+     "multitone_dfr_db": 150.7
+    }
+   },
+   "decoder_alone": {
+    "thdn_db": -280.92,
+    "thd_db": -309.97,
+    "thdn_a_db": -282.12,
+    "sinad_db": 280.92,
+    "peak": {
+     "thdn_db": -280.93,
+     "thd_db": -310.0,
+     "thdn_a_db": -282.12,
+     "sinad_db": 280.93
+    },
+    "noise_dbfs": -346.95,
+    "noise_a_dbfs": -348.14,
+    "dr_db": 340.93,
+    "dr_a_db": 342.12,
+    "alias_rejection_db": -187.7,
+    "metric_floors": {
+     "lobe_noise_db": -369.4,
+     "imd_smpte_db": -294.92,
+     "imd_ccif_db": -279.67
+    }
+   },
+   "meets_target": true
+  },
+  "tone_0dbsacd": {
+   "thd_db": -146.81405288059406,
+   "thdn_db": -127.96672249213509,
+   "thdn_a_db": -130.11563373284065,
+   "sinad_db": 127.96672249213509,
+   "thd_percent": 4.563492656115046e-06,
+   "thdn_percent": 3.996353300727451e-05,
+   "largest_harmonic": {
+    "order": 7,
+    "db": -152.46493138342657
+   }
+  },
+  "tone_peak": {
+   "thd_db": -139.30151169423877,
+   "thdn_db": -127.47986406179477,
+   "sinad_db": 127.47986406179477,
+   "design": "order 8, max gain 1.3",
+   "design_floor": {
+    "order": 8,
+    "hinf": 1.3,
+    "ntf": "order 8, max gain 1.3",
+    "stable": true,
+    "level_dbfs": -2.922386997509154,
+    "thdn_db": -129.16,
+    "thd_db": -139.5,
+    "sinad_db": 129.16,
+    "lobe_noise_db": -148.3
+   }
+  },
+  "gain_error_db": 8.295838725302929e-06,
+  "dynamic_range": {
+   "dr_db": 128.34665900088265,
+   "dr_a_db": 130.52229557285415,
+   "noise_dbfs": -134.36725895752247,
+   "noise_a_dbfs": -136.54289552949396
+  },
+  "linearity": {
+   "lowest_level_within_0p5_db": -126.02059991327964,
+   "error_at": {
+    "-6": 8.295838725302929e-06,
+    "-66": -3.6945574137803305e-05,
+    "-90": -0.0002461237060771282,
+    "-102": -0.0022244207315793574,
+    "-114": -0.00030910870408717983,
+    "-126": 0.02863162696303334
+   }
+  },
+  "noise_input": "32-bit-level TPDF-dithered silence (about -194.85 dBFS over 20 kHz, below every converter here) through the reference modulator",
+  "noise_reference": "dBFS re the rms of a full-scale sine (AES17, ASR); a full-scale square would read +3 dB",
+  "noise_idle_pattern_a_weighted_dbfs": -146.94342368072603,
+  "noise": {
+   "bands": {
+    "20-20000": -130.71649801415072,
+    "20000-40000": -79.25531456970747,
+    "40000-44100.0": -73.0307375917499
+   },
+   "a_weighted_dbfs": -132.58525192669055,
+   "unweighted_dbfs": -130.71649801415072,
+   "density_1k_dbfs_hz": -170.88783377394083,
+   "density_20k_dbfs_hz": -175.1698994761276,
+   "bin_hz": 1.3458251953125,
+   "averages": 8
+  },
+  "dc": {
+   "dc": -3.3863203669547837e-10,
+   "dc_dbfs": -189.40543914652045
+  },
+  "filter_summary": {
+   "stopband_worst_db": -132.58030744581646,
+   "stopband_edge_hz": 68200.0,
+   "stopband_tested_hz": [
+    68202.38342285156,
+    78201.86462402344
+   ],
+   "stopband_method": "worst image of tones from the output rate minus 20 kHz upward, read at the folded frequency (output rate minus tone, 20 kHz or lower), re the tone; includes the device's own noise, so it is an upper bound on the filter's stopband level: the true level is this or deeper"
+  },
+  "alias_tones": {
+   "output_rate": 88200,
+   "worst_image_db": -132.58030744581646,
+   "worst_tone_hz": 68202.38342285156,
+   "worst_image_hz": 19997.616577148438,
+   "rows": [
+    {
+     "tone_hz": 68202.38342285156,
+     "alias_hz": 19997.616577148438,
+     "image_db": -132.58030744581646
+    },
+    {
+     "tone_hz": 70202.27966308594,
+     "alias_hz": 17997.720336914062,
+     "image_db": -158.07500039875208
+    },
+    {
+     "tone_hz": 72202.17590332031,
+     "alias_hz": 15997.824096679688,
+     "image_db": -138.63856306074496
+    },
+    {
+     "tone_hz": 74202.07214355469,
+     "alias_hz": 13997.927856445312,
+     "image_db": -134.38202340306614
+    },
+    {
+     "tone_hz": 76201.96838378906,
+     "alias_hz": 11998.031616210938,
+     "image_db": -138.83100917423036
+    },
+    {
+     "tone_hz": 78201.86462402344,
+     "alias_hz": 9998.135375976562,
+     "image_db": -146.58370772223913
+    }
+   ],
+   "note": "image level relative to the input tone; includes the device noise floor"
+  },
+  "output_format": {
+   "container": "wav",
+   "kind": "int",
+   "bits": 24,
+   "rate": 88200,
+   "text": "24-bit integer",
+   "quantisation_sinad_db": 143.7,
+   "quantisation_sinad_dithered_db": 138.9,
+   "tone_shift_db": 0.0
+  }
+ },
+ "not_run": {},
+ "notes": [
+  "Ultrasonic noise is limited by the device output rate."
+ ]
+}

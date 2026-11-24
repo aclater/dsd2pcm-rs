@@ -1,0 +1,366 @@
+{
+ "device": {
+  "name": "new pysacd 88200",
+  "class": "A",
+  "adapter": "cli",
+  "gain_db": 0.0,
+  "dsd_rate": 2822400,
+  "command": "target/quality/new/bin/dsd2pcm {input} {output} --filter pysacd --rate 88200 --single-thread",
+  "shell": false,
+  "input_ext": "dsf"
+ },
+ "profile": "quick",
+ "in_rate": 88200,
+ "reference_chain": "2",
+ "versions": {
+  "dsd_measure": "0.1.2",
+  "reference_chain": "2",
+  "python": "3.15.2",
+  "numpy": "2.5.5",
+  "scipy": "1.18.1",
+  "matplotlib": "3.11.2"
+ },
+ "suite_sha256": "8a64e20d4fc6fdee12e2f89fbfe62cee8ca1622865d44739ba2b5b88309f66ce",
+ "adapter_calls": [
+  {
+   "input_sha256": "725c7c32c57d47a797e294213d54a499d5dbfc41b6f0b828af3d38af837c718b",
+   "output_sha256": "5c555205659e2ced8416c090495d57c409cc3739d6016690f894c5d2ca31ec55",
+   "rate": 88200,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 88200,
+    "channels": 1
+   }
+  },
+  {
+   "input_sha256": "eb2f9ce4c4b1aa91ccd1005a316bcb54f475d279188bb1696fb8e80388892c87",
+   "output_sha256": "9d5dcdb2af548aaa5bb26226c87ebc8ad02e7e3f169f7d5f0d8fad19daa30d15",
+   "rate": 88200,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 88200,
+    "channels": 1
+   }
+  },
+  {
+   "input_sha256": "03c34cd1087d4a25c639e4ac7e8e88a6d844f86ceed54600929e8fe9a3374b3d",
+   "output_sha256": "e40cd49eb1ea784e48b50dde97235fbd61f2ad9275818d0e418a797b26cc1465",
+   "rate": 88200,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 88200,
+    "channels": 1
+   }
+  },
+  {
+   "input_sha256": "7f9e2b7a3af291767c31670fdeaf178fa1d42a8983dbaa77db7e7e2b4251bb27",
+   "output_sha256": "7620cad0e79cd4b7d58a5c52370d982b5d7405a2884b15c1a7d3478952370e2c",
+   "rate": 88200,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 88200,
+    "channels": 1
+   }
+  },
+  {
+   "input_sha256": "63b93550b0e2b59f3dc20855f07ef7487648c868b4782cf7f4e47fc1c0c5a9ab",
+   "output_sha256": "01c9c171e823ff5e8decaa22dc21188baf38de6d78105e12909e7f735092b04c",
+   "rate": 88200,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 88200,
+    "channels": 1
+   }
+  },
+  {
+   "input_sha256": "defcecfd1aff5dd8c8bccac2c015dd8b29b4f20a17f30fc044aeecf753858b3d",
+   "output_sha256": "afa294d0eb763ea1d75c2938c195c42a842c7cbda8c09f0ade2268ca432200a8",
+   "rate": 88200,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 88200,
+    "channels": 1
+   }
+  },
+  {
+   "input_sha256": "f07e8387d86f852759a326675d2a86ef3d71a509a0f832006a02d7a02572427b",
+   "output_sha256": "ac4b909de7d79a34517a8f14320c842d05474dfb4059d7eec0d9ff62eebec6ab",
+   "rate": 88200,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 88200,
+    "channels": 1
+   }
+  },
+  {
+   "input_sha256": "2f4c3a77fd5b79417d24e446af135d17d06dd348af2c28a43b97cc0e731e7218",
+   "output_sha256": "5dd82baf831ddc7e0ac57c9660d81902aeb2588d3973e9ab71092649e49ca629",
+   "rate": 88200,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 88200,
+    "channels": 1
+   }
+  },
+  {
+   "input_sha256": "17fc627a047dbd3ea506455ebd8bb750b640d996c38097ba69836b1b0c3c3e50",
+   "output_sha256": "7fef3d9100cb2e5842059beff3c737bc60216ad0b0ed5477d0cc667b3dff4af3",
+   "rate": 88200,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 88200,
+    "channels": 1
+   }
+  },
+  {
+   "input_sha256": "5a61d3294403fa443da4d68c5e30d8b21ab88bc45cef0fa977b7c1158e4b9b95",
+   "output_sha256": "beb5cdcf1864f87e60ce98657a471eaa779b75ae879ee3d8415d5d17bd40f6a0",
+   "rate": 88200,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 88200,
+    "channels": 1
+   }
+  },
+  {
+   "input_sha256": "f994590f8c3aa84fe8a510ea1e333828c0fc6abd38124508ec2f66d9e986f5a4",
+   "output_sha256": "ac56e6ece83940d3d36244d1fe55852814b494ad5638875a7861112c53b4f21a",
+   "rate": 88200,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 88200,
+    "channels": 1
+   }
+  }
+ ],
+ "command": "dsd-measure run suites/dsd2pcm.toml --only reference_floor levels noise alias_tones -o target/quality/run1/report",
+ "timing_s": {
+  "reference_floor": 0.0,
+  "levels": 12.6,
+  "noise": 2.3,
+  "alias_tones": 9.0
+ },
+ "preflight": {
+  "checked": "converted a short test signal",
+  "seconds": 0.28,
+  "rate": 88200,
+  "output_format": {
+   "container": "wav",
+   "kind": "int",
+   "bits": 24,
+   "rate": 88200,
+   "text": "24-bit integer",
+   "quantisation_sinad_db": 143.7,
+   "quantisation_sinad_dithered_db": 138.9,
+   "tone_shift_db": 0.0
+  },
+  "warning": "the tool wrote 24-bit integer PCM at 88.2 kHz, which alone limits SINAD to about 143.7 dB with plain rounding or 138.9 dB with TPDF dither whatever the decoder does, so a figure near that cannot be told from the file format. Ask the tool for floating-point output."
+ },
+ "device_versions": {
+  "adapter": "cli",
+  "declared_version": "0.2.0",
+  "program": "target/quality/new/bin/dsd2pcm",
+  "path": "target/quality/new/bin/dsd2pcm",
+  "sha256": "0e5b63b8114ede2bbbf38afdbaae5067ba29114ce5814a019b35618434659141",
+  "version": null
+ },
+ "profile_settings": {
+  "seg_s": 1.5,
+  "step_db": 6.0,
+  "fr_every": 2,
+  "noise_s": 6.0,
+  "mt_periods": 3,
+  "imd_s": 2.0,
+  "hold_s": 5.0,
+  "jtest_s": 12.0,
+  "tone_s": 2.0
+ },
+ "reference_modulator_designs": {
+  "levels": {
+   "ntf": "order 8, max gain 1.45",
+   "order": 8,
+   "hinf": 1.45,
+   "fallbacks": 0,
+   "overload": 0
+  },
+  "levels_peak": {
+   "ntf": "order 8, max gain 1.3",
+   "order": 8,
+   "hinf": 1.3,
+   "fallbacks": 3,
+   "overload": 0
+  },
+  "noise": {
+   "ntf": "order 8, max gain 1.45",
+   "order": 8,
+   "hinf": 1.45,
+   "fallbacks": 0,
+   "overload": 0
+  },
+  "alias_probe": {
+   "ntf": "order 8, max gain 1.45",
+   "order": 8,
+   "hinf": 1.45,
+   "fallbacks": 0,
+   "overload": 0
+  },
+  "alias_68202": {
+   "ntf": "order 8, max gain 1.4",
+   "order": 8,
+   "hinf": 1.4,
+   "fallbacks": 1,
+   "overload": 0
+  },
+  "alias_70202": {
+   "ntf": "order 8, max gain 1.4",
+   "order": 8,
+   "hinf": 1.4,
+   "fallbacks": 1,
+   "overload": 0
+  },
+  "alias_72202": {
+   "ntf": "order 8, max gain 1.4",
+   "order": 8,
+   "hinf": 1.4,
+   "fallbacks": 1,
+   "overload": 0
+  },
+  "alias_74202": {
+   "ntf": "order 8, max gain 1.45",
+   "order": 8,
+   "hinf": 1.45,
+   "fallbacks": 0,
+   "overload": 0
+  },
+  "alias_76201": {
+   "ntf": "order 8, max gain 1.45",
+   "order": 8,
+   "hinf": 1.45,
+   "fallbacks": 0,
+   "overload": 0
+  },
+  "alias_78201": {
+   "ntf": "order 8, max gain 1.45",
+   "order": 8,
+   "hinf": 1.45,
+   "fallbacks": 0,
+   "overload": 0
+  }
+ },
+ "measured": {
+  "device": {
+   "name": "new pysacd 88200",
+   "class": "A",
+   "kind": "DSD to PCM converter",
+   "adapter": "cli",
+   "gain_db": 0.0,
+   "dsd_rate": 2822400,
+   "dsd_rate_name": "DSD64",
+   "command": "target/quality/new/bin/dsd2pcm /tmp/dsd-measure-example/in1.dsf /tmp/dsd-measure-example/out1.wav --filter pysacd --rate 88200 --single-thread",
+   "command_template": "target/quality/new/bin/dsd2pcm {input} {output} --filter pysacd --rate 88200 --single-thread",
+   "output": "WAV file read back"
+  },
+  "fed_with": "DSD (DSD64, 1 bit, 2822400 Hz) made from the test signals by the built-in reference modulator",
+  "returns": "WAV file read back; analysed by the reference analyser in 64-bit float",
+  "in_rate_hz": 88200,
+  "in_word": "1-bit DSD",
+  "out_rate_hz": 88200,
+  "out_word": "24-bit integer as written by the device (WAV), read and analysed in 64-bit float",
+  "gain_db": 0.0,
+  "profile": "quick",
+  "date": "2026-11-24",
+  "generator": "dsd-measure 0.1.2, reference chain 2",
+  "source_signal_sha256": {
+   "tone_1k_0dbsacd.wav": "80d70bfdee8c9386f2f48ce778765c4f59433f62148bac1bef04447acb05fc5a",
+   "tone_1k_peak.wav": "6428a12a2f4efaf6e9796e0d97f6589ded909024b3c4f69a4cf22a0ecfe85f64",
+   "tone_15k_m12.wav": "4c8dfc750582022bc4d83367ec87294408643dac8c3c6dbfa467bbc4ec1398de",
+   "multitone.wav": "a4227c58b6668732c52a1c287dc37ac7e1ac5967c94f629f1536747281917db6",
+   "jtest_44100.wav": "f55a8d2bb68193ea9985d65d5dda3fa963b96639623138d5a59bab14995b0bc2"
+  },
+  "floor": {
+   "dsd_rate": 2822400,
+   "target_db": -140.0,
+   "margin_db": 6.0,
+   "ntf": "order 8, max gain 1.45",
+   "ntf_fallbacks": 0,
+   "chain": {
+    "thdn_db": -146.99,
+    "thd_db": -163.28,
+    "thdn_a_db": -150.37,
+    "sinad_db": 146.99,
+    "noise_dbfs": -159.06,
+    "noise_a_dbfs": -162.45,
+    "dr_db": 148.46,
+    "dr_a_db": 151.8,
+    "metric_floors": {
+     "lobe_noise_db": -183.5,
+     "imd_smpte_db": -144.78,
+     "imd_ccif_db": -134.89,
+     "multitone_dfr_db": 150.7
+    }
+   },
+   "decoder_alone": {
+    "thdn_db": -280.92,
+    "thd_db": -309.97,
+    "thdn_a_db": -282.12,
+    "sinad_db": 280.92,
+    "peak": {
+     "thdn_db": -280.93,
+     "thd_db": -310.0,
+     "thdn_a_db": -282.12,
+     "sinad_db": 280.93
+    },
+    "noise_dbfs": -346.95,
+    "noise_a_dbfs": -348.14,
+    "dr_db": 340.93,
+    "dr_a_db": 342.12,
+    "alias_rejection_db": -187.7,
+    "metric_floors": {
+     "lobe_noise_db": -369.4,
+     "imd_smpte_db": -294.92,
+     "imd_ccif_db": -279.67
+    }
+   },
+   "meets_target": true
+  },
+  "suite": "dsd2pcm release comparison",
+  "versions": {
+   "dsd_measure": "0.1.2",
+   "reference_chain": "2",
+   "python": "3.15.2",
+   "numpy": "2.5.5",
+   "scipy": "1.18.1",
+   "matplotlib": "3.11.2"
+  },
+  "device_versions": {
+   "adapter": "cli",
+   "declared_version": "0.2.0",
+   "program": "target/quality/new/bin/dsd2pcm",
+   "path": "target/quality/new/bin/dsd2pcm",
+   "sha256": "0e5b63b8114ede2bbbf38afdbaae5067ba29114ce5814a019b35618434659141",
+   "version": null
+  }
+ }
+}

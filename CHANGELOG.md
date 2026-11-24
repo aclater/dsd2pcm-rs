@@ -11,6 +11,9 @@ with its measured effect. Releases up to 0.1.2 keep their behaviour as released.
 
 ## 0.2.0 - 2026-11-24
 
+Quality: [docs/quality/0.2.0.md](docs/quality/0.2.0.md), every filter measured against 0.1.2
+with dsd-measure 0.1.2.
+
 ### Changed
 
 #### Breaking changes (Rust API)
