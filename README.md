@@ -10,7 +10,7 @@
 [![MSRV 1.83](https://img.shields.io/badge/MSRV-1.83-orange)](Cargo.toml)
 [![Licence: MIT OR Apache-2.0](https://img.shields.io/badge/licence-MIT%20OR%20Apache--2.0-blue)](#licence-and-credits)
 
-dsd2pcm converts DSD (DSF and DFF files, or SACD frames) to 24-bit PCM, as a Rust
+dsd2pcm converts DSD64 (DSF and DFF files, or SACD frames) to 24-bit PCM, as a Rust
 crate, a C library and a command-line tool.
 
 ## Platforms
@@ -34,7 +34,7 @@ On Linux x86_64, with a DSF file named `01 - Track.dsf` in the current directory
 
 <!-- docs-run: image=fedora-net setup="printf 'DSD \x1c\x00\x00\x00\x00\x00\x00\x00\x5c\x20\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00fmt \x34\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x02\x00\x00\x00\x00\x11\x2b\x00\x01\x00\x00\x00\x00\x80\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00data\x0c\x20\x00\x00\x00\x00\x00\x00' > '01 - Track.dsf' && head -c 8192 /dev/zero | tr '\000' i >> '01 - Track.dsf'" expect="Hz -> 176400 Hz, .*clipped samples: 0" -->
 ```sh
-curl -LO https://github.com/dsd-toolbox/dsd2pcm-rs/releases/download/v0.2.0/dsd2pcm-0.2.0-x86_64-linux.tar.gz
+curl -fLO https://github.com/dsd-toolbox/dsd2pcm-rs/releases/download/v0.2.0/dsd2pcm-0.2.0-x86_64-linux.tar.gz
 tar xzf dsd2pcm-0.2.0-x86_64-linux.tar.gz
 ./dsd2pcm-0.2.0-x86_64-linux/dsd2pcm "01 - Track.dsf" "01 - Track.wav"
 ```
@@ -50,13 +50,14 @@ silicon; for an Intel Mac use `x86_64-macos` in both names):
 
 <!-- docs-run: skip="macOS" -->
 ```sh
-curl -LO https://github.com/dsd-toolbox/dsd2pcm-rs/releases/download/v0.2.0/dsd2pcm-0.2.0-aarch64-macos.tar.gz
+curl -fLO https://github.com/dsd-toolbox/dsd2pcm-rs/releases/download/v0.2.0/dsd2pcm-0.2.0-aarch64-macos.tar.gz
 tar xzf dsd2pcm-0.2.0-aarch64-macos.tar.gz
 ./dsd2pcm-0.2.0-aarch64-macos/dsd2pcm "01 - Track.dsf" "01 - Track.wav"
 ```
 
-The tool is signed with a Developer ID and notarised by Apple, so it runs without a
-Gatekeeper prompt.
+The tool, like `libdsd2pcm.1.dylib` in the C library archives, is signed with a Developer ID
+and notarised by Apple. The release workflow checks both on a fresh runner before it publishes
+(`codesign --check-notarization` and `spctl`; see [Releases](docs/release.md)).
 
 ### Windows
 
@@ -70,8 +71,9 @@ Expand-Archive dsd2pcm-0.2.0-x86_64-windows.zip -DestinationPath .
 ```
 
 The archive is also on the [release page](https://github.com/dsd-toolbox/dsd2pcm-rs/releases/tag/v0.2.0).
-`dsd2pcm.exe` is not code-signed, so Windows SmartScreen may warn when it first runs; choose
-**More info**, then **Run anyway**. The [user guide](docs/user-guide.md#windows) covers the
+`dsd2pcm.exe` is not code-signed. Windows may show a
+[Microsoft Defender SmartScreen](https://learn.microsoft.com/en-us/windows/security/operating-system-security/virus-and-threat-protection/microsoft-defender-smartscreen/)
+warning for a file downloaded with a web browser. The [user guide](docs/user-guide.md#windows) covers the
 `PATH`, quoting and double-clicking.
 
 ## Documentation

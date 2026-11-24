@@ -236,8 +236,9 @@ administrator rights needed), then open a new PowerShell window:
 
 Each release unzips to a folder named after its version; after an update, change the `PATH`
 entry to the new folder (**Settings**, **System**, **About**, **Advanced system settings**,
-**Environment Variables**). `dsd2pcm.exe` is not code-signed, so Windows SmartScreen may
-warn when it first runs; choose **More info**, then **Run anyway**.
+**Environment Variables**). `dsd2pcm.exe` is not code-signed. Windows may show a
+[Microsoft Defender SmartScreen](https://learn.microsoft.com/en-us/windows/security/operating-system-security/virus-and-threat-protection/microsoft-defender-smartscreen/)
+warning for a file downloaded with a web browser.
 
 ### File names with spaces
 
