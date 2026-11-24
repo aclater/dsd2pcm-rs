@@ -6,6 +6,22 @@ How to convert DSD to PCM with the `dsd2pcm` tool or the `dsd2pcm` crate: the fo
 reads and writes, the choices of rate, filter and gain, how it writes its output files, and
 what to do when a conversion fails. Every option is listed in [options.md](options.md).
 
+- **Quality first.** The default filter, `precise`, has 150 dB or more of stopband wherever
+  ultrasonic content folds into the audio band. With a very quiet DSD64 source it measures a
+  SINAD of 142 to 145 dB, the limit of 24-bit output, and every tone that folds into the
+  audio band is rejected by 151 dB or more
+  ([PCM quality](pcm-quality.md#the-precise-filter)). It takes 1.3 to 1.9 times the
+  CPU time of scarletbook-pcm 0.7.0 on an Intel Core i9-13900H
+  ([performance](performance.md)).
+- **`fast` for lower CPU, at lower quality.** `--filter fast` is scarletbook-pcm 0.7.0's
+  filter and byte-identical to it. On x86-64 it runs at 1.11 to 1.25 times scarletbook-pcm's
+  speed (Intel Core i9-13900H); on aarch64 the two are level. Its stopband limits SINAD to
+  122 dB (116 dB with `wide`) with the same quiet source, and alias rejection to 111 to 115 dB.
+- **Deterministic.** Within a release, the same input and settings give the same bytes on
+  every CPU and SIMD level (with SSE2 floating point on x86). Output may change between
+  releases when measured quality improves; each change is in the [changelog](../CHANGELOG.md)
+  with its measured effect ([release quality comparison](quality/README.md)).
+
 ## Convert a file
 
 `dsd2pcm` converts one DSF or DFF file (DSD64) to a 24-bit WAV file, by default at
