@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Reference conversion for tools/quality/measure.py: converts a raw DSD64 file (channels
+//! Reference conversion for tools/quality/decode.py: converts a raw DSD64 file (channels
 //! interleaved byte by byte, earliest sample in the MSB, as in DSDIFF and Super Audio CD
 //! frames; a whole number of 4704-byte frames per channel) with scarletbook-pcm 0.7.0 as
 //! one run, and writes 24-bit little-endian PCM, interleaved.

@@ -9,6 +9,11 @@ with its measured effect. Releases up to 0.1.2 keep their behaviour as released.
 
 ## Unreleased
 
+- Docs: [PCM quality](docs/pcm-quality.md) corrected after an independent review: the
+  pysacd preset's extra in-band noise is stopband folding, not its dither; passband figures
+  are the largest deviation from the DC gain; the ultrasonic figures say which signal they
+  are for; claims the filter floor contradicts are reworded; the gain advice is 0 dB plus
+  the clip counter. `tools/quality/dsd-sha256.txt` lists the generated test files' SHA-256.
 - Docs: [PCM quality](docs/pcm-quality.md#comparisons): three foobar2000 SACD plug-in
   settings measured again from a re-run whose input and output SHA-256 are published in
   [docs/quality/data](docs/quality/data/README.md). The figures are unchanged at the
