@@ -69,9 +69,12 @@ same for the live heap and the kept converters.
 At 0.2.0 the checks before this one (the live heap's highest value of 20 to 50 % of the
 run as the plateau, no separate account of the kept converters) failed every run of 1000
 iterations without a leak: the live heap rose 1.1 MiB to the second half, all of it the
-kept converters' buffers, which still grow now and then after their first call (about 70
-KiB at a time, 10 times in the late window of a run of 1000 iterations). The live heap
-less that growth is the same to the byte at every tenth of the run after the first.
+kept converters' buffers, which then still grew now and then after their first call (about
+70 KiB at a time, 10 times in the late window of a run of 1000 iterations). The live heap
+less that growth was the same to the byte at every tenth of the run after the first.
+Since `Converter::new` sizes every buffer a converter uses
+([design](design.md#frame-runs-threading-and-sharing)), the kept converters grow on none
+of their calls, and the soak requires that over the whole run.
 
 At 0.2.0, the CI build (optimisation level 2, debug assertions), 1000 iterations, on a
 Ryzen AI Max+ 395 with the process held to 2.5 cores of CPU time on average (its cgroup
@@ -83,6 +86,11 @@ frozen whenever it ran ahead), so that the worker count follows the CPUs it may 
 | 4 (`taskset -c 0-3`) | 10 of 10 | +0 bytes in every run (bound 64 KiB) | grew on 10 of 2354 calls, by 633 KiB (bounds 23 calls, 4 MiB) | 177 to 234; 199 to 241 | 26 to 85 |
 | 16 (`taskset -c 0-15`) | 2 of 2 (one with an earlier bound of 25 % or 64 MiB) | the same | the same | 222, 271; 270, 294 | 47 and 72 against this bound |
 | 32 (all) | 1 of 1, and 1 of 1 in the release build | the same | the same | 273, 317; release 258, 307 | 84; release 79 |
+
+The kept-converter figures in the table are from before `Converter::new` sized every
+buffer, against the bounds of then (23 calls, 4 MiB); the bound is now 0 calls, and a run
+of one hour (the release build, 3 worker threads under a 4-CPU quota, Ryzen AI Max+ 395)
+grew on 0 of 1 637 704 calls.
 
 The leak self-test caught every leak in all these runs: with 1 MiB per iteration the live
 heap rose 392 MiB and the late median of the resident set was 157 to 247 MiB over its
@@ -106,13 +114,12 @@ Shorter runs on an Intel Core i9-13900H with 4 worker threads agree: 20 minutes 
 iterations), the same live heap to the byte, resident set 150 to 190 MiB; and one hour
 before the live-heap check (387 206 iterations), resident set 147 to 193 MiB.
 
-The live heap is the 40 converters the test keeps (one per valid setting and gain, their
-buffers grown to the longest run they met, 230 frames) and the test's own arrays of
-samples (64 MiB, allocated before the run): it stops moving once every kept converter has
-met its longest run, and stays there to the byte. The resident set grows with the number of
-worker threads (each has its own allocator arena) and wanders within them; the peak (`time
--v`) was 497 MiB with 16 workers and 282 to 286 MiB with 4, during the 230-frame
-six-channel iterations.
+The live heap is the converters the test keeps (one per valid setting and gain, every
+buffer allocated when each is made) and the test's own arrays of samples (64 MiB,
+allocated before the run): it is the same to the byte at every tenth of the run after
+the first. The resident set grows with the number of worker threads (each has its own
+allocator arena) and wanders within them; the peak (`time -v`) was 497 MiB with 16
+workers and 282 to 286 MiB with 4, during the 230-frame six-channel iterations.
 
 ## C leak loop
 
