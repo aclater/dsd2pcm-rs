@@ -77,12 +77,15 @@ the tool is a 32-bit x86 program. `aarch64` builds for `aarch64-unknown-linux-gn
 Fedora container with the cross linker and glibc sysroot and runs every test under
 `qemu-aarch64-static`, at its one level, `generic`, built with `--release` plus debug
 assertions and overflow checks (a debug build under emulation takes hours); the tool must
-be an aarch64 program. One test is left out there: the tool's signal test
-(`sigint_and_sigterm_leave_no_partial_output`) starts the tool as a child process, which a
-container without `binfmt_misc` cannot run under qemu-user. In its place the release build
-of the aarch64 tool runs under qemu on a 120-second 5.1 file and is sent SIGINT, then
-SIGTERM: it must exit 130 and 143, leave the existing output as it was and leave no
-temporary file. The native aarch64 CI job runs the test itself.
+be an aarch64 program. The CLI's tests start the tool as a child process, which the host
+kernel's `binfmt_misc` entry for aarch64 runs under qemu (Fedora's `qemu-user-static`
+registers it with the F flag, which a container can use; without that entry or its F flag
+the script fails at once with a message saying so, rather than skipping the tests), with
+`QEMU_LD_PREFIX` naming the sysroot. One test is left out there: the tool's signal test
+(`sigint_and_sigterm_leave_no_partial_output`), which signals that child. In its place the
+release build of the aarch64 tool runs under qemu on a 120-second 5.1 file and is sent
+SIGINT, then SIGTERM: it must exit 130 and 143, leave the existing output as it was and
+leave no temporary file. The native aarch64 CI job runs the test itself.
 
 The suite holds item 2: `tests/identity.rs` compares the output of the fast filter with
 scarletbook-pcm 0.7.0 (a dev-dependency, run in the same test) for every rate, cutoff, gain
