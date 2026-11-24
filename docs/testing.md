@@ -48,7 +48,7 @@ DSD2PCM_SOAK_SECONDS=3600 cargo test --release -p dsd2pcm --test soak -- --ignor
 
 The live-heap check needs 1000 iterations or more: in shorter runs, the default of 300
 included, the kept converters are still growing in the 20 to 50 % window, and the check
-fails without a leak (0.1.3 moves the window). Set `DSD2PCM_SOAK_ITERATIONS` as above.
+fails without a leak (0.2.0 moves the window). Set `DSD2PCM_SOAK_ITERATIONS` as above.
 `DSD2PCM_SOAK_RSS_REPORT_ONLY=1` prints the resident set without the check, for sanitizer
 builds, whose shadow memory grows with the run; `DSD2PCM_SOAK_HEAP_REPORT_ONLY=1` does the
 same for the live heap, for short sanitizer runs.
