@@ -11,7 +11,7 @@ or more; a null that is no longer identical) are in bold.
 SINAD is −THD+N; THD counts the harmonics only. The raw results are in `data/X.Y.Z/`
 ([raw data](README.md#raw-data), CC BY 4.0).
 
-| Filter | Cutoff | Rate (kHz) | Version | SINAD (dB) | THD (dB) | Noise, 20 Hz-20 kHz (dBFS) | Alias rejection (dB) | Null vs previous |
+| Filter | Cutoff | Rate (kHz) | Version | SINAD (dB) | THD (dB) | Noise, 20 Hz-20 kHz (dBFS) | Alias rejection (dB below the tone) | Null vs previous |
 |---|---|---:|---|---:|---:|---:|---:|---|
 | fast | 40 | 88.2 | W.W.W | | | | | baseline |
 | fast | 40 | 88.2 | X.Y.Z | | | | | |

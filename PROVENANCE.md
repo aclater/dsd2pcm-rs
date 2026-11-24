@@ -34,7 +34,7 @@ are identical.
 Documentation (READMEs included), measurement data and creative assets (CC BY 4.0; see the
 README's licence section): written, measured and drawn for this project. The icon set in
 `docs/assets/` was drawn for this project (hand-written SVG and its PNG exports; no fonts,
-embedded images or third-party artwork) and added by the owner's account in the commit
+embedded images or third-party artwork) and added in the commit
 "docs: add the project icon set under docs/assets". They cite, but do not copy, other work: the Scarlet Book's DSD
 levels and its Annex D low-pass recommendation, as restated by Archimago (2022); the AES17
 measurement band and dBFS convention; RMAA's summary layout (the figures are our own);
