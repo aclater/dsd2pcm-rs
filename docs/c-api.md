@@ -369,7 +369,8 @@ environment variable; install it with `cargo install cbindgen`), then builds and
 `tests/*.c` and `examples/convert.c` under gcc and clang with `-Wall -Wextra -Werror`,
 compiles the header and its init macros as C++11, checks that the static library holds no
 claxon symbols (`.github/scripts/check-capi-no-claxon.sh`, which lists the symbol table with
-`nm`, so a stripped library fails instead of passing unchecked), and runs the smoke test and the leak loop
+`nm` and fails closed: a stripped library, an nm error or an archive member nm left out fails
+instead of passing unchecked; `check-capi-no-claxon-test.sh` tests it on small archives), and runs the smoke test and the leak loop
 (`tests/leakloop.c`: create, convert and free on every path, many times over) under clang's
 AddressSanitizer, LeakSanitizer and UndefinedBehaviorSanitizer (`ASAN=0` skips that). CI
 does the same in the C library job, runs the claxon check on both libraries, and checks that

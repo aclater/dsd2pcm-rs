@@ -25,7 +25,11 @@ version.
 - C library: CI, `crates/dsd2pcm-capi/check.sh` and the release archive checks verify that
   the libraries hold no claxon (FLAC decoder) symbols, by their symbol tables (`nm`), and
   CI checks that the check catches a library built with `--features flac`
-  ([C interface](docs/c-api.md#checks)).
+  ([C interface](docs/c-api.md#checks)). The check fails closed (an nm error, or an archive
+  member nm did not list, fails it), has its own tests on small archives with a planted
+  claxon symbol, and reads Mach-O symbol tables on macOS: Xcode's `nm` otherwise reads the
+  LLVM bitcode embedded in Rust's `compiler_builtins` objects, fails on bitcode from a newer
+  LLVM, and skipped those members.
 - CI: a check that tracked files and commit identities hold no private names or addresses
   ([testing](docs/testing.md#private-names)).
 - Tests: golden SHA-256 hashes of whole output files (header and samples) from
