@@ -159,7 +159,7 @@ fn unknown_length_without_frames_is_an_error() {
     f.truncate(frames_at(&f));
     let e = FlacReader::new(Cursor::new(f)).unwrap_err();
     assert!(
-        matches!(e, Error::Format(ref m) if m.contains("no audio frames")),
+        matches!(e, Error::Format(ref m) if m.message().contains("no audio frames")),
         "{e}"
     );
 }
@@ -177,15 +177,35 @@ fn short_stream_is_an_error() {
     let mut r = FlacReader::new(Cursor::new(g)).unwrap();
     let e = read_all(&mut r, 1 << 20).unwrap_err();
     assert!(
-        matches!(e, Error::Format(ref m) if m.contains("ended after 4100 of 5000")),
+        matches!(e, Error::Format(ref m) if m.message().contains("ended after 4100 of 5000")),
         "{e}"
     );
-    // Declared shorter: the rest is ignored.
+    // Declared shorter than the stream, inside a block (2000), at a block boundary
+    // (2304 = 2 x 1152) or at one frame: every frame of the stream is delivered, as the
+    // reference decoder does; `declared_frames` keeps STREAMINFO's count and
+    // `info().frames` is the count delivered once the stream has ended.
+    for total in [2000u64, 2304, 1] {
+        let mut g = f.clone();
+        set_total(&mut g, total);
+        let mut r = FlacReader::new(Cursor::new(g)).unwrap();
+        assert_eq!((r.info().frames, r.declared_frames()), (total, total));
+        let got = read_all(&mut r, 999).unwrap();
+        assert_eq!(got, expected(16, 2, 4100), "{total}");
+        assert_eq!((r.info().frames, r.declared_frames()), (4100, total));
+        let mut out = vec![Vec::new(), Vec::new()];
+        assert_eq!(r.read_frames(999, &mut out).unwrap(), 0);
+    }
+    // ... and the same with a trailing ID3v1 tag, which is not audio.
     let mut g = f.clone();
     set_total(&mut g, 2000);
+    g.extend_from_slice(b"TAG");
+    g.resize(g.len() + 125, b' ');
     let mut r = FlacReader::new(Cursor::new(g)).unwrap();
-    let got = read_all(&mut r, 999).unwrap();
-    assert_eq!(got[0], expected(16, 2, 2000)[0]);
+    assert_eq!(read_all(&mut r, 3000).unwrap(), expected(16, 2, 4100));
+    // A whole file declares what it holds.
+    let mut r = FlacReader::new(Cursor::new(f.clone())).unwrap();
+    read_all(&mut r, 3000).unwrap();
+    assert_eq!((r.info().frames, r.declared_frames()), (4100, 4100));
     // Truncated inside a frame.
     let mut r = FlacReader::new(Cursor::new(f[..f.len() - 100].to_vec())).unwrap();
     assert!(matches!(read_all(&mut r, 1 << 20), Err(Error::Format(_))));
@@ -200,7 +220,7 @@ fn rejects_unsupported_streams() {
     f[SI + 12] = (f[SI + 12] & 0xF1) | (6 << 1);
     let e = FlacReader::new(Cursor::new(f)).unwrap_err();
     assert!(
-        matches!(e, Error::Format(ref m) if m.contains("channel count 7")),
+        matches!(e, Error::Format(ref m) if m.message().contains("channel count 7")),
         "{e}"
     );
     // A frame with a channel count other than STREAMINFO's.
@@ -218,7 +238,7 @@ fn rejects_unsupported_streams() {
     assert_eq!(r.bits_per_sample(), 16);
     let e = read_all(&mut r, 100).unwrap_err();
     assert!(
-        matches!(e, Error::Format(ref m) if m.contains("bit depth")),
+        matches!(e, Error::Format(ref m) if m.message().contains("bit depth")),
         "{e}"
     );
 }
@@ -390,6 +410,12 @@ fn trailing_id3v1_tag() {
         assert_eq!(r.info().frames, 4100);
         assert_eq!(read_all(&mut r, 3000).unwrap(), expected(16, 2, 4100));
     }
+    // With the length declared, trailing bytes that do not decode as a frame are not audio
+    // and are ignored.
+    let mut f = fixture("s16_2ch_44100.flac");
+    f.extend_from_slice(&[0x55; 128]);
+    let mut r = FlacReader::new(Cursor::new(f)).unwrap();
+    assert_eq!(read_all(&mut r, 3000).unwrap(), expected(16, 2, 4100));
     // Other trailing junk with an unknown length is still an error.
     let mut f = fixture("s16_2ch_44100.flac");
     set_total(&mut f, 0);

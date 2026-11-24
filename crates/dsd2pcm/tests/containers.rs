@@ -104,7 +104,7 @@ fn dff_rejects_dst() {
     let at = f.windows(4).position(|w| w == b"CMPR").unwrap() + 12;
     f[at..at + 4].copy_from_slice(b"DST ");
     match DffReader::new(Cursor::new(f)) {
-        Err(Error::Unsupported(m)) => assert!(m.contains("DST")),
+        Err(Error::Unsupported(m)) => assert!(m.message().contains("DST")),
         other => panic!("expected DST rejection, got {other:?}"),
     }
 }
@@ -133,6 +133,7 @@ fn wav_round_trip_formats() {
                     }
                     WavFormat::F32 => raw.extend_from_slice(&(v as f32).to_le_bytes()),
                     WavFormat::F64 => raw.extend_from_slice(&v.to_le_bytes()),
+                    f => unreachable!("format {f:?}"),
                 }
             }
         }
@@ -226,11 +227,7 @@ struct ShortSource(bool);
 
 impl dsd2pcm::io::DsdRead for ShortSource {
     fn info(&self) -> dsd2pcm::io::DsdInfo {
-        dsd2pcm::io::DsdInfo {
-            channels: 2,
-            sample_rate: 2_822_400,
-            samples: 2_822_400 * 3600,
-        }
+        dsd2pcm::io::DsdInfo::new(2, 2_822_400, 2_822_400 * 3600)
     }
     fn read_bytes(&mut self, _max: usize, out: &mut [Vec<u8>]) -> dsd2pcm::Result<usize> {
         if std::mem::replace(&mut self.0, true) {
@@ -263,11 +260,7 @@ struct Dsd128Source;
 
 impl dsd2pcm::io::DsdRead for Dsd128Source {
     fn info(&self) -> dsd2pcm::io::DsdInfo {
-        dsd2pcm::io::DsdInfo {
-            channels: 2,
-            sample_rate: 5_644_800,
-            samples: 5_644_800,
-        }
+        dsd2pcm::io::DsdInfo::new(2, 5_644_800, 5_644_800)
     }
     fn read_bytes(&mut self, _max: usize, out: &mut [Vec<u8>]) -> dsd2pcm::Result<usize> {
         for o in out.iter_mut() {
@@ -433,11 +426,7 @@ struct HugeShort(bool);
 
 impl DsdRead for HugeShort {
     fn info(&self) -> dsd2pcm::io::DsdInfo {
-        dsd2pcm::io::DsdInfo {
-            channels: 1,
-            sample_rate: 2_822_400,
-            samples: 1 << 37,
-        }
+        dsd2pcm::io::DsdInfo::new(1, 2_822_400, 1 << 37)
     }
     fn read_bytes(&mut self, _max: usize, out: &mut [Vec<u8>]) -> dsd2pcm::Result<usize> {
         if std::mem::replace(&mut self.0, true) {
@@ -504,4 +493,148 @@ fn wav_writer_refuses_data_past_4_gib() {
     }
     w.finish().unwrap();
     assert!(w.into_inner().1 <= u64::from(u32::MAX) + 8);
+}
+
+// ---- Reader rules for files that bend the format (each accepted or refused on purpose) ----
+
+/// A `data` size past the end of the file (a file cut short) reads the whole frames there;
+/// `declared_frames` keeps what the header declared.
+#[test]
+fn wav_data_size_past_the_end_reads_what_is_there() {
+    let good = wav_samples(wav_i24(100)).unwrap();
+    // Declares 100 frames, holds 60 and half of the 61st.
+    let mut b = wav_i24(100);
+    b.truncate(b.len() - 40 * 6 + 3);
+    let r = WavReader::new(Cursor::new(b.clone())).unwrap();
+    assert_eq!((r.info().frames, r.declared_frames()), (60, 100));
+    let got = wav_samples(b).unwrap();
+    assert_eq!(got[0], good[0][..60]);
+    assert_eq!(got[1], good[1][..60]);
+    // A whole file declares what it holds.
+    let r = WavReader::new(Cursor::new(wav_i24(100))).unwrap();
+    assert_eq!((r.info().frames, r.declared_frames()), (100, 100));
+}
+
+/// A stereo `WAVE_FORMAT_EXTENSIBLE` file of 24-bit containers with the given valid bits
+/// and sub-format GUID, holding `samples` (left-justified, as written).
+fn wav_extensible(valid: u16, guid: [u8; 16], samples: &[i32]) -> Vec<u8> {
+    let mut fmt = Vec::new();
+    fmt.extend_from_slice(&0xFFFEu16.to_le_bytes());
+    fmt.extend_from_slice(&2u16.to_le_bytes());
+    fmt.extend_from_slice(&48_000u32.to_le_bytes());
+    fmt.extend_from_slice(&(48_000u32 * 6).to_le_bytes());
+    fmt.extend_from_slice(&6u16.to_le_bytes());
+    fmt.extend_from_slice(&24u16.to_le_bytes());
+    fmt.extend_from_slice(&22u16.to_le_bytes());
+    fmt.extend_from_slice(&valid.to_le_bytes());
+    fmt.extend_from_slice(&3u32.to_le_bytes());
+    fmt.extend_from_slice(&guid);
+    let data: Vec<u8> = samples
+        .iter()
+        .flat_map(|&v| v.to_le_bytes()[..3].to_vec())
+        .collect();
+    let mut b = b"WAVEfmt ".to_vec();
+    b.extend_from_slice(&(fmt.len() as u32).to_le_bytes());
+    b.extend_from_slice(&fmt);
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    b.extend_from_slice(&data);
+    let mut f = b"RIFF".to_vec();
+    f.extend_from_slice(&(b.len() as u32).to_le_bytes());
+    f.extend_from_slice(&b);
+    f
+}
+
+/// KSDATAFORMAT_SUBTYPE_PCM as stored.
+const PCM_GUID: [u8; 16] = [
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71,
+];
+
+/// Valid bits: 0 (not given) and fewer than the container (20 in 24, as `flac -d` writes)
+/// read at the container's width; more than the container is malformed.
+#[test]
+fn wav_extensible_valid_bits() {
+    // 20-bit values, left-justified in 24 bits.
+    let samples: Vec<i32> = (0..20).map(|i| (i * 40_000 - 300_000) << 4).collect();
+    let want: Vec<f64> = samples
+        .iter()
+        .step_by(2)
+        .map(|&v| f64::from(v) / 8_388_608.0)
+        .collect();
+    for valid in [0u16, 20, 24] {
+        let got = wav_samples(wav_extensible(valid, PCM_GUID, &samples)).unwrap();
+        assert_eq!(got[0], want, "valid bits {valid}");
+    }
+    let e = WavReader::new(Cursor::new(wav_extensible(25, PCM_GUID, &samples))).unwrap_err();
+    assert!(
+        matches!(&e, Error::Format(m) if m.kind() == dsd2pcm::FormatErrorKind::Malformed
+            && m.message().contains("valid bits 25")),
+        "{e}"
+    );
+}
+
+/// The sub-format GUID must be KSDATAFORMAT's: an Ambisonic B-format GUID, whose first
+/// bytes read like PCM's, and a GUID with one byte changed are refused as unsupported.
+#[test]
+fn wav_extensible_sub_format_guid() {
+    let samples = [1i32 << 8; 4];
+    assert!(wav_samples(wav_extensible(24, PCM_GUID, &samples)).is_ok());
+    let ambisonic = [
+        0x01, 0x00, 0x00, 0x00, 0x21, 0x07, 0xD3, 0x11, 0x86, 0x44, 0xC8, 0xC1, 0xCA, 0x00, 0x00,
+        0x00,
+    ];
+    let mut one_off = PCM_GUID;
+    one_off[15] ^= 1;
+    for (guid, text) in [
+        (ambisonic, "00000001-0721-11D3-8644-C8C1CA000000"),
+        (one_off, "00000001-0000-0010-8000-00AA00389B70"),
+    ] {
+        let e = WavReader::new(Cursor::new(wav_extensible(24, guid, &samples))).unwrap_err();
+        assert!(
+            matches!(&e, Error::Unsupported(m) if m.kind() == dsd2pcm::UnsupportedKind::Encoding
+                && m.message().contains(text)),
+            "{e}"
+        );
+    }
+}
+
+/// A DSDIFF `DSD ` chunk whose length is not a multiple of the channel count: the partial
+/// last turn (fewer bytes than channels) is not read; the rest reads as usual.
+#[test]
+fn dff_partial_last_turn_is_not_read() {
+    let data = pattern(3, 100);
+    let mut b = dff_bytes(&data, 2_822_400);
+    // Append two bytes of a 101st turn to the 'DSD ' chunk (and its FRM8 size).
+    let at = b.windows(4).rposition(|w| w == b"DSD ").unwrap();
+    let size = u64::from_be_bytes(b[at + 4..at + 12].try_into().unwrap());
+    assert_eq!(size, 300);
+    b[at + 4..at + 12].copy_from_slice(&302u64.to_be_bytes());
+    b.extend_from_slice(&[0xAA, 0xBB]);
+    let form = u64::from_be_bytes(b[4..12].try_into().unwrap());
+    b[4..12].copy_from_slice(&(form + 2).to_be_bytes());
+    let mut r = DffReader::new(Cursor::new(b)).unwrap();
+    assert_eq!(r.info().samples, 800);
+    assert_eq!(read_all(&mut r, 7), data);
+}
+
+/// A DSF tag larger than `MAX_METADATA` is not loaded: the audio reads, `metadata` is
+/// `None` and `skipped_metadata_len` gives its size. One of exactly that size is loaded.
+#[test]
+fn dsf_oversized_tag_is_skipped_not_fatal() {
+    let data = pattern(2, 4096);
+    let max = dsd2pcm::dsf::MAX_METADATA as usize;
+    for (len, loaded) in [(max, true), (max + 1, false)] {
+        let mut tag = b"ID3".to_vec();
+        tag.resize(len, 0);
+        let b = dsf_bytes(&data, 4096 * 8, 2_822_400, Some(tag.clone()));
+        let mut r = DsfReader::new(Cursor::new(b)).unwrap();
+        if loaded {
+            assert_eq!(r.metadata(), Some(&tag[..]));
+            assert_eq!(r.skipped_metadata_len(), None);
+        } else {
+            assert_eq!(r.metadata(), None);
+            assert_eq!(r.skipped_metadata_len(), Some(len as u64));
+        }
+        assert_eq!(read_all(&mut r, 1000), data);
+    }
 }

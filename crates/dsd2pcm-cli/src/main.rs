@@ -1,6 +1,6 @@
 //! `dsd2pcm [OPTIONS] [--] IN.dsf|IN.dff OUT.wav`
 
-use dsd2pcm::{convert_file_to, Cutoff, Filter, OutputOptions, PcmOptions, PcmRate};
+use dsd2pcm::{convert_file_to, Cutoff, Filter, OutputOptions, PcmOptions, PcmRate, Threads};
 use std::ffi::OsString;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
@@ -75,7 +75,7 @@ fn parse(args: Vec<OsString>) -> Result<(PathBuf, PathBuf, PcmOptions, OutputOpt
                     v => return Err(format!("filter {v:?}: default, precise or pysacd")),
                 }
             }
-            "--single-thread" => opts.threads = false,
+            "--single-thread" => opts.threads = Threads::Single,
             "-n" | "--no-clobber" => out_opts.no_clobber = true,
             "-h" | "--help" => return Err(String::new()),
             "--" => {

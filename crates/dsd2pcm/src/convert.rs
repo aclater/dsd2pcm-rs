@@ -5,19 +5,23 @@
 use crate::decimator::{self, Cutoff, PcmRate, Plan, Scratch};
 use crate::dff::DffReader;
 use crate::dsf::DsfReader;
-use crate::error::{Error, Result};
+use crate::error::{ArgumentKind, Error, FormatErrorKind, Result, UnsupportedKind};
 use crate::filters::{pysacd, Filter};
 use crate::io::{DsdRead, PcmRead};
 use crate::wav::{WavFormat, WavReader, WavWriter};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::num::NonZeroUsize;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-/// DSD to PCM settings.
-#[derive(Clone, Copy, Debug)]
+/// DSD to PCM settings. Start from [`PcmOptions::new`] and set fields, or chain the
+/// `with_*` methods; new fields may be added in minor versions, with defaults that keep the
+/// old behaviour.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct PcmOptions {
     /// Output rate.
     pub rate: PcmRate,
@@ -25,22 +29,77 @@ pub struct PcmOptions {
     pub cutoff: Cutoff,
     /// Gain in dB, -120 to +24 (0 = scarletbook-pcm's default).
     pub gain_db: f64,
-    /// Convert channels on separate threads.
-    pub threads: bool,
+    /// The threads to convert on; [`Threads::All`] by default. The output is the same
+    /// with any setting.
+    pub threads: Threads,
     /// The filter and quantiser; [`Filter::Default`] is scarletbook-pcm's.
     pub filter: Filter,
 }
 
 impl PcmOptions {
-    /// Standard cutoff, unity gain.
+    /// Standard cutoff, unity gain, the default filter, all cores.
     pub fn new(rate: PcmRate) -> PcmOptions {
         PcmOptions {
             rate,
             cutoff: Cutoff::Standard,
             gain_db: 0.0,
-            threads: true,
+            threads: Threads::All,
             filter: Filter::Default,
         }
+    }
+
+    /// The same options with cutoff `cutoff`.
+    pub fn with_cutoff(self, cutoff: Cutoff) -> PcmOptions {
+        PcmOptions { cutoff, ..self }
+    }
+
+    /// The same options with a gain of `gain_db` dB (checked when converting).
+    pub fn with_gain_db(self, gain_db: f64) -> PcmOptions {
+        PcmOptions { gain_db, ..self }
+    }
+
+    /// The same options with threads `threads`.
+    pub fn with_threads(self, threads: Threads) -> PcmOptions {
+        PcmOptions { threads, ..self }
+    }
+
+    /// The same options with filter `filter`.
+    pub fn with_filter(self, filter: Filter) -> PcmOptions {
+        PcmOptions { filter, ..self }
+    }
+}
+
+/// The threads a whole-file conversion runs on. The output bytes are the same whatever
+/// the setting; only the time differs.
+///
+/// New variants may be added in minor versions: match with a wildcard arm.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Threads {
+    /// As many as the system reports cores for this process
+    /// ([`std::thread::available_parallelism`]), the calling thread included.
+    #[default]
+    All,
+    /// The calling thread only: no thread is started.
+    Single,
+    /// At most this many, the calling thread included (1 is [`Threads::Single`]); counts
+    /// above [`Threads::MAX`] are taken as `MAX`. For a program that runs several
+    /// conversions at once or must leave cores free.
+    Count(NonZeroUsize),
+}
+
+impl Threads {
+    /// The highest thread count used ([`Threads::Count`] is capped to it).
+    pub const MAX: usize = 256;
+
+    /// The number of threads to use, at least 1.
+    pub(crate) fn workers(self) -> usize {
+        match self {
+            Threads::All => std::thread::available_parallelism().map_or(1, |n| n.get()),
+            Threads::Single => 1,
+            Threads::Count(n) => n.get(),
+        }
+        .min(Threads::MAX)
     }
 }
 
@@ -68,8 +127,9 @@ impl OutputOptions {
     }
 }
 
-/// Result of a DSD to PCM conversion.
+/// Result of a DSD to PCM conversion. New fields may be added in minor versions.
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub struct Report {
     /// Input rate (Hz).
     pub in_rate: u32,
@@ -132,10 +192,14 @@ pub fn open_input(path: &Path) -> Result<Input> {
         #[cfg(feature = "flac")]
         [b'I', b'D', b'3', _] => Ok(Input::Pcm(Box::new(crate::flac::FlacReader::new(f)?))),
         #[cfg(not(feature = "flac"))]
-        b"fLaC" => Err(Error::Unsupported(
-            "FLAC input (built without the `flac` feature)".into(),
+        b"fLaC" => Err(Error::unsupported(
+            UnsupportedKind::Input,
+            "FLAC input (built without the `flac` feature)",
         )),
-        _ => Err(Error::Format("not a DSF, DFF, WAV or FLAC file".into())),
+        _ => Err(Error::format(
+            FormatErrorKind::NotRecognised,
+            "not a DSF, DFF, WAV or FLAC file",
+        )),
     }
 }
 
@@ -187,21 +251,28 @@ pub fn convert_file_to(
     progress: ProgressHook<'_>,
 ) -> Result<Report> {
     let Input::Dsd(r) = open_input(input)? else {
-        return Err(Error::Unsupported("input is PCM, not DSD".into()));
+        return Err(Error::unsupported(
+            UnsupportedKind::Input,
+            "input is PCM, not DSD",
+        ));
     };
     check_options(opts)?;
     let info = r.info();
     check_dsd64(info.sample_rate)?;
     let replaced = check_output(output, out_opts.no_clobber)?;
     if same_file(input, output) {
-        return Err(Error::InvalidArgument("output is the input file".into()));
+        return Err(Error::invalid(
+            ArgumentKind::Output,
+            "output is the input file",
+        ));
     }
     let data = decimator::output_len(info.samples, opts.rate) * u64::from(info.channels) * 3;
     // The RIFF size: everything after its own 8 bytes.
     let header = crate::wav::header_len(WavFormat::I24, info.channels);
     if header - 8 + data + (data & 1) > u64::from(u32::MAX) {
-        return Err(Error::Unsupported(
-            "WAV output over 4 GiB (RF64 is not supported yet)".into(),
+        return Err(Error::unsupported(
+            UnsupportedKind::OutputSize,
+            "WAV output over 4 GiB (RF64 is not supported yet)",
         ));
     }
     let mut tmp = TempFile::create(output, replaced.is_some())?;
@@ -248,8 +319,9 @@ fn check_output(output: &Path, no_clobber: bool) -> Result<Option<std::fs::Permi
         .last()
         .is_some_and(|&b| std::path::is_separator(char::from(b)));
     if ends_in_separator || output.file_name().is_none() {
-        return Err(Error::InvalidArgument(
-            "output path names a directory, not a file".into(),
+        return Err(Error::invalid(
+            ArgumentKind::Output,
+            "output path names a directory, not a file",
         ));
     }
     let meta = match std::fs::symlink_metadata(output) {
@@ -259,7 +331,10 @@ fn check_output(output: &Path, no_clobber: bool) -> Result<Option<std::fs::Permi
     };
     let kind = meta.file_type();
     if kind.is_dir() {
-        return Err(Error::InvalidArgument("output is a directory".into()));
+        return Err(Error::invalid(
+            ArgumentKind::Output,
+            "output is a directory",
+        ));
     }
     if no_clobber {
         return Err(exists_error());
@@ -268,10 +343,10 @@ fn check_output(output: &Path, no_clobber: bool) -> Result<Option<std::fs::Permi
         return Ok(None);
     }
     if !kind.is_file() {
-        return Err(Error::InvalidArgument(
+        return Err(Error::invalid(
+            ArgumentKind::Output,
             "output exists and is not a regular file (a device, FIFO or socket); \
-             refusing to replace it"
-                .into(),
+             refusing to replace it",
         ));
     }
     // Opening for writing (without truncating) changes nothing; it fails as writing would.
@@ -423,9 +498,10 @@ fn same_file(a: &Path, b: &Path) -> bool {
 
 fn check_dsd64(rate: u32) -> Result<()> {
     if rate != decimator::DSD64_RATE {
-        return Err(Error::Unsupported(format!(
-            "PCM output from {rate} Hz DSD (only DSD64 so far)"
-        )));
+        return Err(Error::unsupported(
+            UnsupportedKind::SampleRate,
+            format!("PCM output from {rate} Hz DSD (only DSD64 so far)"),
+        ));
     }
     Ok(())
 }
@@ -433,10 +509,10 @@ fn check_dsd64(rate: u32) -> Result<()> {
 /// Checks the gain range and the rate, cutoff and filter combination.
 pub fn check_options(opts: &PcmOptions) -> Result<()> {
     if !opts.gain_db.is_finite() || !(-120.0..=24.0).contains(&opts.gain_db) {
-        return Err(Error::InvalidArgument(format!(
-            "gain {} dB is outside -120 to +24 dB",
-            opts.gain_db
-        )));
+        return Err(Error::invalid(
+            ArgumentKind::Gain,
+            format!("gain {} dB is outside -120 to +24 dB", opts.gain_db),
+        ));
     }
     match opts.filter {
         Filter::Pysacd => pysacd::Pysacd::new(opts.rate, opts.cutoff).map(|_| ()),
@@ -477,11 +553,7 @@ pub fn dsd64_to_pcm_with<W: Write + Seek>(
     let plan = Plan::with_design(rate, opts.cutoff, opts.filter.design())?;
     let ch = usize::from(info.channels);
     let n_out = decimator::output_len(info.samples, rate);
-    let workers = if opts.threads {
-        std::thread::available_parallelism().map_or(1, |n| n.get())
-    } else {
-        1
-    };
+    let workers = opts.threads.workers();
     let chunk = if workers > 1 { CHUNK } else { CHUNK_1 };
     let mut scratch: Vec<Scratch> = (0..workers).map(|_| Scratch::default()).collect();
     let mut clipped = vec![0u64; ch];
@@ -504,10 +576,13 @@ pub fn dsd64_to_pcm_with<W: Write + Seek>(
         if got == 0 && !eof && (end as u64).saturating_mul(8) < info.samples {
             // A source that ends before the samples it declared: refuse, instead of
             // converting the missing part as idle in one unbounded batch.
-            return Err(Error::Format(format!(
-                "input ended after {end} of {} bytes per channel",
-                info.samples.div_ceil(8)
-            )));
+            return Err(Error::format(
+                FormatErrorKind::Truncated,
+                format!(
+                    "input ended after {end} of {} bytes per channel",
+                    info.samples.div_ceil(8)
+                ),
+            ));
         }
         eof |= got == 0;
         let o0 = done as i64;

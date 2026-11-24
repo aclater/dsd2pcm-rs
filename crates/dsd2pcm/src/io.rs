@@ -4,15 +4,17 @@
 //! channel, **MSB-first**: the earliest sample of each byte is bit 7, and a 1 bit means +1.
 //! This is DSDIFF's native order; the DSF reader and writer reverse bits as needed.
 
-use crate::error::{format_err, Result};
+use crate::error::{format_err, FormatErrorKind, Result};
 use std::io::{Read, Seek};
 
 /// Largest number of bytes per channel one `DsdRead::read_bytes` call returns (larger
 /// requests are reduced), which bounds the reader's buffer.
 pub const MAX_CHUNK: usize = 16 << 20;
 
-/// Description of a DSD stream.
+/// Description of a DSD stream. New fields may be added in minor versions; an
+/// implementation of [`DsdRead`] makes one with [`DsdInfo::new`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct DsdInfo {
     /// Number of channels (1..=6).
     pub channels: u16,
@@ -22,15 +24,46 @@ pub struct DsdInfo {
     pub samples: u64,
 }
 
-/// Description of a PCM stream.
+impl DsdInfo {
+    /// A description of `channels` channels of `samples` samples each at `sample_rate` Hz.
+    pub fn new(channels: u16, sample_rate: u32, samples: u64) -> DsdInfo {
+        DsdInfo {
+            channels,
+            sample_rate,
+            samples,
+        }
+    }
+}
+
+/// Description of a PCM stream. New fields may be added in minor versions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PcmInfo {
     /// Number of channels (1..=6).
     pub channels: u16,
     /// Sample rate in Hz.
     pub sample_rate: u32,
-    /// Frames (samples per channel).
+    /// Frames (samples per channel), as the file declares them. A FLAC stream that holds
+    /// more delivers them too, and the reader then reports the count delivered here once
+    /// the stream has ended (see `FlacReader::declared_frames`).
     pub frames: u64,
+}
+
+impl PcmInfo {
+    /// A description of `channels` channels of `frames` frames at `sample_rate` Hz.
+    pub fn new(channels: u16, sample_rate: u32, frames: u64) -> PcmInfo {
+        PcmInfo {
+            channels,
+            sample_rate,
+            frames,
+        }
+    }
+}
+
+pub(crate) mod sealed {
+    /// Keeps [`super::DsdWrite`] and [`super::PcmRead`] implemented in this crate only, so
+    /// methods can be added to them in minor versions.
+    pub trait Sealed {}
 }
 
 /// A source of DSD data.
@@ -62,8 +95,8 @@ pub trait DsdRead {
     }
 }
 
-/// A sink for DSD data.
-pub trait DsdWrite {
+/// A sink for DSD data: the DSF and DFF writers. Sealed: implemented in this crate only.
+pub trait DsdWrite: sealed::Sealed {
     /// Writes the same number of MSB-first bytes for every channel.
     fn write_bytes(&mut self, data: &[Vec<u8>]) -> Result<()>;
     /// Writes trailing structures and fixes up header sizes. `samples` is the exact
@@ -71,8 +104,9 @@ pub trait DsdWrite {
     fn finish(&mut self, samples: u64) -> Result<()>;
 }
 
-/// A source of PCM data, normalised so that digital full scale is +-1.0.
-pub trait PcmRead {
+/// A source of PCM data, normalised so that digital full scale is +-1.0: the WAV and FLAC
+/// readers. Sealed: implemented in this crate only.
+pub trait PcmRead: sealed::Sealed {
     /// Stream description.
     fn info(&self) -> PcmInfo;
     /// Appends up to `max_frames` frames to `out[ch]`. Returns frames appended; 0 = end.
@@ -107,7 +141,7 @@ pub(crate) fn le_u64(b: &[u8], at: usize) -> u64 {
 pub(crate) fn skip<R: Read>(r: &mut R, n: u64) -> Result<()> {
     let got = std::io::copy(&mut r.by_ref().take(n), &mut std::io::sink())?;
     if got != n {
-        return format_err("file is truncated");
+        return format_err(FormatErrorKind::Truncated, "file is truncated");
     }
     Ok(())
 }
@@ -146,5 +180,8 @@ pub(crate) fn check_dsd_rate(rate: u32) -> Result<()> {
             }
         }
     }
-    format_err(format!("DSD sample rate {rate} Hz is not DSD64..DSD1024"))
+    format_err(
+        FormatErrorKind::Malformed,
+        format!("DSD sample rate {rate} Hz is not DSD64..DSD1024"),
+    )
 }

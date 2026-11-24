@@ -38,7 +38,7 @@ use dsd2pcm::frames::{
 };
 use dsd2pcm::io::{DsdRead, DsdWrite, PcmRead};
 use dsd2pcm::wav::{WavFormat, WavReader, WavWriter};
-use dsd2pcm::{convert_file_with, Cutoff, Error, Filter, PcmOptions, PcmRate};
+use dsd2pcm::{convert_file_with, Cutoff, Error, Filter, PcmOptions, PcmRate, Threads};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -361,7 +361,11 @@ fn iteration(
     opts.filter = s.filter;
     opts.gain_db = gain.db();
     for threaded in [false, true] {
-        opts.threads = threaded;
+        opts.threads = if threaded {
+            Threads::All
+        } else {
+            Threads::Single
+        };
         let wav = whole_file(reader(&file), ch as u16, &opts, None).unwrap();
         assert!(wav_data(&wav) == &whole[..], "{s:?}: file path differs");
         st.conversions += 1;
@@ -378,7 +382,11 @@ fn iteration(
         assert_eq!(pcm[0].len(), frames * spf);
     }
     // Cancelled from the hook, before or after the first block.
-    opts.threads = i % 3 != 0;
+    opts.threads = if i % 3 != 0 {
+        Threads::All
+    } else {
+        Threads::Single
+    };
     let r = whole_file(reader(&file), ch as u16, &opts, Some(i % 2));
     if i % 2 == 0 {
         assert!(matches!(r, Err(Error::Cancelled)), "{r:?}");
@@ -397,7 +405,7 @@ fn iteration(
         DffReader::new(Cursor::new(cut.to_vec())).map(|r| Box::new(r) as _)
     };
     if let Ok(r) = r {
-        opts.threads = false;
+        opts.threads = Threads::Single;
         let _ = whole_file(r, ch as u16, &opts, None);
     }
     st.errors += 1;
@@ -428,7 +436,7 @@ fn iteration(
     if i % 10 == 7 {
         let (inp, out) = (tmp.join("in.dsf"), tmp.join("out.wav"));
         std::fs::write(&inp, dsf(&data)).unwrap();
-        opts.threads = true;
+        opts.threads = Threads::All;
         let mut calls = 0u32;
         let rep = convert_file_with(&inp, &out, &opts, &mut |_| {
             calls += 1;

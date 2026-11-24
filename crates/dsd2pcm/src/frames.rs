@@ -46,7 +46,7 @@
 //! call and are reused: later calls allocate nothing.
 
 use crate::decimator::{self, Carry, Cutoff, PcmRate, Plan, Scratch, IDLE};
-use crate::error::{Error, Result};
+use crate::error::{ArgumentKind, Error, Result};
 use crate::filters::{pysacd, Filter};
 
 /// Bytes of one channel in one frame: 37 632 one-bit samples.
@@ -81,9 +81,10 @@ impl Gain {
     /// on every platform.
     pub fn from_db(db: f64) -> Result<Gain> {
         if !db.is_finite() || !(Self::MIN_DB..=Self::MAX_DB).contains(&db) {
-            return Err(Error::InvalidArgument(format!(
-                "gain {db} dB is outside -120 to +24 dB"
-            )));
+            return Err(Error::invalid(
+                ArgumentKind::Gain,
+                format!("gain {db} dB is outside -120 to +24 dB"),
+            ));
         }
         Ok(Gain {
             db,
@@ -108,8 +109,10 @@ impl Default for Gain {
     }
 }
 
-/// What a [`Converter`] produces.
+/// What a [`Converter`] produces. Start from [`PcmConfig::new`]; new fields may be added in
+/// minor versions, with defaults that keep the old behaviour.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct PcmConfig {
     /// The output rate.
     pub rate: PcmRate,
@@ -149,8 +152,9 @@ impl PcmConfig {
     }
 }
 
-/// Counts from one conversion call.
+/// Counts from one conversion call. New fields may be added in minor versions.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ConvertStats {
     /// Samples clamped to the 24-bit range, per channel.
     pub clipped: [u64; MAX_CHANNELS as usize],
@@ -163,8 +167,10 @@ impl ConvertStats {
     }
 }
 
-/// A run of consecutive frames of one area in one buffer, and the frames around it.
+/// A run of consecutive frames of one area in one buffer, and the frames around it. Start
+/// from [`FrameRun::new`]; new fields may be added in minor versions.
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct FrameRun<'a> {
     /// The frame before the run, or `None` if the run starts the area.
     pub before: Option<&'a [u8]>,
@@ -217,8 +223,10 @@ impl<'a> From<&'a [&'a [u8]]> for Frames<'a> {
 }
 
 /// A run of consecutive frames of one area and the frames around it, for
-/// [`Converter::convert`].
+/// [`Converter::convert`]. Start from [`Run::new`]; new fields may be added in minor
+/// versions.
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct Run<'a> {
     /// The frame before the run, or `None` if the run starts the area.
     pub before: Option<&'a [u8]>,
@@ -284,6 +292,7 @@ impl<'a> From<FrameRun<'a>> for Run<'a> {
 /// The output buffer of [`Converter::convert`] and its sample layout. Either holds
 /// `frames x samples_per_frame() x channels` interleaved samples.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PcmOut<'o> {
     /// Sign-extended `i32` samples.
     I32(&'o mut [i32]),
@@ -317,18 +326,18 @@ impl Converter {
     /// available at 88.2 kHz), a gain made by [`Gain::from_db`].
     pub fn new(config: PcmConfig) -> Result<Converter> {
         if !(1..=MAX_CHANNELS).contains(&config.channels) {
-            return Err(Error::InvalidArgument(format!(
-                "{} channels: 1 to 6 are supported",
-                config.channels
-            )));
+            return Err(Error::invalid(
+                ArgumentKind::Channels,
+                format!("{} channels: 1 to 6 are supported", config.channels),
+            ));
         }
         if !config.gain.linear.is_finite()
             || !(Gain::MIN_DB..=Gain::MAX_DB).contains(&config.gain.db)
         {
-            return Err(Error::InvalidArgument(format!(
-                "gain {} dB is outside -120 to +24 dB",
-                config.gain.db
-            )));
+            return Err(Error::invalid(
+                ArgumentKind::Gain,
+                format!("gain {} dB is outside -120 to +24 dB", config.gain.db),
+            ));
         }
         let pysacd = match config.filter {
             Filter::Pysacd => Some(Box::new(pysacd::FrameState::new(
@@ -432,26 +441,25 @@ impl Converter {
         let expected = frames * spf * ch;
         match &out {
             PcmOut::I32(o) if o.len() != expected => {
-                return Err(Error::InvalidArgument(format!(
-                    "output of {} samples, {expected} expected",
-                    o.len()
-                )));
+                return Err(Error::invalid(
+                    ArgumentKind::Buffer,
+                    format!("output of {} samples, {expected} expected", o.len()),
+                ));
             }
             PcmOut::S24le(o) if o.len() != 3 * expected => {
-                return Err(Error::InvalidArgument(format!(
-                    "output of {} bytes, {} expected",
-                    o.len(),
-                    3 * expected
-                )));
+                return Err(Error::invalid(
+                    ArgumentKind::Buffer,
+                    format!("output of {} bytes, {} expected", o.len(), 3 * expected),
+                ));
             }
             _ => {}
         }
         if let Some(fc) = &mut frame_clipped {
             if fc.len() != frames {
-                return Err(Error::InvalidArgument(format!(
-                    "{} per-frame clip counts for {frames} frames",
-                    fc.len()
-                )));
+                return Err(Error::invalid(
+                    ArgumentKind::Buffer,
+                    format!("{} per-frame clip counts for {frames} frames", fc.len()),
+                ));
             }
             fc.fill(0);
         }
@@ -532,7 +540,10 @@ impl Converter {
 }
 
 fn input_len(len: usize, what: &str) -> Error {
-    Error::InvalidArgument(format!("input of {len} bytes is not {what}"))
+    Error::invalid(
+        ArgumentKind::Buffer,
+        format!("input of {len} bytes is not {what}"),
+    )
 }
 
 /// Interleaves the channels `q` (equal lengths) into `out`.

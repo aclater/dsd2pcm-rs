@@ -106,6 +106,7 @@ fn check_wav(format: WavFormat, raw: &[u8], got: &[Vec<f64>]) {
                     s == 0.0
                 }
             }
+            f => unreachable!("format {f:?}"),
         };
         assert!(ok, "WAV sample {i} differs");
     }

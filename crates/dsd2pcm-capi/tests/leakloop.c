@@ -247,7 +247,7 @@ static void file_cycle(const char *dsf, const char *wav, const char *junk, const
     dsd2pcm_file_options py = DSD2PCM_FILE_OPTIONS_INIT;
     py.rate_hz = 88200;
     py.filter = DSD2PCM_FILTER_PYSACD;
-    py.threads = (uint32_t)(it % 2);
+    py.threads = (uint32_t)(it % 3); /* all cores, one, two */
     CHECK(dsd2pcm_convert_file(dsf, wav, &py, NULL) == DSD2PCM_OK);
     o.user_data = NULL;
     o.progress = NULL;
@@ -260,7 +260,7 @@ static void file_cycle(const char *dsf, const char *wav, const char *junk, const
     bad.rate_hz = 44100;
     CHECK(dsd2pcm_convert_file(dsf, wav, &bad, NULL) == DSD2PCM_E_INVALID_ARGUMENT);
     bad = o;
-    bad.threads = 2;
+    bad.no_clobber = 2;
     CHECK(dsd2pcm_convert_file(dsf, wav, &bad, NULL) == DSD2PCM_E_INVALID_ARGUMENT);
     bad = o;
     bad.struct_size = 0;

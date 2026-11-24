@@ -124,7 +124,9 @@ typedef struct dsd2pcm_file_options {
   uint32_t cutoff;
   // `DSD2PCM_FILTER_*`; 0 is the default.
   uint32_t filter;
-  // 0: convert on all cores; 1: on the calling thread only. Other values are reserved.
+  // 0: convert on all cores; 1: on the calling thread only; n > 1: on at most n threads
+  // (the calling one included, at most 256). The output is the same with any value.
+  // Values above 1 were refused before 0.2.0.
   uint32_t threads;
   // Gain in dB, -120 to +24.
   double gain_db;

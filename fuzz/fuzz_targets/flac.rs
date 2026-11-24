@@ -19,13 +19,17 @@ fuzz_target!(|data: &[u8]| {
         assert!((1..=6).contains(&ch));
         assert!(info.sample_rate > 0);
         assert!(info.frames > 0);
-        limit += ch * 16 * (info.frames.min(MAX_CHUNK as u64) as usize);
+        // Per call; the frames past the declared count come in calls of the same size.
+        limit += ch * 16 * MAX_CHUNK;
         let mut out = vec![Vec::new(); ch];
         let mut total = 0u64;
         for max in read_sizes(data) {
             match r.read_frames(max, &mut out) {
                 Ok(0) => {
-                    assert_eq!(total, info.frames, "FLAC delivered a different frame count");
+                    // The declared frames, and any the stream holds past them.
+                    assert!(total >= info.frames, "FLAC delivered fewer than declared");
+                    assert_eq!(total, r.info().frames, "frame count at the end");
+                    assert_eq!(r.declared_frames(), info.frames);
                     break;
                 }
                 Ok(n) => {
@@ -34,10 +38,6 @@ fuzz_target!(|data: &[u8]| {
                         assert!((-1.0..1.0).contains(s), "sample outside full scale");
                     }
                     total += n as u64;
-                    assert!(
-                        total <= info.frames,
-                        "FLAC delivered more than the frame count"
-                    );
                     out.iter_mut().for_each(Vec::clear);
                 }
                 // Frames are decoded as they are read, so damage after the headers is
