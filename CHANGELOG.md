@@ -140,9 +140,10 @@ Each with what to change in a caller. The C interface stays ABI version 1, with 
   RMAA-style summary; the pysacd preset, scarletbook-pcm 0.7.0 and the foobar2000 SACD
   plug-in compared), with the measurement scripts in `tools/quality`.
 - `Threads::Count(n)` runs a conversion on at most n threads (up to 256), and the C
-  interface's `dsd2pcm_file_options.threads` takes n > 1 the same way (it was refused). The
-  output bytes are the same for every count (tested from 1 to 7, all cores and above the
-  cap, with every filter).
+  interface's `dsd2pcm_file_options.threads` takes n > 1 the same way (it was refused), as
+  does the tool's new `--threads N` (1 to 256; 1 is `--single-thread`). The output bytes are
+  the same for every count (tested from 1 to 7, all cores and above the cap, with every
+  filter; the tool's test at 1, 2, 3, 5, 7, 64 and 256 against all cores).
 - `WavReader::declared_frames`: the frames a WAV file's `data` size declares, which is more
   than `info().frames` when the file is cut short. `FlacReader::declared_frames`: the
   frames STREAMINFO declares, which is less than `info().frames` at the end of a stream that

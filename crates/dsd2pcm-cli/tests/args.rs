@@ -127,7 +127,7 @@ fn non_utf8_arguments() {
     let wav = std::fs::read(d.join(&out)).unwrap();
     assert_eq!(&wav[..4], b"RIFF");
 
-    for opt in ["--rate", "--cutoff", "--gain", "--filter"] {
+    for opt in ["--rate", "--cutoff", "--gain", "--filter", "--threads"] {
         let bad = OsString::from_vec(b"17\xff".to_vec());
         let o = run(&d, &[inp.clone(), out.clone(), OsString::from(opt), bad]);
         assert_eq!(o.status.code(), Some(2), "{opt}: {}", stderr(&o));
@@ -199,5 +199,63 @@ fn filter_names() {
     let help = String::from_utf8_lossy(&o.stdout);
     assert!(help.contains("--filter precise|fast|pysacd"), "{help}");
     assert!(help.contains("lower CPU, lower quality"), "{help}");
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+/// `--threads N`: the same bytes as all cores and `--single-thread` for every N from 1 to the
+/// cap; 0, a count above 256 and a non-number are usage errors.
+#[test]
+fn threads_count() {
+    let d = dir("threads");
+    // Six channels of eight blocks of a pseudo-random bitstream, so the conversion splits
+    // into many pieces.
+    let (ch, blocks, block) = (6u64, 8u64, 4096u64);
+    let data = blocks * block * ch;
+    let mut h = Vec::new();
+    h.extend(b"DSD ");
+    for v in [28u64, 92 + data, 0] {
+        h.extend(v.to_le_bytes());
+    }
+    h.extend(b"fmt ");
+    h.extend(52u64.to_le_bytes());
+    for v in [1u32, 0, 7, ch as u32, 2_822_400, 1] {
+        h.extend(v.to_le_bytes());
+    }
+    h.extend((blocks * block * 8).to_le_bytes());
+    h.extend((block as u32).to_le_bytes());
+    h.extend(0u32.to_le_bytes());
+    h.extend(b"data");
+    h.extend((12 + data).to_le_bytes());
+    let mut s = 0x2545_f491_4f6c_dd1du64;
+    for _ in 0..data {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        h.push(s as u8);
+    }
+    std::fs::write(d.join("in.dsf"), h).unwrap();
+    let conv = |name: &str, extra: &[&str]| {
+        let mut a = os(&["in.dsf", name]);
+        a.extend(os(extra));
+        let o = run(&d, &a);
+        assert_eq!(o.status.code(), Some(0), "{extra:?}: {}", stderr(&o));
+        std::fs::read(d.join(name)).unwrap()
+    };
+    let all = conv("all.wav", &[]);
+    assert!(all == conv("single.wav", &["--single-thread"]));
+    for n in ["1", "2", "3", "5", "7", "64", "256"] {
+        assert!(all == conv("n.wav", &["--threads", n]), "--threads {n}");
+    }
+    for bad in ["0", "257", "-1", "two", ""] {
+        let o = run(&d, &os(&["in.dsf", "x.wav", "--threads", bad]));
+        assert_eq!(o.status.code(), Some(2), "{bad:?}: {}", stderr(&o));
+        assert!(
+            stderr(&o).contains("a whole number from 1 to 256"),
+            "{bad:?}: {}",
+            stderr(&o)
+        );
+    }
+    let o = run(&d, &os(&["--help"]));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("--threads N"));
     std::fs::remove_dir_all(&d).unwrap();
 }

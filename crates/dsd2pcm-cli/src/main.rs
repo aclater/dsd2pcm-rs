@@ -2,6 +2,7 @@
 
 use dsd2pcm::{convert_file_to, Cutoff, Filter, OutputOptions, PcmOptions, PcmRate, Threads};
 use std::ffi::OsString;
+use std::num::NonZeroUsize;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -10,7 +11,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 const USAGE: &str = "usage: dsd2pcm [OPTIONS] [--] IN.dsf|IN.dff OUT.wav
-options: [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter precise|fast|pysacd] [--single-thread] [-n|--no-clobber]
+options: [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter precise|fast|pysacd] [--single-thread | --threads N] [-n|--no-clobber]
 
 Converts DSD64 to 24-bit PCM WAV. Defaults: --rate 176400 --cutoff 40 --gain 0 --filter precise.
 Cutoffs: 30 (pass 30 kHz, stop 36 kHz), 40 (pass 40 kHz, stop 48 kHz),
@@ -24,6 +25,8 @@ Filters (figures from docs/pcm-quality.md and docs/performance.md):
   pysacd   pysacd's filter and dithered quantiser, computed in f64 (pysacd computes
            in f32); 88200 and 176400 only, fixed response.
 --single-thread: convert on the calling thread only (default: all cores).
+--threads N: convert on at most N threads, the calling one included; 1 to 256 (1 is
+--single-thread). The output bytes are the same with any count.
 -n, --no-clobber: fail if OUT exists, and never replace a file that appears at OUT
 during the conversion (default: replace OUT).
 --: every later argument is a file name, even one that starts with '-'.
@@ -83,6 +86,20 @@ fn parse(args: Vec<OsString>) -> Result<(PathBuf, PathBuf, PcmOptions, OutputOpt
                 }
             }
             "--single-thread" => opts.threads = Threads::Single,
+            "--threads" => {
+                let v = val("--threads")?;
+                let bad = || format!("--threads {v:?}: a whole number from 1 to {}", Threads::MAX);
+                let n = v
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(NonZeroUsize::new)
+                    .ok_or_else(bad)?;
+                opts.threads = match n.get() {
+                    1 => Threads::Single,
+                    c if c > Threads::MAX => return Err(bad()),
+                    _ => Threads::Count(n),
+                };
+            }
             "-n" | "--no-clobber" => out_opts.no_clobber = true,
             "-h" | "--help" => return Err(String::new()),
             "--" => {
