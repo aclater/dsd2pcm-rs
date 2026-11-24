@@ -1,3 +1,5 @@
+[dsd2pcm-rs](../README.md) › [Documentation](README.md) › Development
+
 # Development
 
 CI (`.github/workflows`) runs fmt, clippy, the docs build and the tests on Linux (x86_64,
@@ -14,7 +16,7 @@ dev-dependency scarletbook-pcm 0.7.0 uses edition 2024 (rust-version 1.85).
 with 1.85.
 Locally:
 
-```
+```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 CARGO_PROFILE_DEV_OPT_LEVEL=2 .github/scripts/test-simd-levels.sh
@@ -29,3 +31,12 @@ CHANGELOG, SECURITY.md and `docs/` (lychee, `.github/lychee.toml`), runs the REA
 Quick start block literally on the release it names, and fails when the workspace version,
 the lock files, the newest CHANGELOG section and the release references in the docs
 disagree (`python3 -I .github/scripts/check-doc-versions.py`).
+
+## See also
+
+- [Contributing](../CONTRIBUTING.md): how changes get in
+- [Testing](testing.md): checks for long-lived processes
+- [Fuzzing](fuzzing.md): the fuzz targets
+- [Releases](release.md): publishing a version
+
+Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).

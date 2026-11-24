@@ -1,5 +1,10 @@
 # Changelog
 
+All notable changes to this project are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
+[semantic versioning](https://semver.org/), and output bytes never change without a major
+version.
+
 ## Unreleased
 
 ### Added
@@ -16,7 +21,7 @@
   or FLAC's `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` comment); `DsdRead::channel_mask` the
   layout of a DSF channel type or of DSDIFF channel IDs; `WavWriter::with_channel_mask`,
   `DsfWriter::set_channel_mask`, `dsf::channel_mask_for_type` and
-  `dsf::channel_type_for_mask` ([usage](docs/usage.md#formats)). DSD to WAV conversion
+  `dsf::channel_type_for_mask` ([user guide](docs/user-guide.md#formats)). DSD to WAV conversion
   still writes the mask of the channel count, so output files are unchanged.
 - C library: CI, `crates/dsd2pcm-capi/check.sh` and the release archive checks verify that
   the libraries hold no claxon (FLAC decoder) symbols, by their symbol tables (`nm`), and
@@ -29,7 +34,6 @@
   DSDIFF files with speaker and numbered channel IDs, at every rate and cutoff and with
   pysacd's filter, pinned to 0.1.2's files; the MSRV workflow also builds the tests with
   Rust 1.85, which they need ([development](docs/development.md)).
-
 - Releases: the C library for Linux with musl (x86_64, aarch64), macOS on Intel (signed and
   notarised) and Windows with MinGW-w64 (`x86_64-windows-gnu`, for gcc); the command-line
   tool for musl (statically linked) and macOS on Intel; an attested source archive
@@ -53,6 +57,9 @@
 - Command line: `--` ends the options, so a file whose name starts with `-` can be given
   (`dsd2pcm -- -take1.dsf out.wav`). An unknown argument that starts with `-` is now a usage
   error; before, one that did not start with `--` was taken as a file name.
+- Docs in the DSD Toolbox layout: a [documentation index](docs/README.md), the
+  [user guide](docs/user-guide.md) and [options](docs/options.md) pages (from
+  `docs/usage.md`), and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Fixed
 
@@ -65,20 +72,13 @@
   `DSD2PCM_E_INTERNAL`). The calling thread now converts too, so a conversion starts one
   thread fewer for the same parallelism ([design](docs/design.md#frame-runs-threading-and-sharing)).
 
-## 0.1.2 (2026-11-23)
+## 0.1.2 - 2026-11-23
 
 This release contains security fixes; upgrading is recommended. Versions 0.1.0 and 0.1.1 are
 yanked from crates.io.
 
-- x86_64 without AVX2 (e.g. Celeron and Pentium J and N series of NAS units): the `sse2`
-  level now runs there too, at 1.09x to 1.34x the speed of scarletbook-pcm 0.7.0's path for
-  CPUs without AVX2 on runs of frames and whole files (1.03x to 1.27x one frame per call),
-  where the generic level ran at 0.84x to 1.17x ([performance](docs/performance.md)).
-  Output bytes unchanged.
-- C library: built without FLAC reading (unreachable from C); the archives now contain no
-  third-party code.
-- Command line: `--help` prints the usage to standard output and exits with status 0 (it
-  exited with 2); the usage explains `--single-thread`.
+### Added
+
 - Testing for long-lived processes: a soak test (thousands of conversions in one process,
   live heap, RSS and threads checked flat), a C create-convert-free leak loop under ASan
   and LSan, and Miri, ThreadSanitizer and valgrind runs ([testing](docs/testing.md)).
@@ -89,6 +89,15 @@ yanked from crates.io.
 
 ### Changed
 
+- x86_64 without AVX2 (e.g. Celeron and Pentium J and N series of NAS units): the `sse2`
+  level now runs there too, at 1.09x to 1.34x the speed of scarletbook-pcm 0.7.0's path for
+  CPUs without AVX2 on runs of frames and whole files (1.03x to 1.27x one frame per call),
+  where the generic level ran at 0.84x to 1.17x ([performance](docs/performance.md)).
+  Output bytes unchanged.
+- C library: built without FLAC reading (unreachable from C); the archives now contain no
+  third-party code.
+- Command line: `--help` prints the usage to standard output and exits with status 0 (it
+  exited with 2); the usage explains `--single-thread`.
 - Output files (`convert_file`, `convert_file_with`, `dsd2pcm_convert_file` and the tool):
   the output is written to `.dsd2pcm-PID-N.tmp` in the output's directory and renamed into
   place. A SIGKILL or power loss may leave that file behind; it is safe to delete.
@@ -106,7 +115,7 @@ yanked from crates.io.
 
 - DSF input whose sample count is not a multiple of 8: the padding bits of the last byte
   convert as silence (the reader delivers them as 0x69's bits); before, zero padding gave a
-  click in each channel's last few output samples ([usage](docs/usage.md#output)).
+  click in each channel's last few output samples ([user guide](docs/user-guide.md#output)).
 - Readers: opening a DFF, WAV or FLAC file with many small chunks takes time linear in its
   size with any buffered reader; DFF and WAV files may have at most 4096 chunks before the
   audio data (and DFF 4096 property chunks), as FLAC already had for metadata blocks.
@@ -130,7 +139,7 @@ yanked from crates.io.
 - Testing: the sanitizer soak run no longer fails on its short warm-up.
 - Release checks: a pipeline check could pass or fail wrongly when its reader stopped early.
 
-## 0.1.1 (2026-11-23)
+## 0.1.1 - 2026-11-23
 
 Faster, same output: every output byte is unchanged from 0.1.0 at every SIMD level.
 
@@ -143,10 +152,10 @@ Faster, same output: every output byte is unchanged from 0.1.0 at every SIMD lev
   such as Atom: 1.1x to 1.3x the speed of scarletbook-pcm 0.7.0 where the generic level ran
   at 0.9x to 1.0x.
 - Releases: the macOS tool and C library are signed (Developer ID, hardened runtime) and
-  notarized. Windows builds are still not code-signed.
+  notarised. Windows builds are still not code-signed.
 - Docs: README in the DSD Toolbox layout; usage and development notes in `docs/`.
 
-## 0.1.0 (2026-11-23)
+## 0.1.0 - 2026-11-23
 
 First release.
 
@@ -161,3 +170,4 @@ First release.
 - Progress and cancel hooks; `Error::Cancelled`.
 - A C interface (`libdsd2pcm`, ABI 1), shipped as release archives with a pkg-config file.
 - The `dsd2pcm` command-line tool.
+

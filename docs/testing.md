@@ -1,3 +1,5 @@
+[dsd2pcm-rs](../README.md) › [Documentation](README.md) › Testing for long-lived processes
+
 # Testing for long-lived processes
 
 A program that keeps converters for days (a file system, a player, a server) needs more than
@@ -38,7 +40,7 @@ It asserts, after a warm-up (the first 20 % of iterations):
 - on Linux, after every threaded conversion the thread count (`/proc/self/task`) is back
   at its value before the run.
 
-```
+```sh
 DSD2PCM_SOAK_ITERATIONS=1000 cargo test --release -p dsd2pcm --test soak -- --ignored --nocapture
 DSD2PCM_SOAK_SECONDS=3600 cargo test --release -p dsd2pcm --test soak -- --ignored --nocapture
 ```
@@ -82,14 +84,14 @@ with clang's AddressSanitizer, LeakSanitizer and UndefinedBehaviorSanitizer and 
 iterations with `detect_leaks=1`: one block left allocated fails it. Without a sanitizer it
 also checks the resident set levels off. Locally:
 
-```
+```sh
 CBINDGEN=cbindgen crates/dsd2pcm-capi/check.sh          # LEAKLOOP_ITERATIONS=100 by default
 ASAN_CC=clang .github/scripts/capi-check.sh crates/dsd2pcm-capi
 ```
 
 ## Miri
 
-```
+```sh
 rustup toolchain install nightly-2026-11-01 --component miri,rust-src
 cargo +nightly-2026-11-01 miri test -p dsd2pcm-capi
 .github/scripts/miri-core.sh            # with RUSTUP_TOOLCHAIN=nightly-2026-11-01
@@ -116,7 +118,7 @@ and 12 for the core crate on a Ryzen AI Max+ 395 (one core each):
 
 ## ThreadSanitizer
 
-```
+```sh
 export CARGO_PROFILE_DEV_OPT_LEVEL=2
 RUSTFLAGS=-Zsanitizer=thread DSD2PCM_SOAK_ITERATIONS=100 DSD2PCM_SOAK_RSS_REPORT_ONLY=1 DSD2PCM_SOAK_HEAP_REPORT_ONLY=1 \
   cargo +nightly-2026-11-01 test -Zbuild-std --target x86_64-unknown-linux-gnu \
@@ -162,3 +164,11 @@ on a hit and 2 when the check itself fails (an invalid or match-everything regex
 error), so an error never passes; `.github/scripts/check-private-names-test.sh` (run first
 in the same job) checks each of those cases in throwaway repositories. Locally:
 `PRIVATE_NAMES='pattern' .github/scripts/check-private-names.sh`.
+
+## See also
+
+- [Development](development.md): the checks CI runs
+- [C interface](c-api.md#checks): the C library checks
+- [Fuzzing](fuzzing.md): the readers against bad input
+
+Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
