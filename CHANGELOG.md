@@ -14,6 +14,8 @@ with its measured effect. Releases up to 0.1.2 keep their behaviour as released.
 Quality: [docs/quality/0.2.0.md](docs/quality/0.2.0.md), every filter measured against 0.1.2
 with dsd-measure 0.1.2.
 
+Known issue: Linux aarch64 builds are tested in CI on GitHub's hosted ARM runners and under emulation; one long-running memory test does not yet pass there and is being investigated. Release testing on our own ARM hardware resumes when our ARM test machine arrives.
+
 ### Changed
 
 #### Breaking changes (Rust API)
