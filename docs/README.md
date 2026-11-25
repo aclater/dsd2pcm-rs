@@ -10,7 +10,7 @@ Start with the [Quick start](../README.md#quick-start) in the README.
 ## Install
 
 - [Platforms](../README.md#platforms): release archives, `cargo install dsd2pcm-cli`
-- [Releases](https://github.com/dsd-toolbox/dsd2pcm-rs/releases): the latest is <!-- facts:release repo=dsd-toolbox/dsd2pcm-rs fmt="{version} ({date})" -->0.1.2 (2026-11-24)<!-- /facts -->
+- [Releases](https://github.com/dsd-toolbox/dsd2pcm-rs/releases): the latest is <!-- facts:release repo=dsd-toolbox/dsd2pcm-rs fmt="{version} ({date})" -->0.2.0 (2026-11-25)<!-- /facts -->
 - [C library binary releases](c-api.md#binary-releases): archives, checksums and attestations
 
 ## Use

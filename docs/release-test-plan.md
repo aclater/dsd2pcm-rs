@@ -332,7 +332,7 @@ pipx install git+https://github.com/dsd-toolbox/dsd-measure@3eaec2df13634f3bfc39
 dsd-measure --version
 cargo install --locked --path crates/dsd2pcm-cli --root target/quality/new
 # facts:release repo=dsd-toolbox/dsd2pcm-rs fmt="cargo install --locked --git https://github.com/{repo} --tag {tag} --root target/quality/old dsd2pcm-cli"
-cargo install --locked --git https://github.com/dsd-toolbox/dsd2pcm-rs --tag v0.1.2 --root target/quality/old dsd2pcm-cli
+cargo install --locked --git https://github.com/dsd-toolbox/dsd2pcm-rs --tag v0.2.0 --root target/quality/old dsd2pcm-cli
 # /facts
 ```
 
