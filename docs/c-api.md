@@ -172,6 +172,14 @@ Both run without arguments.
 - `DSD2PCM_ABI_VERSION` (1) in the header and `dsd2pcm_abi_version()` in the library name
   the ABI; a program can compare them at start-up. On Linux the shared library's SONAME is
   `libdsd2pcm.so.<ABI version>`, so a program linked against ABI 1 never loads another.
+- `dsd2pcm_simd_level()` (since 0.2.1) returns the SIMD level the library's kernels use now as a static,
+  NUL-terminated ASCII string (`generic`, `sse2`, `avx2` or `avx2fma`; the environment
+  variable `DSD2PCM_SIMD` caps it, as for the command-line tool). It is never NULL, is valid
+  for the life of the process and must not be freed. The output bytes are the same at every
+  level, so use it for logs and bug reports, not to choose a code path; later versions may
+  return other names (a string, so adding one is not an ABI change). `dsd2pcm_version()` gives
+  the library's version the same way. Adding a function is an append, so the ABI version
+  stays 1.
 - The ABI version goes up on any incompatible change: a field removed, moved or retyped, a
   changed function signature, a changed meaning of a value.
 - Compatible changes only append: new fields go at the end of a struct, new functions,
@@ -223,17 +231,17 @@ library (MIT OR Apache-2.0). `--features flac` adds it back. Build it on its own
 it too, through the command-line tool, and its libraries then hold claxon's code.
 
 From 0.2.0 on, each release has the source as an attested archive,
-`dsd2pcm-0.2.0-src.tar.gz` for this version: the tagged commit's whole tree, made with
-`git archive --format=tar --prefix=dsd2pcm-0.2.0/ v0.2.0 | gzip -n -9` (the same command
+`dsd2pcm-0.2.1-src.tar.gz` for this version: the tagged commit's whole tree, made with
+`git archive --format=tar --prefix=dsd2pcm-0.2.1/ v0.2.1 | gzip -n -9` (the same command
 gives the same tar, and with GNU gzip the same bytes). To pin and check it:
 
 <!-- docs-run: skip="needs a GitHub login for gh release download and gh attestation verify, then builds with Rust" -->
 ```sh
-gh release download v0.2.0 -R dsd-toolbox/dsd2pcm-rs -p 'dsd2pcm-0.2.0-src.tar.gz*'
-sha256sum -c dsd2pcm-0.2.0-src.tar.gz.sha256
-gh attestation verify dsd2pcm-0.2.0-src.tar.gz -R dsd-toolbox/dsd2pcm-rs --signer-workflow dsd-toolbox/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.2.0 --deny-self-hosted-runners
-tar -xzf dsd2pcm-0.2.0-src.tar.gz
-cd dsd2pcm-0.2.0
+gh release download v0.2.1 -R dsd-toolbox/dsd2pcm-rs -p 'dsd2pcm-0.2.1-src.tar.gz*'
+sha256sum -c dsd2pcm-0.2.1-src.tar.gz.sha256
+gh attestation verify dsd2pcm-0.2.1-src.tar.gz -R dsd-toolbox/dsd2pcm-rs --signer-workflow dsd-toolbox/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.2.1 --deny-self-hosted-runners
+tar -xzf dsd2pcm-0.2.1-src.tar.gz
+cd dsd2pcm-0.2.1
 cargo build --release --locked -p dsd2pcm-capi
 ```
 
@@ -247,7 +255,7 @@ cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c t
 ./minimal
 ```
 
-It prints `dsd2pcm 0.2.0: 2352 samples per channel, first byte 0`. To link the shared
+It prints `dsd2pcm 0.2.1: 2352 samples per channel, first byte 0`. To link the shared
 library instead (its SONAME is `libdsd2pcm.so.1`, so it needs that name at run time):
 
 <!-- docs-run: checkout=1 expect="2352 samples per channel, first byte 0" -->
@@ -260,7 +268,7 @@ LD_LIBRARY_PATH=target/release ./minimal
 ## Offline source build
 
 From 0.2.0 on, each release also has the C library's own source archive,
-`libdsd2pcm-0.2.0-src.tar.gz` for this version, with a `.sha256` file and a build provenance
+`libdsd2pcm-0.2.1-src.tar.gz` for this version, with a `.sha256` file and a build provenance
 attestation. It is for building the C library where there is no network and no crates.io
 index, for example inside another project's source distribution. It holds the crates
 `dsd2pcm` and `dsd2pcm-capi` as a workspace of their own: their `src/` (and `build.rs`) as
@@ -287,11 +295,11 @@ To download, check and build a release's archive, with Rust 1.83 or later:
 
 <!-- docs-run: skip="needs a GitHub login for gh release download and gh attestation verify, and a release from 0.2.0 on" -->
 ```sh
-gh release download v0.2.0 -R dsd-toolbox/dsd2pcm-rs -p 'libdsd2pcm-0.2.0-src.tar.gz*'
-sha256sum -c libdsd2pcm-0.2.0-src.tar.gz.sha256
-gh attestation verify libdsd2pcm-0.2.0-src.tar.gz -R dsd-toolbox/dsd2pcm-rs --signer-workflow dsd-toolbox/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.2.0 --deny-self-hosted-runners
-tar -xzf libdsd2pcm-0.2.0-src.tar.gz
-cd libdsd2pcm-0.2.0
+gh release download v0.2.1 -R dsd-toolbox/dsd2pcm-rs -p 'libdsd2pcm-0.2.1-src.tar.gz*'
+sha256sum -c libdsd2pcm-0.2.1-src.tar.gz.sha256
+gh attestation verify libdsd2pcm-0.2.1-src.tar.gz -R dsd-toolbox/dsd2pcm-rs --signer-workflow dsd-toolbox/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.2.1 --deny-self-hosted-runners
+tar -xzf libdsd2pcm-0.2.1-src.tar.gz
+cd libdsd2pcm-0.2.1
 cargo build --offline --locked --release -p dsd2pcm-capi
 ```
 
@@ -302,15 +310,15 @@ the example against the static library:
 <!-- docs-run: checkout=1 group=capi-offline image=fedora-net timeout=3600 setup="dnf -y -q --setopt=install_weak_deps=False install gcc git-core tar gzip python3 && .github/scripts/rust-setup.sh 1.100.0 && mkdir -p ~/.local && ln -s ~/.cargo/bin ~/.local/bin && git init -q && git add -A && git -c user.name=docs-run -c user.email=docs-run@localhost commit -q -m checkout" expect="2352 samples per channel, first byte 0" -->
 ```sh
 .github/scripts/make-capi-src.sh dist
-tar -C dist -xzf dist/libdsd2pcm-0.2.0-src.tar.gz
-cd dist/libdsd2pcm-0.2.0
+tar -C dist -xzf dist/libdsd2pcm-0.2.1-src.tar.gz
+cd dist/libdsd2pcm-0.2.1
 mkdir /tmp/empty-cargo-home
 CARGO_HOME=/tmp/empty-cargo-home cargo build --offline --locked --release -p dsd2pcm-capi
 cc -std=c11 -I include examples/minimal.c target/release/libdsd2pcm.a -lpthread -ldl -lm -o minimal
 ./minimal
 ```
 
-It prints `dsd2pcm 0.2.0: 2352 samples per channel, first byte 0`.
+It prints `dsd2pcm 0.2.1: 2352 samples per channel, first byte 0`.
 
 ## Binary releases
 
@@ -320,15 +328,15 @@ The C library's source archive is in [Offline source build](#offline-source-buil
 
 | Archive | Platform |
 |---|---|
-| `libdsd2pcm-0.2.0-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
-| `libdsd2pcm-0.2.0-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
-| `libdsd2pcm-0.2.0-i686-linux.tar.gz` | Linux 32-bit x86, glibc 2.17 or later |
-| `libdsd2pcm-0.2.0-x86_64-linux-musl.tar.gz` | (from 0.2.0) Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later) |
-| `libdsd2pcm-0.2.0-aarch64-linux-musl.tar.gz` | (from 0.2.0) Linux aarch64, musl 1.2.3 or later |
-| `libdsd2pcm-0.2.0-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon |
-| `libdsd2pcm-0.2.0-x86_64-macos.tar.gz` | (from 0.2.0) macOS 11 or later, Intel |
-| `libdsd2pcm-0.2.0-x86_64-windows.zip` | Windows x86_64, for MSVC |
-| `libdsd2pcm-0.2.0-x86_64-windows-gnu.zip` | (from 0.2.0) Windows x86_64, for MinGW-w64 gcc (MSYS2 MINGW64, msvcrt) |
+| `libdsd2pcm-0.2.1-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
+| `libdsd2pcm-0.2.1-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
+| `libdsd2pcm-0.2.1-i686-linux.tar.gz` | Linux 32-bit x86, glibc 2.17 or later |
+| `libdsd2pcm-0.2.1-x86_64-linux-musl.tar.gz` | (from 0.2.0) Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later) |
+| `libdsd2pcm-0.2.1-aarch64-linux-musl.tar.gz` | (from 0.2.0) Linux aarch64, musl 1.2.3 or later |
+| `libdsd2pcm-0.2.1-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon |
+| `libdsd2pcm-0.2.1-x86_64-macos.tar.gz` | (from 0.2.0) macOS 11 or later, Intel |
+| `libdsd2pcm-0.2.1-x86_64-windows.zip` | Windows x86_64, for MSVC |
+| `libdsd2pcm-0.2.1-x86_64-windows-gnu.zip` | (from 0.2.0) Windows x86_64, for MinGW-w64 gcc (MSYS2 MINGW64, msvcrt) |
 
 An archive holds:
 
@@ -354,23 +362,23 @@ shown):
 <!-- docs-run: skip="needs a GitHub login for gh attestation verify, and the archive downloaded as the text above says" -->
 <!-- docs-lint: ignore placeholder -- pkg-config prints the flags for wherever the archive is unpacked, and '$ORIGIN' is the linker's token for the program's folder, passed on unexpanded -->
 ```sh
-sha256sum -c libdsd2pcm-0.2.0-x86_64-linux.tar.gz.sha256
-gh attestation verify libdsd2pcm-0.2.0-x86_64-linux.tar.gz -R dsd-toolbox/dsd2pcm-rs
-tar -xzf libdsd2pcm-0.2.0-x86_64-linux.tar.gz
-export PKG_CONFIG_PATH=libdsd2pcm-0.2.0-x86_64-linux/lib/pkgconfig
-cc libdsd2pcm-0.2.0-x86_64-linux/examples/minimal.c $(pkg-config --cflags --libs dsd2pcm) -Wl,-rpath,'$ORIGIN/libdsd2pcm-0.2.0-x86_64-linux/lib' -o minimal
+sha256sum -c libdsd2pcm-0.2.1-x86_64-linux.tar.gz.sha256
+gh attestation verify libdsd2pcm-0.2.1-x86_64-linux.tar.gz -R dsd-toolbox/dsd2pcm-rs
+tar -xzf libdsd2pcm-0.2.1-x86_64-linux.tar.gz
+export PKG_CONFIG_PATH=libdsd2pcm-0.2.1-x86_64-linux/lib/pkgconfig
+cc libdsd2pcm-0.2.1-x86_64-linux/examples/minimal.c $(pkg-config --cflags --libs dsd2pcm) -Wl,-rpath,'$ORIGIN/libdsd2pcm-0.2.1-x86_64-linux/lib' -o minimal
 ./minimal
 ```
 
 The musl archives work the same way on Alpine (`apk add gcc musl-dev pkgconf`). On macOS
 the same with the `aarch64-macos` or `x86_64-macos` archive, `shasum -a 256 -c` in place of
-`sha256sum -c`, and `-Wl,-rpath,@executable_path/libdsd2pcm-0.2.0-aarch64-macos/lib`.
+`sha256sum -c`, and `-Wl,-rpath,@executable_path/libdsd2pcm-0.2.1-aarch64-macos/lib`.
 Static linking instead (Linux):
 
 <!-- docs-run: skip="continues the block above, in the unpacked archive" -->
 <!-- docs-lint: ignore placeholder -- pkg-config prints the flags and the static library's system libraries for this platform -->
 ```sh
-cc libdsd2pcm-0.2.0-x86_64-linux/examples/minimal.c $(pkg-config --cflags dsd2pcm) libdsd2pcm-0.2.0-x86_64-linux/lib/libdsd2pcm.a $(pkg-config --libs-only-l --static dsd2pcm | sed 's/-ldsd2pcm//') -o minimal
+cc libdsd2pcm-0.2.1-x86_64-linux/examples/minimal.c $(pkg-config --cflags dsd2pcm) libdsd2pcm-0.2.1-x86_64-linux/lib/libdsd2pcm.a $(pkg-config --libs-only-l --static dsd2pcm | sed 's/-ldsd2pcm//') -o minimal
 ```
 
 To install system-wide, copy `include/` and `lib/` under a prefix such as `/usr/local`; the
@@ -386,14 +394,14 @@ minimal.exe
 
 With MinGW-w64, in an MSYS2 MINGW64 shell (`pacman -S mingw-w64-x86_64-gcc
 mingw-w64-x86_64-pkgconf`), in the folder holding the unpacked
-`libdsd2pcm-0.2.0-x86_64-windows-gnu` folder:
+`libdsd2pcm-0.2.1-x86_64-windows-gnu` folder:
 
 <!-- docs-run: skip="Windows, in an MSYS2 MINGW64 shell" -->
 <!-- docs-lint: ignore placeholder -- pkg-config prints the flags for wherever the archive is unpacked -->
 ```sh
-export PKG_CONFIG_PATH=libdsd2pcm-0.2.0-x86_64-windows-gnu/lib/pkgconfig
-gcc libdsd2pcm-0.2.0-x86_64-windows-gnu/examples/minimal.c $(pkg-config --cflags --libs dsd2pcm) -o minimal.exe
-cp libdsd2pcm-0.2.0-x86_64-windows-gnu/bin/dsd2pcm.dll .
+export PKG_CONFIG_PATH=libdsd2pcm-0.2.1-x86_64-windows-gnu/lib/pkgconfig
+gcc libdsd2pcm-0.2.1-x86_64-windows-gnu/examples/minimal.c $(pkg-config --cflags --libs dsd2pcm) -o minimal.exe
+cp libdsd2pcm-0.2.1-x86_64-windows-gnu/bin/dsd2pcm.dll .
 ./minimal.exe
 ```
 
@@ -418,7 +426,7 @@ module, a plug-in) without exporting them, and without clashing with another Rus
 in the same process, hide its symbols:
 
 - GNU ld and lld: `-Wl,--exclude-libs,libdsd2pcm.a`, for example
-  `cc -shared -fPIC -o myext.so myext.c libdsd2pcm-0.2.0-x86_64-linux/lib/libdsd2pcm.a -Wl,--exclude-libs,libdsd2pcm.a -lpthread -ldl -lm`
+  `cc -shared -fPIC -o myext.so myext.c libdsd2pcm-0.2.1-x86_64-linux/lib/libdsd2pcm.a -Wl,--exclude-libs,libdsd2pcm.a -lpthread -ldl -lm`
   (or a version script that lists your own exports);
 - MinGW-w64: `-static-libgcc -Wl,--exclude-libs,ALL`: without `-static-libgcc` your DLL
   needs `libgcc_s_seh-1.dll`, and `ALL` keeps both libdsd2pcm's and the static libgcc's

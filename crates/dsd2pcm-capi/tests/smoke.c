@@ -153,6 +153,14 @@ int main(int argc, char **argv) {
     snprintf(wav, sizeof wav, "%s/dsd2pcm-smoke.wav", dir);
     printf("dsd2pcm %s, ABI %u\n", dsd2pcm_version(), (unsigned)dsd2pcm_abi_version());
     CHECK(dsd2pcm_abi_version() == DSD2PCM_ABI_VERSION);
+    {
+        const char *simd = dsd2pcm_simd_level();
+        CHECK(simd != NULL);
+        CHECK(simd != NULL && (strcmp(simd, "generic") == 0 || strcmp(simd, "sse2") == 0 ||
+                               strcmp(simd, "avx2") == 0 || strcmp(simd, "avx2fma") == 0));
+        CHECK(dsd2pcm_simd_level() == simd);
+        printf("SIMD level: %s\n", simd);
+    }
 
     /* Pseudo-random area with full-scale stretches (which clip at +6 dB). */
     unsigned char *area = malloc((size_t)FRAMES * FRAME);

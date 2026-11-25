@@ -33,18 +33,28 @@ option values must be UTF-8, and a value that is not is a usage error.
 | `-n`, `--no-clobber` | | off | Refuse an existing `OUT` (exit status 1, the file left as it was), and never replace a file that appears at `OUT` during the conversion. |
 | `--` | | | Ends the options: every later argument is a file name. |
 | `-h`, `--help` | | | Print the usage to standard output and exit. |
+| `-V`, `--version` | | | Print the version and the SIMD level in use to standard output, and exit. No `IN` or `OUT` is needed. |
+
+`--version` prints two lines:
+
+```
+dsd2pcm 0.2.1
+simd: avx2fma
+```
+
+The second line is the level the conversion kernels use on this machine: `generic`, `sse2`, `avx2` or `avx2fma`, the best the CPU has, lowered by `DSD2PCM_SIMD` if that is set (see [Environment](#environment)). Every level gives the same output bytes; the line is for bug reports and benchmarks. A machine without the x86 levels (Apple silicon, any aarch64 machine) reports `generic`. The set of names may grow in later versions, so a script should print it, not match on it.
 
 ## Environment
 
 | Variable | Values | Effect |
 |---|---|---|
-| `DSD2PCM_SIMD` | `generic`, `sse2`, `avx2`, `avx2fma` | Caps the SIMD level picked at run time (`sse2` and above on x86 and x86_64 only). The output bytes are the same at every level. |
+| `DSD2PCM_SIMD` | `generic`, `sse2`, `avx2`, `avx2fma` | Caps the SIMD level picked at run time (`sse2` and above on x86 and x86_64 only). The output bytes are the same at every level. `dsd2pcm --version` shows the level that results. |
 
 ## Exit status
 
 | Status | Meaning |
 |---|---|
-| 0 | Converted, or `--help`. |
+| 0 | Converted, or `--help` or `--version`. |
 | 1 | The conversion failed or the options do not fit together; the message names the reason. |
 | 2 | Usage error: an unknown option, a missing value, an option value that is not UTF-8, or a missing file name. |
 | 130 | Interrupted by SIGINT (Ctrl-C). |

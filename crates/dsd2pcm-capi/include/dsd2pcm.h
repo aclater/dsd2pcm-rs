@@ -258,6 +258,13 @@ const char *dsd2pcm_last_error(void);
 // header's at start-up.
 uint32_t dsd2pcm_abi_version(void);
 
+// The SIMD level the library's kernels use now, as a static NUL-terminated ASCII string:
+// "generic", "sse2", "avx2" or "avx2fma" (the words the environment variable `DSD2PCM_SIMD`
+// takes, which caps it). Never NULL; valid for the life of the process; do not free it. Every
+// level gives the same output bytes: the name is for logs and bug reports. Later versions may
+// return other names. (Since 0.2.1.)
+const char *dsd2pcm_simd_level(void);
+
 // A short static name for a status code, such as "invalid argument".
 const char *dsd2pcm_status_str(int status);
 

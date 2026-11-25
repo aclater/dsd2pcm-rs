@@ -1069,6 +1069,18 @@ fn abi_version() {
     assert_eq!(DSD2PCM_ABI_VERSION, 1);
 }
 
+#[test]
+fn simd_level_name() {
+    let p = dsd2pcm_simd_level();
+    assert!(!p.is_null());
+    // SAFETY: the function returns a static NUL-terminated string.
+    let s = unsafe { CStr::from_ptr(p) }.to_str().unwrap();
+    assert!(["generic", "sse2", "avx2", "avx2fma"].contains(&s), "{s}");
+    assert_eq!(s, dsd::simd_level());
+    // Static: the same pointer every time.
+    assert_eq!(p, dsd2pcm_simd_level());
+}
+
 /// Paths are raw bytes on Unix: a file whose name is not UTF-8 converts.
 // macOS file systems (APFS, HFS+) refuse names that are not UTF-8, so the test cannot
 // create its input there.
