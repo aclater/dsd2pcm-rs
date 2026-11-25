@@ -30,14 +30,15 @@ fn abs_full(half: &[f64]) -> u128 {
 /// `|h|` of an integer tap.
 fn int(h: f64) -> u128 {
     assert!(
-        h.fract() == 0.0 && h.abs() < 2f64.powi(63),
+        // 2^63, written out: `powi` is not exactly specified (Miri perturbs it).
+        h.fract() == 0.0 && h.abs() < 9_223_372_036_854_775_808.0,
         "taps are integers"
     );
     h.abs() as u128
 }
 
-/// `q` of a scale `2^-q`.
-fn shift(scale: f64) -> u32 {
+/// `q` of a scale `2^-q`, from its bits (exact).
+pub(super) fn shift(scale: f64) -> u32 {
     let e = ((scale.to_bits() >> 52) & 0x7ff) as i32 - 1023;
     assert!(
         scale == f64::from_bits(((1023 + e) as u64) << 52) && e < 0,

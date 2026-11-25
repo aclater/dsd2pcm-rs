@@ -21,6 +21,7 @@ use dsd::{Cutoff, Error, Filter, PcmRate};
 use std::any::Any;
 use std::cell::RefCell;
 use std::ffi::{c_char, c_int, c_void, CString};
+use std::num::NonZeroUsize;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Mutex;
 
@@ -50,6 +51,9 @@ pub const DSD2PCM_E_CANCELLED: c_int = 6;
 pub const DSD2PCM_E_BUSY: c_int = 7;
 /// An internal error (a caught panic, or a handle unusable after one). Please report it.
 pub const DSD2PCM_E_INTERNAL: c_int = 8;
+/// The output file exists and `dsd2pcm_file_options.no_clobber` is set: it is left as it
+/// was. (Since 0.2.0.)
+pub const DSD2PCM_E_EXISTS: c_int = 9;
 
 /// Output layout: packed 3-byte little-endian samples (24-bit WAV and FLAC).
 pub const DSD2PCM_FORMAT_S24LE: u32 = 0;
@@ -63,13 +67,24 @@ pub const DSD2PCM_CUTOFF_LOW: u32 = 1;
 /// Low-pass filter: passband to 80 kHz (176 400 and 352 800 Hz only).
 pub const DSD2PCM_CUTOFF_WIDE: u32 = 2;
 
-/// Filter and quantiser: scarletbook-pcm 0.7.0's (the default).
+/// Filter and quantiser: the default, which is the precise filter since 0.2.0
+/// (`DSD2PCM_FILTER_PRECISE`, the same bytes). In 0.1.x it was scarletbook-pcm 0.7.0's,
+/// now `DSD2PCM_FILTER_FAST`. A zero `filter` field (the `*_INIT` macros) means this.
 pub const DSD2PCM_FILTER_DEFAULT: u32 = 0;
 /// Filter and quantiser: pysacd's filter with its TPDF-dithered quantiser, at 88200 and
 /// 176400 Hz with the standard cutoff. The dither is seeded per Super Audio CD frame from
 /// its index in the area: files count from their start, frame runs from
 /// `dsd2pcm_run.first_frame`.
 pub const DSD2PCM_FILTER_PYSACD: u32 = 1;
+/// Filter and quantiser: the precise filter (the default since 0.2.0), at every rate and
+/// cutoff, rounded without dither: at least 150 dB of stopband where ultrasonic content
+/// folds into the passband, SINAD 142 to 145 dB with a quiet source.
+pub const DSD2PCM_FILTER_PRECISE: u32 = 2;
+/// Filter and quantiser: lower CPU, lower quality: scarletbook-pcm 0.7.0's filters at
+/// every rate and cutoff, rounded without dither, the same bytes as scarletbook-pcm (the
+/// default of 0.1.x). SINAD about 122 dB with a quiet source (116 dB with the wide cutoff),
+/// at about 0.55 times the precise filter's CPU time on one core. (Since 0.2.0.)
+pub const DSD2PCM_FILTER_FAST: u32 = 3;
 
 /// The ABI version: it changes on any incompatible change to the interface. Compatible
 /// changes only append fields to the structs (see `struct_size`) or add functions.
@@ -92,7 +107,7 @@ pub type dsd2pcm_progress_fn =
 
 /// Settings for `dsd2pcm_convert_file`. Start from `DSD2PCM_FILE_OPTIONS_INIT` (all zeros
 /// but `struct_size`) and set `rate_hz`; the other zeros are the defaults: standard cutoff,
-/// default filter, 0 dB, all cores, no callback.
+/// default filter (precise), 0 dB, all cores, no callback, an existing output replaced.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct dsd2pcm_file_options {
@@ -104,9 +119,11 @@ pub struct dsd2pcm_file_options {
     pub rate_hz: u32,
     /// `DSD2PCM_CUTOFF_*`.
     pub cutoff: u32,
-    /// `DSD2PCM_FILTER_*`; 0 is the default.
+    /// `DSD2PCM_FILTER_*`; 0 is the default (`DSD2PCM_FILTER_PRECISE` since 0.2.0).
     pub filter: u32,
-    /// 0: convert on all cores; 1: on the calling thread only. Other values are reserved.
+    /// 0: convert on all cores; 1: on the calling thread only; n > 1: on at most n threads
+    /// (the calling one included, at most 256). The output is the same with any value.
+    /// Values above 1 were refused before 0.2.0.
     pub threads: u32,
     /// Gain in dB, -120 to +24.
     pub gain_db: f64,
@@ -114,6 +131,11 @@ pub struct dsd2pcm_file_options {
     pub progress: dsd2pcm_progress_fn,
     /// Passed to `progress` unchanged.
     pub user_data: *mut c_void,
+    /// 0: replace an existing output file. 1: refuse it with `DSD2PCM_E_EXISTS` and leave
+    /// it as it was; the result is put in place without ever replacing a file that appears
+    /// during the conversion. Other values are reserved. Appended in 0.2.0: a caller built
+    /// against an older header passes the 0.1.0 size, and this reads as 0.
+    pub no_clobber: u32,
 }
 
 /// What `dsd2pcm_convert_file` did; written on success only. Start from
@@ -143,7 +165,7 @@ pub struct dsd2pcm_file_report {
 
 /// Settings for `dsd2pcm_frames_new`. Start from `DSD2PCM_FRAMES_CONFIG_INIT` and set
 /// `rate_hz` and `channels`; the other zeros are the defaults: standard cutoff, default
-/// filter, 0 dB.
+/// filter (precise), 0 dB.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct dsd2pcm_frames_config {
@@ -155,7 +177,7 @@ pub struct dsd2pcm_frames_config {
     pub rate_hz: u32,
     /// `DSD2PCM_CUTOFF_*`.
     pub cutoff: u32,
-    /// `DSD2PCM_FILTER_*`; 0 is the default.
+    /// `DSD2PCM_FILTER_*`; 0 is the default (`DSD2PCM_FILTER_PRECISE` since 0.2.0).
     pub filter: u32,
     /// Channels of the frames, 1 to 6.
     pub channels: u32,
@@ -195,8 +217,8 @@ pub struct dsd2pcm_run {
     /// `after`'s length in bytes: one frame, or 0 with NULL.
     pub after_len: usize,
     /// Index of the run's first frame in its area. `DSD2PCM_FILTER_PYSACD` seeds its
-    /// dither from it (frame `first_frame + i` for the run's frame `i`); the default filter
-    /// ignores it.
+    /// dither from it (frame `first_frame + i` for the run's frame `i`); the other filters
+    /// ignore it.
     pub first_frame: u64,
 }
 
@@ -229,12 +251,18 @@ pub struct dsd2pcm_frames {
 
 impl dsd2pcm_frames {
     pub(crate) fn new(conv: dsd::frames::Converter) -> dsd2pcm_frames {
-        dsd2pcm_frames {
+        let h = dsd2pcm_frames {
             channels: usize::from(conv.config().channels),
             samples_per_frame: conv.samples_per_frame(),
             context_bytes: conv.context_bytes(),
             conv: Mutex::new(conv),
-        }
+        };
+        // On some targets std's `Mutex` allocates its operating-system lock on first use
+        // (macOS: a boxed pthread mutex, 64 bytes). Use it once here, so that
+        // `dsd2pcm_frames_convert`, which takes it, allocates nothing on its first call.
+        // The boxed lock stays valid when the handle moves.
+        drop(h.conv.lock());
+        h
     }
 
     /// Bytes of one frame of all channels.
@@ -290,24 +318,39 @@ macro_rules! versioned {
                 self.struct_size = size;
             }
         }
-        // The 0.1.0 layout is a contract: fields are only appended. While none has been,
-        // the struct is exactly its 0.1.0 size.
+        // The 0.1.0 layout is a contract: fields are only appended, so the struct is at
+        // least its 0.1.0 size.
+        const _: () = assert!(std::mem::size_of::<$t>() >= <$t as Versioned>::V1_SIZE);
+    };
+    // A struct that has not grown since 0.1.0: exactly its 0.1.0 size.
+    ($t:ident, $v1_64:expr, $v1_32a4:expr, $v1_32a8:expr, unchanged) => {
+        versioned!($t, $v1_64, $v1_32a4, $v1_32a8);
         const _: () = assert!(std::mem::size_of::<$t>() == <$t as Versioned>::V1_SIZE);
     };
 }
 
 // 0.1.0 sizes: 64-bit, 32-bit (i686 Linux), 32-bit with 8-byte aligned 64-bit fields.
 versioned!(dsd2pcm_file_options, 48, 36, 40);
-versioned!(dsd2pcm_file_report, 88, 88, 88);
-versioned!(dsd2pcm_frames_config, 32, 28, 32);
-versioned!(dsd2pcm_run, 80, 44, 48);
-versioned!(dsd2pcm_stats, 64, 64, 64);
+versioned!(dsd2pcm_file_report, 88, 88, 88, unchanged);
+versioned!(dsd2pcm_frames_config, 32, 28, 32, unchanged);
+versioned!(dsd2pcm_run, 80, 44, 48, unchanged);
+versioned!(dsd2pcm_stats, 64, 64, 64, unchanged);
+// Fields appended to dsd2pcm_file_options: `no_clobber` (0.2.0) starts where the 0.1.0
+// layout ended.
+const _: () = assert!(
+    std::mem::offset_of!(dsd2pcm_file_options, no_clobber)
+        == <dsd2pcm_file_options as Versioned>::V1_SIZE
+);
 
-/// Checks a caller's `struct_size`.
+/// The largest `struct_size` accepted: far above any struct's size, it bounds the bytes
+/// checked past ours and catches a `struct_size` that was never set.
+pub(crate) const MAX_STRUCT_SIZE: usize = 4096;
+
+/// Checks a caller's `struct_size`: from the 0.1.0 size to [`MAX_STRUCT_SIZE`].
 pub(crate) fn check_struct_size<T: Versioned>(size: u32, what: &str) -> Result<(), Fail> {
-    if (size as usize) < T::V1_SIZE {
+    if (size as usize) < T::V1_SIZE || size as usize > MAX_STRUCT_SIZE {
         return Err(invalid(format!(
-            "{what}->struct_size {size}: {} needs at least {} (use {}_INIT)",
+            "{what}->struct_size {size}: {} needs {} to {MAX_STRUCT_SIZE} (use {}_INIT)",
             T::NAME,
             T::V1_SIZE,
             T::NAME.to_uppercase()
@@ -399,24 +442,34 @@ pub(crate) fn cutoff(c: u32) -> Result<Cutoff, Fail> {
 
 pub(crate) fn filter(f: u32) -> Result<Filter, Fail> {
     match f {
-        DSD2PCM_FILTER_DEFAULT => Ok(Filter::Default),
+        DSD2PCM_FILTER_DEFAULT => Ok(Filter::default()),
         DSD2PCM_FILTER_PYSACD => Ok(Filter::Pysacd),
-        _ => Err(invalid(format!("filter {f}: 0 or 1"))),
+        DSD2PCM_FILTER_PRECISE => Ok(Filter::Precise),
+        DSD2PCM_FILTER_FAST => Ok(Filter::Fast),
+        _ => Err(invalid(format!("filter {f}: 0, 1, 2 or 3"))),
     }
 }
 
-pub(crate) fn file_options(o: &dsd2pcm_file_options) -> Result<dsd::PcmOptions, Fail> {
+pub(crate) fn file_options(
+    o: &dsd2pcm_file_options,
+) -> Result<(dsd::PcmOptions, dsd::OutputOptions), Fail> {
     let mut opts = dsd::PcmOptions::new(rate(o.rate_hz)?);
     opts.cutoff = cutoff(o.cutoff)?;
     opts.filter = filter(o.filter)?;
     opts.threads = match o.threads {
-        0 => true,
-        1 => false,
-        t => return Err(invalid(format!("threads {t}: 0 (all cores) or 1"))),
+        0 => dsd::Threads::All,
+        1 => dsd::Threads::Single,
+        // Above `Threads::MAX` the library uses `MAX`; a 32-bit count always fits.
+        t => dsd::Threads::Count(NonZeroUsize::new(t as usize).expect("t > 1")),
     };
     opts.gain_db = o.gain_db;
     dsd::convert::check_options(&opts)?;
-    Ok(opts)
+    let out = dsd::OutputOptions::default().with_no_clobber(match o.no_clobber {
+        0 => false,
+        1 => true,
+        n => return Err(invalid(format!("no_clobber {n}: 0 or 1"))),
+    });
+    Ok((opts, out))
 }
 
 pub(crate) fn frames_config(c: &dsd2pcm_frames_config) -> Result<dsd::frames::PcmConfig, Fail> {
@@ -460,6 +513,7 @@ pub(crate) fn status_str(status: c_int) -> &'static [u8] {
         DSD2PCM_E_CANCELLED => b"cancelled\0",
         DSD2PCM_E_BUSY => b"converter busy\0",
         DSD2PCM_E_INTERNAL => b"internal error\0",
+        DSD2PCM_E_EXISTS => b"output exists\0",
         _ => b"unknown status\0",
     }
 }

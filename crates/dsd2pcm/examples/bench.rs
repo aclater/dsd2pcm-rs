@@ -1,4 +1,5 @@
-//! Speed of DSD64 to 24-bit PCM against scarletbook-pcm 0.7.0, in memory, on one DSF file.
+//! Speed of DSD64 to 24-bit PCM against scarletbook-pcm 0.7.0, in memory, on one DSF file,
+//! with `Filter::Fast` (scarletbook-pcm's filters, the same bytes), not the default filter.
 //!
 //! `cargo run --release --example bench -- FILE.dsf [SECONDS]`: converts the first
 //! SECONDS (default 60) of FILE with every rate and cutoff, single-threaded and with one
@@ -11,7 +12,7 @@ use dsd2pcm::convert::dsd64_to_pcm;
 use dsd2pcm::dsf::{DsfReader, DsfWriter};
 use dsd2pcm::io::{DsdRead, DsdWrite};
 use dsd2pcm::wav::{WavFormat, WavWriter};
-use dsd2pcm::{Cutoff, PcmOptions, PcmRate};
+use dsd2pcm::{Cutoff, PcmOptions, PcmRate, Threads};
 use scarletbook_pcm as sb;
 use std::io::Cursor;
 use std::time::Instant;
@@ -66,13 +67,15 @@ fn main() {
                 continue;
             }
             let ours = |threads: bool| {
-                let opts = PcmOptions {
-                    rate,
-                    cutoff,
-                    gain_db: 0.0,
-                    threads,
-                    filter: dsd2pcm::Filter::Default,
-                };
+                let opts = PcmOptions::new(rate)
+                    .with_cutoff(cutoff)
+                    .with_gain_db(0.0)
+                    .with_threads(if threads {
+                        Threads::All
+                    } else {
+                        Threads::Single
+                    })
+                    .with_filter(dsd2pcm::Filter::Fast);
                 let r = DsfReader::new(Cursor::new(dsf.clone())).unwrap();
                 // Sized up front, as scarletbook-pcm's output buffer is.
                 let size = 68 + n * 8 / rate.decimation() as usize * ch * 3;
@@ -96,6 +99,7 @@ fn main() {
                     Cutoff::Standard => sb::Cutoff::Standard,
                     Cutoff::Low => sb::Cutoff::Low,
                     Cutoff::Wide => sb::Cutoff::Wide,
+                    c => unreachable!("cutoff {c:?}"),
                 };
                 let mut conv = sb::Converter::new(sb::PcmConfig::new(sr, sc, ch as u8)).unwrap();
                 let mut out = vec![0u8; frames * conv.samples_per_frame() * ch * 3];

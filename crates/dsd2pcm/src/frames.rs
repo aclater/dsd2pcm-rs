@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Super Audio CD frame runs to 24-bit PCM, with the interface and the output bytes of
-//! scarletbook-pcm 0.7.0's `Converter::convert`.
+//! Super Audio CD frame runs to 24-bit PCM, with the interface of scarletbook-pcm 0.7.0's
+//! `Converter::convert`, and its output bytes with [`crate::Filter::Fast`].
 //!
 //! Portions Copyright (c) 2026 The scarletbook-rs authors, MIT OR Apache-2.0 (see
 //! PROVENANCE.md): the public types and their semantics (`Converter`, `Run`, `FrameRun`,
@@ -18,7 +18,8 @@
 //! conversion of the whole area, and so does any run of frames with its two neighbours,
 //! whatever the run length or buffer layout. A neighbour of `None` marks the edge of the
 //! area: the input beyond it is the idle pattern (0x69). The samples are those of
-//! scarletbook-pcm 0.7.0 and of [`crate::convert::dsd64_to_pcm`].
+//! [`crate::convert::dsd64_to_pcm`] with the same filter, and with [`crate::Filter::Fast`]
+//! those of scarletbook-pcm 0.7.0.
 //!
 //! ```
 //! use dsd2pcm::frames::{Converter, PcmConfig, PcmOut, Run, FRAME_BYTES_PER_CHANNEL};
@@ -42,11 +43,11 @@
 //! [`Run::at_frame`]. A run with no frame before it starts the area.
 //!
 //! A [`Converter`] converts one call at a time on the calling thread (`&mut self`); use one
-//! per worker thread. Its buffers hold a few frames of every channel, grow on the first
-//! call and are reused: later calls allocate nothing.
+//! per worker thread. Its buffers hold a few frames of every channel; [`Converter::new`]
+//! sizes them for any run, so a call that succeeds allocates nothing, the first included.
 
 use crate::decimator::{self, Carry, Cutoff, PcmRate, Plan, Scratch, IDLE};
-use crate::error::{Error, Result};
+use crate::error::{ArgumentKind, Error, Result};
 use crate::filters::{pysacd, Filter};
 
 /// Bytes of one channel in one frame: 37 632 one-bit samples.
@@ -81,9 +82,10 @@ impl Gain {
     /// on every platform.
     pub fn from_db(db: f64) -> Result<Gain> {
         if !db.is_finite() || !(Self::MIN_DB..=Self::MAX_DB).contains(&db) {
-            return Err(Error::InvalidArgument(format!(
-                "gain {db} dB is outside -120 to +24 dB"
-            )));
+            return Err(Error::invalid(
+                ArgumentKind::Gain,
+                format!("gain {db} dB is outside -120 to +24 dB"),
+            ));
         }
         Ok(Gain {
             db,
@@ -108,8 +110,10 @@ impl Default for Gain {
     }
 }
 
-/// What a [`Converter`] produces.
+/// What a [`Converter`] produces. Start from [`PcmConfig::new`]; new fields may be added in
+/// minor versions, with defaults that keep the old behaviour.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct PcmConfig {
     /// The output rate.
     pub rate: PcmRate,
@@ -119,7 +123,8 @@ pub struct PcmConfig {
     pub channels: u8,
     /// The gain; [`Gain::UNITY`] by default.
     pub gain: Gain,
-    /// The filter and quantiser; [`Filter::Default`] (scarletbook-pcm's) by default. With
+    /// The filter and quantiser; [`Filter::Precise`] by default ([`Filter::Fast`],
+    /// scarletbook-pcm's, has the same interface and frame independence). With
     /// [`Filter::Pysacd`] the output also depends on each run's position in the area
     /// ([`Run::at_frame`]).
     pub filter: Filter,
@@ -133,7 +138,7 @@ impl PcmConfig {
             cutoff,
             channels,
             gain: Gain::UNITY,
-            filter: Filter::Default,
+            filter: Filter::default(),
         }
     }
 
@@ -148,8 +153,9 @@ impl PcmConfig {
     }
 }
 
-/// Counts from one conversion call.
+/// Counts from one conversion call. New fields may be added in minor versions.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ConvertStats {
     /// Samples clamped to the 24-bit range, per channel.
     pub clipped: [u64; MAX_CHANNELS as usize],
@@ -162,8 +168,10 @@ impl ConvertStats {
     }
 }
 
-/// A run of consecutive frames of one area in one buffer, and the frames around it.
+/// A run of consecutive frames of one area in one buffer, and the frames around it. Start
+/// from [`FrameRun::new`]; new fields may be added in minor versions.
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct FrameRun<'a> {
     /// The frame before the run, or `None` if the run starts the area.
     pub before: Option<&'a [u8]>,
@@ -216,8 +224,10 @@ impl<'a> From<&'a [&'a [u8]]> for Frames<'a> {
 }
 
 /// A run of consecutive frames of one area and the frames around it, for
-/// [`Converter::convert`].
+/// [`Converter::convert`]. Start from [`Run::new`]; new fields may be added in minor
+/// versions.
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct Run<'a> {
     /// The frame before the run, or `None` if the run starts the area.
     pub before: Option<&'a [u8]>,
@@ -283,6 +293,7 @@ impl<'a> From<FrameRun<'a>> for Run<'a> {
 /// The output buffer of [`Converter::convert`] and its sample layout. Either holds
 /// `frames x samples_per_frame() x channels` interleaved samples.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PcmOut<'o> {
     /// Sign-extended `i32` samples.
     I32(&'o mut [i32]),
@@ -313,21 +324,23 @@ pub struct Converter {
 
 impl Converter {
     /// A converter for `config`: 1 to 6 channels, a cutoff the rate has (`Wide` is not
-    /// available at 88.2 kHz), a gain made by [`Gain::from_db`].
+    /// available at 88.2 kHz), a gain made by [`Gain::from_db`]. Every buffer the converter
+    /// uses is allocated here, sized for any run: [`convert`](Self::convert) allocates
+    /// nothing when it succeeds.
     pub fn new(config: PcmConfig) -> Result<Converter> {
         if !(1..=MAX_CHANNELS).contains(&config.channels) {
-            return Err(Error::InvalidArgument(format!(
-                "{} channels: 1 to 6 are supported",
-                config.channels
-            )));
+            return Err(Error::invalid(
+                ArgumentKind::Channels,
+                format!("{} channels: 1 to 6 are supported", config.channels),
+            ));
         }
         if !config.gain.linear.is_finite()
             || !(Gain::MIN_DB..=Gain::MAX_DB).contains(&config.gain.db)
         {
-            return Err(Error::InvalidArgument(format!(
-                "gain {} dB is outside -120 to +24 dB",
-                config.gain.db
-            )));
+            return Err(Error::invalid(
+                ArgumentKind::Gain,
+                format!("gain {} dB is outside -120 to +24 dB", config.gain.db),
+            ));
         }
         let pysacd = match config.filter {
             Filter::Pysacd => Some(Box::new(pysacd::FrameState::new(
@@ -337,8 +350,8 @@ impl Converter {
             )?)),
             _ => None,
         };
-        let plan = Plan::new(config.rate, config.cutoff)?;
-        Ok(Converter {
+        let plan = Plan::with_design(config.rate, config.cutoff, config.filter.design())?;
+        let mut c = Converter {
             config,
             plan,
             sc: Scratch::default(),
@@ -347,7 +360,27 @@ impl Converter {
             pysacd,
             carry: Default::default(),
             next_shift: 0,
-        })
+        };
+        c.reserve();
+        Ok(c)
+    }
+
+    /// Sizes every buffer for the longest block, so that no call allocates: a block's
+    /// buffers depend on its length alone (at most `BLOCK_FRAMES` frames), not on where it
+    /// lies or what is around it.
+    fn reserve(&mut self) {
+        let ch = usize::from(self.config.channels);
+        if let Some(p) = &mut self.pysacd {
+            p.reserve(ch);
+            return;
+        }
+        let n = BLOCK_FRAMES * self.samples_per_frame();
+        self.bytes.reserve_exact(self.plan.span(0, n).1 * ch);
+        self.q.reserve_exact(n * ch);
+        self.plan.size(&mut self.sc);
+        for cy in &mut self.carry[..ch] {
+            self.plan.reserve(cy);
+        }
     }
 
     /// The configuration.
@@ -431,26 +464,25 @@ impl Converter {
         let expected = frames * spf * ch;
         match &out {
             PcmOut::I32(o) if o.len() != expected => {
-                return Err(Error::InvalidArgument(format!(
-                    "output of {} samples, {expected} expected",
-                    o.len()
-                )));
+                return Err(Error::invalid(
+                    ArgumentKind::Buffer,
+                    format!("output of {} samples, {expected} expected", o.len()),
+                ));
             }
             PcmOut::S24le(o) if o.len() != 3 * expected => {
-                return Err(Error::InvalidArgument(format!(
-                    "output of {} bytes, {} expected",
-                    o.len(),
-                    3 * expected
-                )));
+                return Err(Error::invalid(
+                    ArgumentKind::Buffer,
+                    format!("output of {} bytes, {} expected", o.len(), 3 * expected),
+                ));
             }
             _ => {}
         }
         if let Some(fc) = &mut frame_clipped {
             if fc.len() != frames {
-                return Err(Error::InvalidArgument(format!(
-                    "{} per-frame clip counts for {frames} frames",
-                    fc.len()
-                )));
+                return Err(Error::invalid(
+                    ArgumentKind::Buffer,
+                    format!("{} per-frame clip counts for {frames} frames", fc.len()),
+                ));
             }
             fc.fill(0);
         }
@@ -490,7 +522,6 @@ impl Converter {
                 let clipped = &mut stats.clipped[c];
                 let fc = &mut frame_clipped;
                 let cy = &mut carry[c];
-                plan.reserve(cy);
                 cy.shift = shift;
                 plan.run_quantised_carry(
                     src,
@@ -531,7 +562,10 @@ impl Converter {
 }
 
 fn input_len(len: usize, what: &str) -> Error {
-    Error::InvalidArgument(format!("input of {len} bytes is not {what}"))
+    Error::invalid(
+        ArgumentKind::Buffer,
+        format!("input of {len} bytes is not {what}"),
+    )
 }
 
 /// Interleaves the channels `q` (equal lengths) into `out`.

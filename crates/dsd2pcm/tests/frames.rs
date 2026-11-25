@@ -1,7 +1,8 @@
 //! `frames::Converter` gives the bytes and clip counts of scarletbook-pcm 0.7.0's
 //! `Converter::convert` for runs of every length, with and without neighbours, in both
 //! buffer layouts and both sample layouts, at every rate, cutoff, gain, channel count and
-//! SIMD level; and frame by frame equals the whole area equals `dsd64_to_pcm`.
+//! SIMD level; and frame by frame equals the whole area equals `dsd64_to_pcm`, with the
+//! default and the precise filter.
 
 use dsd2pcm::convert::dsd64_to_pcm;
 use dsd2pcm::decimator::{with_simd_level, SimdLevel};
@@ -9,11 +10,15 @@ use dsd2pcm::dsf::{DsfReader, DsfWriter};
 use dsd2pcm::frames::{self, Converter, FrameRun, Gain, PcmConfig, PcmOut, Run};
 use dsd2pcm::io::DsdWrite;
 use dsd2pcm::wav::{WavFormat, WavWriter};
-use dsd2pcm::{Cutoff, PcmOptions, PcmRate};
+use dsd2pcm::{Cutoff, Filter, PcmOptions, PcmRate, Threads};
 use scarletbook_pcm as sb;
 use std::io::Cursor;
 
 const FRAME: usize = frames::FRAME_BYTES_PER_CHANNEL;
+
+/// The filters whose frame runs must equal their whole-area conversion (pysacd's has its own
+/// tests: its dither depends on the frame index).
+const FILTERS: [Filter; 2] = [Filter::Fast, Filter::Precise];
 
 const ALL: [(PcmRate, Cutoff); 8] = [
     (PcmRate::Hz88200, Cutoff::Low),
@@ -62,6 +67,7 @@ fn sb_conv(rate: PcmRate, cutoff: Cutoff, ch: usize, gain_db: f64) -> sb::Conver
         Cutoff::Standard => sb::Cutoff::Standard,
         Cutoff::Low => sb::Cutoff::Low,
         Cutoff::Wide => sb::Cutoff::Wide,
+        c => unreachable!("cutoff {c:?}"),
     };
     let cfg =
         sb::PcmConfig::new(rate, cutoff, ch as u8).with_gain(sb::Gain::from_db(gain_db).unwrap());
@@ -69,7 +75,13 @@ fn sb_conv(rate: PcmRate, cutoff: Cutoff, ch: usize, gain_db: f64) -> sb::Conver
 }
 
 fn our_conv(rate: PcmRate, cutoff: Cutoff, ch: usize, gain_db: f64) -> Converter {
-    let cfg = PcmConfig::new(rate, cutoff, ch as u8).with_gain(Gain::from_db(gain_db).unwrap());
+    conv_with(Filter::Fast, rate, cutoff, ch, gain_db)
+}
+
+fn conv_with(filter: Filter, rate: PcmRate, cutoff: Cutoff, ch: usize, gain_db: f64) -> Converter {
+    let cfg = PcmConfig::new(rate, cutoff, ch as u8)
+        .with_gain(Gain::from_db(gain_db).unwrap())
+        .with_filter(filter);
     Converter::new(cfg).unwrap()
 }
 
@@ -249,7 +261,14 @@ fn padded_short_frame() {
 }
 
 /// Our whole-file conversion of an area given as interleaved frames.
-fn whole_file(area: &[u8], ch: usize, rate: PcmRate, cutoff: Cutoff, gain_db: f64) -> Vec<u8> {
+fn whole_file(
+    filter: Filter,
+    area: &[u8],
+    ch: usize,
+    rate: PcmRate,
+    cutoff: Cutoff,
+    gain_db: f64,
+) -> Vec<u8> {
     let n = area.len() / ch;
     let chans: Vec<Vec<u8>> = (0..ch)
         .map(|c| (0..n).map(|i| area[i * ch + c]).collect())
@@ -265,13 +284,11 @@ fn whole_file(area: &[u8], ch: usize, rate: PcmRate, cutoff: Cutoff, gain_db: f6
         rate.hz(),
     )
     .unwrap();
-    let opts = PcmOptions {
-        rate,
-        cutoff,
-        gain_db,
-        threads: false,
-        filter: dsd2pcm::Filter::Default,
-    };
+    let opts = PcmOptions::new(rate)
+        .with_cutoff(cutoff)
+        .with_gain_db(gain_db)
+        .with_threads(Threads::Single)
+        .with_filter(filter);
     dsd64_to_pcm(Box::new(r), &mut wav, &opts).unwrap();
     wav.finish().unwrap();
     let off = wav.data_offset() as usize;
@@ -287,12 +304,12 @@ fn whole_file(area: &[u8], ch: usize, rate: PcmRate, cutoff: Cutoff, gain_db: f6
     ignore = "too slow under Miri: converts tens of frames at every setting"
 )]
 fn frame_by_frame_equals_whole_area() {
-    for ch in [1usize, 2, 6] {
+    for (filter, ch) in FILTERS.iter().flat_map(|&f| [1usize, 2, 6].map(|c| (f, c))) {
         let frames = 13;
         let a = area(ch, frames, 0xABCD ^ ch as u64);
         for (rate, cutoff) in ALL {
             let gain = 7.5;
-            let mut c = our_conv(rate, cutoff, ch, gain);
+            let mut c = conv_with(filter, rate, cutoff, ch, gain);
             let fb = c.samples_per_frame() * ch * 3;
             let mut whole = vec![0u8; frames * fb];
             let mut whole_fc = vec![0u64; frames];
@@ -323,9 +340,12 @@ fn frame_by_frame_equals_whole_area() {
                 }
                 assert!(
                     pieces == whole,
-                    "{ch} ch {rate:?} {cutoff:?} runs of {step}"
+                    "{filter:?} {ch} ch {rate:?} {cutoff:?} runs of {step}"
                 );
-                assert_eq!(fc, whole_fc, "{ch} ch {rate:?} {cutoff:?} runs of {step}");
+                assert_eq!(
+                    fc, whole_fc,
+                    "{filter:?} {ch} ch {rate:?} {cutoff:?} runs of {step}"
+                );
             }
             // FrameRun and convert_frame: the same samples.
             let mut one = vec![0i32; c.samples_per_frame() * ch];
@@ -333,7 +353,7 @@ fn frame_by_frame_equals_whole_area() {
                 .unwrap();
             let mut b = vec![0u8; fb];
             frames::pack_s24le(&one, &mut b);
-            assert!(b == whole[5 * fb..6 * fb]);
+            assert!(b == whole[5 * fb..6 * fb], "{filter:?} {rate:?} {cutoff:?}");
             let mut two = vec![0i32; 2 * c.samples_per_frame() * ch];
             c.convert_run(
                 FrameRun::new(&a[7 * FRAME * ch..9 * FRAME * ch])
@@ -344,17 +364,17 @@ fn frame_by_frame_equals_whole_area() {
             .unwrap();
             let mut b = vec![0u8; 2 * fb];
             frames::pack_s24le(&two, &mut b);
-            assert!(b == whole[7 * fb..9 * fb]);
+            assert!(b == whole[7 * fb..9 * fb], "{filter:?} {rate:?} {cutoff:?}");
             assert!(
-                whole_file(&a, ch, rate, cutoff, gain) == whole,
-                "{ch} ch {rate:?} {cutoff:?}: dsd64_to_pcm"
+                whole_file(filter, &a, ch, rate, cutoff, gain) == whole,
+                "{filter:?} {ch} ch {rate:?} {cutoff:?}: dsd64_to_pcm"
             );
         }
     }
 }
 
-/// The neighbour context is less than one frame and matches scarletbook-pcm's; only that
-/// many bytes of each neighbour matter.
+/// The neighbour context is less than one frame and (default filter) matches
+/// scarletbook-pcm's; only that many bytes of each neighbour matter.
 #[test]
 #[cfg_attr(
     miri,
@@ -363,11 +383,13 @@ fn frame_by_frame_equals_whole_area() {
 fn context_bytes() {
     let ch = 2;
     let a = area(ch, 5, 5);
-    for (rate, cutoff) in ALL {
-        let mut c = our_conv(rate, cutoff, ch, 0.0);
+    for (filter, (rate, cutoff)) in FILTERS.iter().flat_map(|&f| ALL.map(|p| (f, p))) {
+        let mut c = conv_with(filter, rate, cutoff, ch, 0.0);
         let ctx = c.context_bytes();
-        assert!(ctx < FRAME, "{rate:?} {cutoff:?}: {ctx}");
-        assert_eq!(ctx, sb_conv(rate, cutoff, ch, 0.0).context_bytes());
+        assert!(ctx < FRAME, "{filter:?} {rate:?} {cutoff:?}: {ctx}");
+        if filter == Filter::Fast {
+            assert_eq!(ctx, sb_conv(rate, cutoff, ch, 0.0).context_bytes());
+        }
         let frame = |t: usize| a[t * FRAME * ch..][..FRAME * ch].to_vec();
         let conv = |c: &mut Converter, b: &[u8], n: &[u8]| {
             let mut out = vec![0i32; c.samples_per_frame() * ch];
@@ -380,16 +402,25 @@ fn context_bytes() {
         let (mut b, mut n) = (frame(1), frame(3));
         b[..(FRAME - ctx) * ch].fill(0);
         n[ctx * ch..].fill(0xFF);
-        assert!(conv(&mut c, &b, &n) == want, "{rate:?} {cutoff:?}");
+        assert!(
+            conv(&mut c, &b, &n) == want,
+            "{filter:?} {rate:?} {cutoff:?}"
+        );
     }
 }
 
 /// Bad lengths are errors, and nothing is written.
 #[test]
 fn errors_write_nothing() {
+    for filter in FILTERS {
+        errors_write_nothing_with(filter);
+    }
+}
+
+fn errors_write_nothing_with(filter: Filter) {
     let ch = 2;
     let a = area(ch, 3, 9);
-    let mut c = our_conv(PcmRate::Hz176400, Cutoff::Standard, ch, 0.0);
+    let mut c = conv_with(filter, PcmRate::Hz176400, Cutoff::Standard, ch, 0.0);
     let fb = c.samples_per_frame() * ch * 3;
     let mut out = vec![7u8; 2 * fb];
     let f = FRAME * ch;
@@ -422,9 +453,11 @@ fn errors_write_nothing() {
         .convert(Run::new(&list[..]), PcmOut::S24le(&mut out), None)
         .is_err());
     for chs in [0u8, 7] {
-        assert!(Converter::new(PcmConfig::new(PcmRate::Hz176400, Cutoff::Standard, chs)).is_err());
+        let cfg = PcmConfig::new(PcmRate::Hz176400, Cutoff::Standard, chs).with_filter(filter);
+        assert!(Converter::new(cfg).is_err());
     }
-    assert!(Converter::new(PcmConfig::new(PcmRate::Hz88200, Cutoff::Wide, 2)).is_err());
+    let cfg = PcmConfig::new(PcmRate::Hz88200, Cutoff::Wide, 2).with_filter(filter);
+    assert!(Converter::new(cfg).is_err());
     assert!(Gain::from_db(24.5).is_err() && Gain::from_db(f64::NAN).is_err());
     // An empty run converts to nothing.
     let st = c
@@ -442,7 +475,7 @@ fn errors_write_nothing() {
     ignore = "too slow under Miri: converts tens of frames at every setting"
 )]
 fn calls_out_of_order_or_with_other_neighbours() {
-    for ch in [1usize, 2] {
+    for (filter, ch) in FILTERS.iter().flat_map(|&f| [1usize, 2].map(|c| (f, c))) {
         let frames = 14;
         let a = area(ch, frames, 0x5151 ^ ch as u64);
         let frame = |t: usize| a[t * FRAME * ch..][..FRAME * ch].to_vec();
@@ -453,7 +486,7 @@ fn calls_out_of_order_or_with_other_neighbours() {
         let mut early = frame(4);
         early[ch] ^= 0x01;
         for (rate, cutoff) in ALL {
-            let mut c = our_conv(rate, cutoff, ch, 0.0);
+            let mut c = conv_with(filter, rate, cutoff, ch, 0.0);
             let fb = c.samples_per_frame() * ch * 3;
             // (first frame, frames, replaced `before`)
             let calls: &[(usize, usize, Option<&Vec<u8>>)] = &[
@@ -486,11 +519,58 @@ fn calls_out_of_order_or_with_other_neighbours() {
                 let mut got = vec![0u8; n * fb];
                 c.convert(run(), PcmOut::S24le(&mut got), None).unwrap();
                 let mut want = vec![0u8; n * fb];
-                our_conv(rate, cutoff, ch, 0.0)
+                conv_with(filter, rate, cutoff, ch, 0.0)
                     .convert(run(), PcmOut::S24le(&mut want), None)
                     .unwrap();
-                assert!(got == want, "{ch} ch {rate:?} {cutoff:?} frame {t}");
+                assert!(
+                    got == want,
+                    "{filter:?} {ch} ch {rate:?} {cutoff:?} frame {t}"
+                );
             }
+        }
+    }
+}
+
+/// The precise filter's frame runs (one frame with neighbours, runs of 4, the whole area)
+/// give the same bytes at every SIMD level of this CPU.
+#[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: converts tens of frames at every setting"
+)]
+fn precise_runs_same_at_every_simd_level() {
+    let ch = 2;
+    let frames = 9;
+    let a = area(ch, frames, 0x77);
+    let frame = |t: usize| &a[t * FRAME * ch..][..FRAME * ch];
+    for (rate, cutoff) in ALL {
+        let bytes = |level: SimdLevel| {
+            with_simd_level(level, || {
+                let mut c = conv_with(Filter::Precise, rate, cutoff, ch, 3.0);
+                let fb = c.samples_per_frame() * ch * 3;
+                let mut out = Vec::new();
+                for step in [1usize, 4, frames] {
+                    let mut t = 0;
+                    while t < frames {
+                        let u = (t + step).min(frames);
+                        let list: Vec<&[u8]> = (t..u).map(frame).collect();
+                        let run = Run::new(&list[..])
+                            .with_before(t.checked_sub(1).map(frame))
+                            .with_after((u < frames).then(|| frame(u)));
+                        let mut b = vec![0u8; (u - t) * fb];
+                        c.convert(run, PcmOut::S24le(&mut b), None).unwrap();
+                        out.extend_from_slice(&b);
+                        t = u;
+                    }
+                }
+                out
+            })
+            .unwrap()
+        };
+        let levels = SimdLevel::available();
+        let want = bytes(levels[0]);
+        for &level in &levels[1..] {
+            assert!(bytes(level) == want, "{level:?} {rate:?} {cutoff:?}");
         }
     }
 }

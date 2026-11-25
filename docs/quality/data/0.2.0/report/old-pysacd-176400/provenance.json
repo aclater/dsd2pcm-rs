@@ -1,0 +1,290 @@
+{
+ "device": {
+  "name": "old pysacd 176400",
+  "class": "A",
+  "adapter": "cli",
+  "gain_db": 0.0,
+  "dsd_rate": 2822400,
+  "command": "target/quality/old/bin/dsd2pcm {input} {output} --filter pysacd --rate 176400 --single-thread",
+  "shell": false,
+  "input_ext": "dsf"
+ },
+ "profile": "quick",
+ "in_rate": 88200,
+ "reference_chain": "2",
+ "versions": {
+  "dsd_measure": "0.1.2",
+  "reference_chain": "2",
+  "python": "3.15.2",
+  "numpy": "2.5.5",
+  "scipy": "1.18.1",
+  "matplotlib": "3.11.2"
+ },
+ "suite_sha256": "8a64e20d4fc6fdee12e2f89fbfe62cee8ca1622865d44739ba2b5b88309f66ce",
+ "adapter_calls": [
+  {
+   "input_sha256": "725c7c32c57d47a797e294213d54a499d5dbfc41b6f0b828af3d38af837c718b",
+   "output_sha256": "04ef255a0073c3667739f54ac339402a2b549bdc49ecea5fdc8e9ccc0c31a7a6",
+   "rate": 176400,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 176400,
+    "channels": 1
+   }
+  },
+  {
+   "input_sha256": "eb2f9ce4c4b1aa91ccd1005a316bcb54f475d279188bb1696fb8e80388892c87",
+   "output_sha256": "1581aae38de919d9951716fbe6136fc28ebcd46eb2268d84fa55e13aae75e8cc",
+   "rate": 176400,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 176400,
+    "channels": 1
+   }
+  },
+  {
+   "input_sha256": "03c34cd1087d4a25c639e4ac7e8e88a6d844f86ceed54600929e8fe9a3374b3d",
+   "output_sha256": "04c81c0241790ea9cbd22d1b33f12540808d04b71a450ec1b5e0acd9504c4201",
+   "rate": 176400,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 176400,
+    "channels": 1
+   }
+  },
+  {
+   "input_sha256": "7f9e2b7a3af291767c31670fdeaf178fa1d42a8983dbaa77db7e7e2b4251bb27",
+   "output_sha256": "db3ba6e91a95d428a2d4b3ab6733ecd2d2974d7cb36c46948e22690d49808e01",
+   "rate": 176400,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 176400,
+    "channels": 1
+   }
+  },
+  {
+   "input_sha256": "63b93550b0e2b59f3dc20855f07ef7487648c868b4782cf7f4e47fc1c0c5a9ab",
+   "output_sha256": "d76ded316af78e9a88c27e2c9b1c842beda2390d6e919e73ec8027172e9b36b2",
+   "rate": 176400,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 176400,
+    "channels": 1
+   }
+  },
+  {
+   "input_sha256": "05f4afed7ffb7e6a9cb5393746e452a2ef11cbd48708c33ac5ccc5ee0095fe30",
+   "output_sha256": "2d88e4b0255cc595ef67e1ba87355ea24976b73f5117e9ec88dd288ce8749e3d",
+   "rate": 176400,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 176400,
+    "channels": 1
+   }
+  },
+  {
+   "input_sha256": "3545acf875dd05601064601b016bb9b8248622d2498e046a9854cb91fe1af0e6",
+   "output_sha256": "22ee259b8b13550300f7e85baddee4d02ce8a047faacf91b71cf2c54127ee094",
+   "rate": 176400,
+   "output_format": {
+    "container": "wav",
+    "kind": "int",
+    "bits": 24,
+    "rate": 176400,
+    "channels": 1
+   }
+  }
+ ],
+ "command": "dsd-measure run suites/dsd2pcm.toml --only reference_floor levels noise alias_tones -o target/quality/run1/report",
+ "timing_s": {
+  "reference_floor": 0.0,
+  "levels": 13.7,
+  "noise": 2.6,
+  "alias_tones": 3.9
+ },
+ "preflight": {
+  "checked": "converted a short test signal",
+  "seconds": 0.25,
+  "rate": 176400,
+  "output_format": {
+   "container": "wav",
+   "kind": "int",
+   "bits": 24,
+   "rate": 176400,
+   "text": "24-bit integer",
+   "quantisation_sinad_db": 146.7,
+   "quantisation_sinad_dithered_db": 141.9,
+   "tone_shift_db": 0.0
+  },
+  "warning": "the tool wrote 24-bit integer PCM at 176.4 kHz, which alone limits SINAD to about 146.7 dB with plain rounding or 141.9 dB with TPDF dither whatever the decoder does, so a figure near that cannot be told from the file format. Ask the tool for floating-point output."
+ },
+ "device_versions": {
+  "adapter": "cli",
+  "declared_version": "0.1.2",
+  "program": "target/quality/old/bin/dsd2pcm",
+  "path": "target/quality/old/bin/dsd2pcm",
+  "sha256": "85acd8e04ce58d47d24c4e5c6c9f5d729fa0db36684597dc205dcba883d84bc8",
+  "version": null
+ },
+ "profile_settings": {
+  "seg_s": 1.5,
+  "step_db": 6.0,
+  "fr_every": 2,
+  "noise_s": 6.0,
+  "mt_periods": 3,
+  "imd_s": 2.0,
+  "hold_s": 5.0,
+  "jtest_s": 12.0,
+  "tone_s": 2.0
+ },
+ "reference_modulator_designs": {
+  "levels": {
+   "ntf": "order 8, max gain 1.45",
+   "order": 8,
+   "hinf": 1.45,
+   "fallbacks": 0,
+   "overload": 0
+  },
+  "levels_peak": {
+   "ntf": "order 8, max gain 1.3",
+   "order": 8,
+   "hinf": 1.3,
+   "fallbacks": 3,
+   "overload": 0
+  },
+  "noise": {
+   "ntf": "order 8, max gain 1.45",
+   "order": 8,
+   "hinf": 1.45,
+   "fallbacks": 0,
+   "overload": 0
+  },
+  "alias_probe": {
+   "ntf": "order 8, max gain 1.45",
+   "order": 8,
+   "hinf": 1.45,
+   "fallbacks": 0,
+   "overload": 0
+  },
+  "alias_156402": {
+   "ntf": "order 8, max gain 1.45",
+   "order": 8,
+   "hinf": 1.45,
+   "fallbacks": 0,
+   "overload": 0
+  },
+  "alias_158402": {
+   "ntf": "order 8, max gain 1.45",
+   "order": 8,
+   "hinf": 1.45,
+   "fallbacks": 0,
+   "overload": 0
+  }
+ },
+ "measured": {
+  "device": {
+   "name": "old pysacd 176400",
+   "class": "A",
+   "kind": "DSD to PCM converter",
+   "adapter": "cli",
+   "gain_db": 0.0,
+   "dsd_rate": 2822400,
+   "dsd_rate_name": "DSD64",
+   "command": "target/quality/old/bin/dsd2pcm /tmp/dsd-measure-example/in1.dsf /tmp/dsd-measure-example/out1.wav --filter pysacd --rate 176400 --single-thread",
+   "command_template": "target/quality/old/bin/dsd2pcm {input} {output} --filter pysacd --rate 176400 --single-thread",
+   "output": "WAV file read back"
+  },
+  "fed_with": "DSD (DSD64, 1 bit, 2822400 Hz) made from the test signals by the built-in reference modulator",
+  "returns": "WAV file read back; analysed by the reference analyser in 64-bit float",
+  "in_rate_hz": 88200,
+  "in_word": "1-bit DSD",
+  "out_rate_hz": 176400,
+  "out_word": "24-bit integer as written by the device (WAV), read and analysed in 64-bit float",
+  "gain_db": 0.0,
+  "profile": "quick",
+  "date": "2026-11-24",
+  "generator": "dsd-measure 0.1.2, reference chain 2",
+  "source_signal_sha256": {
+   "tone_1k_0dbsacd.wav": "80d70bfdee8c9386f2f48ce778765c4f59433f62148bac1bef04447acb05fc5a",
+   "tone_1k_peak.wav": "6428a12a2f4efaf6e9796e0d97f6589ded909024b3c4f69a4cf22a0ecfe85f64",
+   "tone_15k_m12.wav": "4c8dfc750582022bc4d83367ec87294408643dac8c3c6dbfa467bbc4ec1398de",
+   "multitone.wav": "a4227c58b6668732c52a1c287dc37ac7e1ac5967c94f629f1536747281917db6",
+   "jtest_44100.wav": "f55a8d2bb68193ea9985d65d5dda3fa963b96639623138d5a59bab14995b0bc2"
+  },
+  "floor": {
+   "dsd_rate": 2822400,
+   "target_db": -140.0,
+   "margin_db": 6.0,
+   "ntf": "order 8, max gain 1.45",
+   "ntf_fallbacks": 0,
+   "chain": {
+    "thdn_db": -146.99,
+    "thd_db": -163.28,
+    "thdn_a_db": -150.37,
+    "sinad_db": 146.99,
+    "noise_dbfs": -159.06,
+    "noise_a_dbfs": -162.45,
+    "dr_db": 148.46,
+    "dr_a_db": 151.8,
+    "metric_floors": {
+     "lobe_noise_db": -183.5,
+     "imd_smpte_db": -144.78,
+     "imd_ccif_db": -134.89,
+     "multitone_dfr_db": 150.7
+    }
+   },
+   "decoder_alone": {
+    "thdn_db": -280.92,
+    "thd_db": -309.97,
+    "thdn_a_db": -282.12,
+    "sinad_db": 280.92,
+    "peak": {
+     "thdn_db": -280.93,
+     "thd_db": -310.0,
+     "thdn_a_db": -282.12,
+     "sinad_db": 280.93
+    },
+    "noise_dbfs": -346.95,
+    "noise_a_dbfs": -348.14,
+    "dr_db": 340.93,
+    "dr_a_db": 342.12,
+    "alias_rejection_db": -187.7,
+    "metric_floors": {
+     "lobe_noise_db": -369.4,
+     "imd_smpte_db": -294.92,
+     "imd_ccif_db": -279.67
+    }
+   },
+   "meets_target": true
+  },
+  "suite": "dsd2pcm release comparison",
+  "versions": {
+   "dsd_measure": "0.1.2",
+   "reference_chain": "2",
+   "python": "3.15.2",
+   "numpy": "2.5.5",
+   "scipy": "1.18.1",
+   "matplotlib": "3.11.2"
+  },
+  "device_versions": {
+   "adapter": "cli",
+   "declared_version": "0.1.2",
+   "program": "target/quality/old/bin/dsd2pcm",
+   "path": "target/quality/old/bin/dsd2pcm",
+   "sha256": "85acd8e04ce58d47d24c4e5c6c9f5d729fa0db36684597dc205dcba883d84bc8",
+   "version": null
+  }
+ }
+}

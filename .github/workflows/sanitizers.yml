@@ -1,17 +1,15 @@
 # Checks for long-lived processes, on Linux x86_64 with a pinned nightly (docs/testing.md):
 # - miri (capi, core): the C interface's Rust tests and the core crate's Miri-feasible
-#   tests (undefined behaviour, use after free, leaks at exit), kernels at the generic level;
+#   tests (undefined behaviour, use after free, leaks at exit), kernels at the generic
+#   level, in two jobs of under 20 minutes each;
 # - tsan: the threaded whole-file path, the frame-run tests, the soak test (short) and the
 #   C interface's tests under ThreadSanitizer, with std rebuilt instrumented (-Zbuild-std).
-# Every week, by hand, and Miri on pull requests that touch the C interface.
+# Miri on every pull request (its jobs can be required checks), and everything every week
+# and by hand.
 name: sanitizers
 
 on:
   pull_request:
-    paths:
-      - "crates/dsd2pcm-capi/**"
-      - ".github/workflows/sanitizers.yml"
-      - ".github/scripts/miri-core.sh"
   schedule:
     - cron: "17 5 * * 3"  # Wednesdays, 05:17 UTC
   workflow_dispatch:
@@ -28,11 +26,12 @@ env:
   RUST_NIGHTLY: nightly-2026-11-01  # Miri and the sanitizers need a nightly
 
 jobs:
-  # Miri, in two jobs that run side by side: the C interface, the core crate.
+  # Miri, in two jobs that run side by side: the C interface, the core crate. Each takes
+  # under 20 minutes (docs/testing.md); the limit leaves room for a slower runner.
   miri:
     name: miri (${{ matrix.part }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -80,9 +79,7 @@ jobs:
       RUSTDOCFLAGS: -Zsanitizer=thread
       TSAN_OPTIONS: halt_on_error=1 second_deadlock_stack=1
       CARGO_PROFILE_DEV_OPT_LEVEL: "2"
-      DSD2PCM_SOAK_ITERATIONS: "100"
-      DSD2PCM_SOAK_RSS_REPORT_ONLY: "1"  # TSan's shadow memory grows with the run
-      DSD2PCM_SOAK_HEAP_REPORT_ONLY: "1"  # 100 iterations end before the warm-up (docs/testing.md)
+      DSD2PCM_SOAK_ITERATIONS: "100"  # under 1000: memory reported, not judged (docs/testing.md)
     steps:
       - name: Packages
         run: dnf -y -q --setopt=install_weak_deps=False install git-core gcc && dnf clean all
@@ -94,6 +91,7 @@ jobs:
       - name: ThreadSanitizer, core crate (threaded whole-file path, frame runs, soak)
         run: |
           cargo test -Zbuild-std --target x86_64-unknown-linux-gnu --locked -p dsd2pcm \
-            --test progress --test frames --test soak -- --include-ignored --nocapture
+            --test progress --test frames --test soak -- --include-ignored --nocapture \
+            --skip soak_catches_a_leak
       - name: ThreadSanitizer, C interface (busy handles, threaded file conversion)
         run: cargo test -Zbuild-std --target x86_64-unknown-linux-gnu --locked -p dsd2pcm-capi --lib

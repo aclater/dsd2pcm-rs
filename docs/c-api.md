@@ -1,3 +1,5 @@
+[dsd2pcm-rs](../README.md) › [Documentation](README.md) › C interface
+
 # C interface
 
 `crates/dsd2pcm-capi` builds `libdsd2pcm.so` (`.dylib`, `.dll`) and `libdsd2pcm.a` with
@@ -39,12 +41,18 @@
 - Zero fields are the defaults, apart from the rate (and channel count): cutoff
   `DSD2PCM_CUTOFF_STANDARD`, filter `DSD2PCM_FILTER_DEFAULT`, 0 dB, all cores, no
   callback. Integer selectors (cutoff, filter, format, threads) are checked, never trusted.
-- `filter` selects the filter and quantiser: 0 is the default (scarletbook-pcm 0.7.0's
-  samples). `DSD2PCM_FILTER_PYSACD` (1) is pysacd's filter with its dithered quantiser
+- `filter` selects the filter and quantiser: 0 (`DSD2PCM_FILTER_DEFAULT`) is the default,
+  the precise filter since 0.2.0 (0.1.x: scarletbook-pcm 0.7.0's samples, now
+  `DSD2PCM_FILTER_FAST`). `DSD2PCM_FILTER_PRECISE` (2) is the precise filter
+  (`Filter::Precise`): every rate and cutoff, rounded without dither, with stopbands of
+  150 dB and more ([PCM quality](pcm-quality.md#the-precise-filter)).
+  `DSD2PCM_FILTER_FAST` (3, since 0.2.0) is lower CPU, lower quality: scarletbook-pcm
+  0.7.0's filters and samples (`Filter::Fast`), at about 0.55 times the precise filter's
+  CPU time. `DSD2PCM_FILTER_PYSACD` (1) is pysacd's filter with its dithered quantiser
   (`Filter::Pysacd`): 88200 and 176400 Hz, standard cutoff only. Its dither is seeded per
   frame from the frame's index in the area: whole files count from their first frame, frame
   runs from `dsd2pcm_run.first_frame` (the index of the run's first frame; a run with no
-  frame before it starts the area). The default filter ignores `first_frame`.
+  frame before it starts the area). The other filters ignore `first_frame`.
 
 ## Whole files
 
@@ -56,7 +64,9 @@ int dsd2pcm_convert_file(const char *input_path, const char *output_path,
 
 Converts a DSF or DFF file (DSD64) to a 24-bit WAV file. `options` holds the rate (88200,
 176400, 352800), cutoff, filter, gain (-120 to +24 dB), `threads` (0: all cores, 1: the
-calling thread only) and an optional progress callback:
+calling thread only, n: at most n threads, up to 256; values above 1 since 0.2.0; the
+output is the same with any value), `no_clobber` (0: replace an existing output, 1: refuse
+it; since 0.2.0) and an optional progress callback:
 
 ```c
 typedef int (*dsd2pcm_progress_fn)(uint64_t done, uint64_t total, void *user_data);
@@ -82,6 +92,17 @@ attributes of a replaced file are not kept. If the process is killed (SIGKILL, p
 a `.dsd2pcm-PID-N.tmp` file may remain; it is safe to delete. The library installs no
 signal handlers.
 
+With `no_clobber` 1, anything at `output_path` (a file, a symbolic link, even a dangling
+one) is refused with `DSD2PCM_E_EXISTS` before converting, and the result is put in place
+without ever replacing a file that appeared during the conversion: it is hard-linked to
+`output_path`, which fails if anything is there by then, and the temporary name is
+removed. On a file system without hard links (FAT, exFAT, some network and FUSE file
+systems) `output_path` is first created empty and exclusively, which fails the same way,
+and the result is renamed over that empty file. That fallback is best effort: a crash at
+that moment can leave an empty output, and a file another process puts there in that
+moment is replaced. Either way a refused output is left as it was and the temporary file is
+removed. Values other than 0 and 1 give `DSD2PCM_E_INVALID_ARGUMENT`.
+
 `crates/dsd2pcm-capi/examples/convert.c` is a complete program:
 
 ```c
@@ -102,7 +123,7 @@ if (rc != DSD2PCM_OK)
 
 ## Frame runs
 
-The C counterpart of `dsd2pcm::frames::Converter`: Super Audio CD frames (`channels x 4704`
+The C counterpart of `dsd2pcm::frames::Converter`: SACD frames (`channels x 4704`
 bytes, channels interleaved byte by byte, earliest sample in the most significant bit) to
 interleaved 24-bit PCM, a run at a time, with the frames before and after the run as
 context. Any run with its neighbours gives the bytes of that run in a whole-area
@@ -137,7 +158,8 @@ dsd2pcm_frames_free(conv);
   buffers; each returns 0 for a NULL handle.
 - `frame_clipped` receives the clamped samples per frame (all channels); `stats` the
   channel count, the clamped samples per channel and their sum.
-- After the first call a converter allocates nothing. Use one converter per thread: a call
+- `dsd2pcm_frames_new` sizes every buffer of the converter for any run, so a call that
+  succeeds allocates nothing, the first one included. Use one converter per thread: a call
   while another thread uses the same handle returns `DSD2PCM_E_BUSY`. Freeing a handle
   while another thread uses it is undefined.
 
@@ -154,10 +176,21 @@ Both run without arguments.
   changed function signature, a changed meaning of a value.
 - Compatible changes only append: new fields go at the end of a struct, new functions,
   constants and status codes are added. Zero in a new field means the old behaviour.
-- `struct_size` makes this work both ways. The library refuses a size below the struct's
-  0.1.0 size (`DSD2PCM_E_INVALID_ARGUMENT`, before reading or writing anything), reads only
-  the fields it knows from a larger struct (a newer header), and writes only
-  `min(struct_size, its size)` bytes of an output struct.
+- `struct_size` makes this work both ways. The library never reads or writes a byte past
+  the caller's `struct_size`, and checks everything before reading or writing a field:
+  - below the struct's 0.1.0 size, or above 4096: refused (`DSD2PCM_E_INVALID_ARGUMENT`);
+  - from the 0.1.0 size up to the library's own size (an older or the same header): the
+    caller's bytes are read, and the fields the caller's struct lacks are taken as 0;
+  - larger than the library's own size (a newer header): for a struct the library reads
+    (options, config, run), the bytes past its own size must all be 0, since a set field
+    the library does not know asks for something it cannot do; one non-zero byte refuses
+    the call (`DSD2PCM_E_INVALID_ARGUMENT`, naming the byte). For an output struct
+    (report, stats), the library writes its own fields and leaves the rest as they are.
+- The library's own size is `sizeof` the struct in its header, padding included. A field
+  appended later starts at or after that size on every target (an explicit `uint32_t`
+  reserved field fills a gap first if needed), so an older library always sees a new
+  field in the bytes it checks for 0. The padding at the end of a struct is never read as
+  a field: a caller that copies a struct can leave anything there.
 - 0.1.0 sizes, fixed for ABI 1 whatever fields are appended later (checked when the
   library is built, and by its tests):
 
@@ -171,83 +204,249 @@ Both run without arguments.
 
   A struct from a caller built against an older header is read for its `struct_size` bytes
   and the fields it lacks are taken as 0.
+- Appended since 0.1.0: `dsd2pcm_file_options.no_clobber` (`uint32_t`, 0.2.0), which makes
+  the struct 56 bytes on 64-bit targets, 40 on i686 Linux and 48 on other 32-bit targets.
+  The status code `DSD2PCM_E_EXISTS` (9) is new in 0.2.0; the library returns it only
+  when `no_clobber` is set.
+- `tests/struct_size.c` checks this from C, under AddressSanitizer and
+  UndefinedBehaviorSanitizer too: a `dsd2pcm_file_options` of the 0.1.0 size (a heap block
+  of exactly that size, and one followed by a set `no_clobber` that must not be read), of
+  the current size, larger with the extra bytes 0 and larger with one of them set, and
+  the same for the other structs.
 
 ## Building from source
 
 The C library is built without the crate's `flac` feature: its whole-file conversion takes
 DSD input only, and without FLAC reading it holds no third-party code, only Rust's standard
-library (MIT OR Apache-2.0). `--features flac` adds it back.
+library (MIT OR Apache-2.0). `--features flac` adds it back. Build it on its own
+(`-p dsd2pcm-capi`): a workspace build (`cargo build --workspace`) turns the feature on for
+it too, through the command-line tool, and its libraries then hold claxon's code.
+
+From 0.2.0 on, each release has the source as an attested archive,
+`dsd2pcm-0.2.0-src.tar.gz` for this version: the tagged commit's whole tree, made with
+`git archive --format=tar --prefix=dsd2pcm-0.2.0/ v0.2.0 | gzip -n -9` (the same command
+gives the same tar, and with GNU gzip the same bytes). To pin and check it:
+
+<!-- docs-run: skip="needs a GitHub login for gh release download and gh attestation verify, then builds with Rust" -->
+```sh
+gh release download v0.2.0 -R dsd-toolbox/dsd2pcm-rs -p 'dsd2pcm-0.2.0-src.tar.gz*'
+sha256sum -c dsd2pcm-0.2.0-src.tar.gz.sha256
+gh attestation verify dsd2pcm-0.2.0-src.tar.gz -R dsd-toolbox/dsd2pcm-rs --signer-workflow dsd-toolbox/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.2.0 --deny-self-hosted-runners
+tar -xzf dsd2pcm-0.2.0-src.tar.gz
+cd dsd2pcm-0.2.0
+cargo build --release --locked -p dsd2pcm-capi
+```
 
 A minimal program, `crates/dsd2pcm-capi/tests/minimal.c`, converts one stereo frame of
 DSD silence. To build and run it on Linux, from the repository root:
 
-```
+<!-- docs-run: checkout=1 image=fedora-net timeout=3600 setup="dnf -y -q --setopt=install_weak_deps=False install gcc gcc-c++ git-core && .github/scripts/rust-setup.sh 1.100.0 clippy,rustfmt && mkdir -p ~/.local && ln -s ~/.cargo/bin ~/.local/bin" expect="2352 samples per channel, first byte 0" -->
+```sh
 cargo build --release -p dsd2pcm-capi
 cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c target/release/libdsd2pcm.a -lpthread -ldl -lm -o minimal
 ./minimal
 ```
 
-It prints `dsd2pcm 0.1.2: 2352 samples per channel, first byte 0`. To link the shared
+It prints `dsd2pcm 0.2.0: 2352 samples per channel, first byte 0`. To link the shared
 library instead (its SONAME is `libdsd2pcm.so.1`, so it needs that name at run time):
 
-```
+<!-- docs-run: checkout=1 expect="2352 samples per channel, first byte 0" -->
+```sh
 ln -sf libdsd2pcm.so target/release/libdsd2pcm.so.1
 cc -std=c11 -I crates/dsd2pcm-capi/include crates/dsd2pcm-capi/tests/minimal.c -L target/release -ldsd2pcm -o minimal
 LD_LIBRARY_PATH=target/release ./minimal
 ```
 
+## Offline source build
+
+From 0.2.0 on, each release also has the C library's own source archive,
+`libdsd2pcm-0.2.0-src.tar.gz` for this version, with a `.sha256` file and a build provenance
+attestation. It is for building the C library where there is no network and no crates.io
+index, for example inside another project's source distribution. It holds the crates
+`dsd2pcm` and `dsd2pcm-capi` as a workspace of their own: their `src/` (and `build.rs`) as
+in the tagged commit, no tests, benches, examples or fuzz targets, a `Cargo.lock` that lists
+only the two crates, `include/dsd2pcm.h`, `examples/minimal.c`, the licences, `NOTICE` and a
+README.
+
+Only the manifests differ from the repository's. `dsd2pcm` has no `flac` feature, no claxon
+and no dev-dependencies there. Cargo puts optional and dev-dependencies in the lock file even
+when nothing turns them on, and then looks them up in the registry index, so with them
+`cargo build --offline` fails with an empty `CARGO_HOME`. The C library is built without
+`flac` anyway, so the library is the same.
+`.github/scripts/capi-src-manifests.py` writes the manifests and stops on anything it does
+not know, such as a new dependency.
+
+`.github/scripts/make-capi-src.sh` makes the archive from a commit: sorted entries, every
+file with the commit's time, owner 0, `gzip -n`, so the same commit gives the same bytes.
+CI makes it on every pull request (job `capi-src` in `ci.yml`). The job makes it twice and
+compares the bytes, then builds it with an empty `CARGO_HOME` and no network
+(`unshare -rn`), and builds and runs `examples/minimal.c` against the result
+(`.github/scripts/check-capi-src.sh`).
+
+To download, check and build a release's archive, with Rust 1.83 or later:
+
+<!-- docs-run: skip="needs a GitHub login for gh release download and gh attestation verify, and a release from 0.2.0 on" -->
+```sh
+gh release download v0.2.0 -R dsd-toolbox/dsd2pcm-rs -p 'libdsd2pcm-0.2.0-src.tar.gz*'
+sha256sum -c libdsd2pcm-0.2.0-src.tar.gz.sha256
+gh attestation verify libdsd2pcm-0.2.0-src.tar.gz -R dsd-toolbox/dsd2pcm-rs --signer-workflow dsd-toolbox/dsd2pcm-rs/.github/workflows/release.yml --source-ref refs/tags/v0.2.0 --deny-self-hosted-runners
+tar -xzf libdsd2pcm-0.2.0-src.tar.gz
+cd libdsd2pcm-0.2.0
+cargo build --offline --locked --release -p dsd2pcm-capi
+```
+
+To make the archive from a clone of the repository and build it with an empty `CARGO_HOME`
+(on Linux, `unshare -rn cargo build ...` also takes the network away), then build and run
+the example against the static library:
+
+<!-- docs-run: checkout=1 group=capi-offline image=fedora-net timeout=3600 setup="dnf -y -q --setopt=install_weak_deps=False install gcc git-core tar gzip python3 && .github/scripts/rust-setup.sh 1.100.0 && mkdir -p ~/.local && ln -s ~/.cargo/bin ~/.local/bin && git init -q && git add -A && git -c user.name=docs-run -c user.email=docs-run@localhost commit -q -m checkout" expect="2352 samples per channel, first byte 0" -->
+```sh
+.github/scripts/make-capi-src.sh dist
+tar -C dist -xzf dist/libdsd2pcm-0.2.0-src.tar.gz
+cd dist/libdsd2pcm-0.2.0
+mkdir /tmp/empty-cargo-home
+CARGO_HOME=/tmp/empty-cargo-home cargo build --offline --locked --release -p dsd2pcm-capi
+cc -std=c11 -I include examples/minimal.c target/release/libdsd2pcm.a -lpthread -ldl -lm -o minimal
+./minimal
+```
+
+It prints `dsd2pcm 0.2.0: 2352 samples per channel, first byte 0`.
+
 ## Binary releases
 
-Each GitHub release has the C library built for five platforms, next to the command-line
-tool: `libdsd2pcm-0.1.2-x86_64-linux.tar.gz`, `-aarch64-linux.tar.gz`, `-i686-linux.tar.gz`
-(glibc 2.17 or later), `-aarch64-macos.tar.gz` (macOS 11 or later) and
-`-x86_64-windows.zip`, each with a `.sha256` file and a build provenance attestation.
+Each GitHub release has the C library built for nine platforms (four of them from 0.2.0 on),
+next to the command-line tool, each with a `.sha256` file and a build provenance attestation.
+The C library's source archive is in [Offline source build](#offline-source-build).
+
+| Archive | Platform |
+|---|---|
+| `libdsd2pcm-0.2.0-x86_64-linux.tar.gz` | Linux x86_64, glibc 2.17 or later |
+| `libdsd2pcm-0.2.0-aarch64-linux.tar.gz` | Linux aarch64, glibc 2.17 or later |
+| `libdsd2pcm-0.2.0-i686-linux.tar.gz` | Linux 32-bit x86, glibc 2.17 or later |
+| `libdsd2pcm-0.2.0-x86_64-linux-musl.tar.gz` | (from 0.2.0) Linux x86_64, musl 1.2.3 or later (Alpine 3.17 or later) |
+| `libdsd2pcm-0.2.0-aarch64-linux-musl.tar.gz` | (from 0.2.0) Linux aarch64, musl 1.2.3 or later |
+| `libdsd2pcm-0.2.0-aarch64-macos.tar.gz` | macOS 11 or later, Apple silicon |
+| `libdsd2pcm-0.2.0-x86_64-macos.tar.gz` | (from 0.2.0) macOS 11 or later, Intel |
+| `libdsd2pcm-0.2.0-x86_64-windows.zip` | Windows x86_64, for MSVC |
+| `libdsd2pcm-0.2.0-x86_64-windows-gnu.zip` | (from 0.2.0) Windows x86_64, for MinGW-w64 gcc (MSYS2 MINGW64, msvcrt) |
+
 An archive holds:
 
 - `include/dsd2pcm.h`;
 - the shared library: `lib/libdsd2pcm.so.1` with the link `lib/libdsd2pcm.so` (Linux,
-  SONAME `libdsd2pcm.so.1`); `lib/libdsd2pcm.1.dylib` with the link `lib/libdsd2pcm.dylib`
+  SONAME `libdsd2pcm.so.1`; with musl it needs only musl's `libc.so`);
+  `lib/libdsd2pcm.1.dylib` with the link `lib/libdsd2pcm.dylib`
   (macOS, install name `@rpath/libdsd2pcm.1.dylib`, signed with a Developer ID and
   notarised);
-  `bin/dsd2pcm.dll` and its import library `lib/dsd2pcm.dll.lib` (Windows, C runtime
-  linked in);
-- the static library: `lib/libdsd2pcm.a` (`lib/dsd2pcm.lib` on Windows, built with the
-  static C runtime, `/MT`);
-- `lib/pkgconfig/dsd2pcm.pc` (Linux and macOS), relative to wherever the archive is
+  `bin/dsd2pcm.dll` and its import library `lib/dsd2pcm.dll.lib` (Windows, MSVC, C runtime
+  linked in), or `lib/libdsd2pcm.dll.a` (MinGW-w64; the DLL needs only Windows' own DLLs);
+- the static library: `lib/libdsd2pcm.a` (`lib/dsd2pcm.lib` for MSVC, built with the
+  static C runtime, `/MT`); position-independent, so it can go into a shared library;
+- `lib/pkgconfig/dsd2pcm.pc` (all but MSVC), relative to wherever the archive is
   unpacked; its `Libs.private` lists the system libraries the static library needs;
 - `examples/minimal.c` (`crates/dsd2pcm-capi/tests/minimal.c`), `README.md`,
-  `LICENSE-MIT`, `LICENSE-APACHE`.
+  `LICENSE-MIT`, `LICENSE-APACHE`, `NOTICE`.
 
 The `1` in the file names is the ABI version (see [ABI](#abi)). Check a download, unpack
 it, and build the example against it, from the folder holding the archive (Linux x86_64
 shown):
 
-```
-sha256sum -c libdsd2pcm-0.1.2-x86_64-linux.tar.gz.sha256
-gh attestation verify libdsd2pcm-0.1.2-x86_64-linux.tar.gz -R aclater/dsd2pcm-rs
-tar -xzf libdsd2pcm-0.1.2-x86_64-linux.tar.gz
-export PKG_CONFIG_PATH=libdsd2pcm-0.1.2-x86_64-linux/lib/pkgconfig
-cc libdsd2pcm-0.1.2-x86_64-linux/examples/minimal.c $(pkg-config --cflags --libs dsd2pcm) -Wl,-rpath,'$ORIGIN/libdsd2pcm-0.1.2-x86_64-linux/lib' -o minimal
+<!-- docs-run: skip="needs a GitHub login for gh attestation verify, and the archive downloaded as the text above says" -->
+<!-- docs-lint: ignore placeholder -- pkg-config prints the flags for wherever the archive is unpacked, and '$ORIGIN' is the linker's token for the program's folder, passed on unexpanded -->
+```sh
+sha256sum -c libdsd2pcm-0.2.0-x86_64-linux.tar.gz.sha256
+gh attestation verify libdsd2pcm-0.2.0-x86_64-linux.tar.gz -R dsd-toolbox/dsd2pcm-rs
+tar -xzf libdsd2pcm-0.2.0-x86_64-linux.tar.gz
+export PKG_CONFIG_PATH=libdsd2pcm-0.2.0-x86_64-linux/lib/pkgconfig
+cc libdsd2pcm-0.2.0-x86_64-linux/examples/minimal.c $(pkg-config --cflags --libs dsd2pcm) -Wl,-rpath,'$ORIGIN/libdsd2pcm-0.2.0-x86_64-linux/lib' -o minimal
 ./minimal
 ```
 
-On macOS the same with the `aarch64-macos` archive, `shasum -a 256 -c` in place of
-`sha256sum -c`, and `-Wl,-rpath,@executable_path/libdsd2pcm-0.1.2-aarch64-macos/lib`.
+The musl archives work the same way on Alpine (`apk add gcc musl-dev pkgconf`). On macOS
+the same with the `aarch64-macos` or `x86_64-macos` archive, `shasum -a 256 -c` in place of
+`sha256sum -c`, and `-Wl,-rpath,@executable_path/libdsd2pcm-0.2.0-aarch64-macos/lib`.
 Static linking instead (Linux):
 
-```
-cc libdsd2pcm-0.1.2-x86_64-linux/examples/minimal.c $(pkg-config --cflags dsd2pcm) libdsd2pcm-0.1.2-x86_64-linux/lib/libdsd2pcm.a $(pkg-config --libs-only-l --static dsd2pcm | sed 's/-ldsd2pcm//') -o minimal
+<!-- docs-run: skip="continues the block above, in the unpacked archive" -->
+<!-- docs-lint: ignore placeholder -- pkg-config prints the flags and the static library's system libraries for this platform -->
+```sh
+cc libdsd2pcm-0.2.0-x86_64-linux/examples/minimal.c $(pkg-config --cflags dsd2pcm) libdsd2pcm-0.2.0-x86_64-linux/lib/libdsd2pcm.a $(pkg-config --libs-only-l --static dsd2pcm | sed 's/-ldsd2pcm//') -o minimal
 ```
 
 To install system-wide, copy `include/` and `lib/` under a prefix such as `/usr/local`; the
 pkg-config file needs no change. On Windows, in a Visual Studio developer prompt in the
 unpacked folder:
 
-```
+<!-- docs-run: skip="Windows, in a Visual Studio developer prompt" -->
+```bat
 cl /I include examples\minimal.c lib\dsd2pcm.dll.lib
 copy bin\dsd2pcm.dll .
 minimal.exe
 ```
+
+With MinGW-w64, in an MSYS2 MINGW64 shell (`pacman -S mingw-w64-x86_64-gcc
+mingw-w64-x86_64-pkgconf`), in the folder holding the unpacked
+`libdsd2pcm-0.2.0-x86_64-windows-gnu` folder:
+
+<!-- docs-run: skip="Windows, in an MSYS2 MINGW64 shell" -->
+<!-- docs-lint: ignore placeholder -- pkg-config prints the flags for wherever the archive is unpacked -->
+```sh
+export PKG_CONFIG_PATH=libdsd2pcm-0.2.0-x86_64-windows-gnu/lib/pkgconfig
+gcc libdsd2pcm-0.2.0-x86_64-windows-gnu/examples/minimal.c $(pkg-config --cflags --libs dsd2pcm) -o minimal.exe
+cp libdsd2pcm-0.2.0-x86_64-windows-gnu/bin/dsd2pcm.dll .
+./minimal.exe
+```
+
+`-ldsd2pcm` takes the import library `libdsd2pcm.dll.a`; for the static library name
+`lib/libdsd2pcm.a` and add `$(pkg-config --libs-only-l --static dsd2pcm | sed
+'s/-ldsd2pcm//')`, as on Linux. The library uses msvcrt, like Rust's
+`x86_64-pc-windows-gnu`: use the MINGW64 environment, not UCRT64.
+
+On musl, Rust links the C runtime into a program statically by default and then builds
+no shared library; the release's musl C library is built with `-C
+target-feature=-crt-static`, so its shared library links musl dynamically and its static
+library's `Libs.private` is `-lgcc_s -lc`. For a fully static program on musl, link the
+static library with `-static` and `-lgcc_eh -lc` in place of `-lgcc_s -lc`.
+
+### Embedding the static library
+
+The static library holds the Rust standard library's global symbols as well as the
+`dsd2pcm_*` functions: over a thousand on Linux, a few hundred of which end up exported
+from a shared library that links it plainly (the shared library `libdsd2pcm` exports only
+`dsd2pcm_*`). To put `libdsd2pcm.a` into a shared library of your own (a Python extension
+module, a plug-in) without exporting them, and without clashing with another Rust library
+in the same process, hide its symbols:
+
+- GNU ld and lld: `-Wl,--exclude-libs,libdsd2pcm.a`, for example
+  `cc -shared -fPIC -o myext.so myext.c libdsd2pcm-0.2.0-x86_64-linux/lib/libdsd2pcm.a -Wl,--exclude-libs,libdsd2pcm.a -lpthread -ldl -lm`
+  (or a version script that lists your own exports);
+- MinGW-w64: `-static-libgcc -Wl,--exclude-libs,ALL`: without `-static-libgcc` your DLL
+  needs `libgcc_s_seh-1.dll`, and `ALL` keeps both libdsd2pcm's and the static libgcc's
+  symbols out of your DLL's exports;
+- macOS: list your own exports, one per line with a leading underscore (`_PyInit_myext`), in
+  a file and link with `-Wl,-exported_symbols_list,exports.txt`.
+
+The release workflow does this for every archive but the MSVC one: it links
+`examples/minimal.c` and the static library into a shared library with these flags, checks
+that only the program's own function is exported, and runs it.
+
+### Intel CET
+
+On x86_64 Linux, every object in `libdsd2pcm.a` (glibc and musl) carries the CET
+shadow-stack property (`readelf -n` shows `x86 feature: SHSTK`), so a program or extension
+built with `-fcf-protection` keeps its SHSTK mark when it links the static library. Stable
+rustc cannot emit the mark: the release adds it to each object afterwards
+(`.github/scripts/clib-shstk.py`, from scarletbook-rs). A caught panic inside the library
+unwinds with the program's own unwinder (libgcc's, through `-lgcc_s` in `Libs.private`),
+which on a distribution built for CET unwinds the shadow stack too.
+
+The shared library `libdsd2pcm.so.1` is not marked: it carries its own unwinder (zig's
+LLVM libunwind, linked in by the release build), which does not unwind the shadow stack,
+so marking it would turn a caught panic into a crash in a process running with shadow
+stacks. A program that needs the mark links the static library. No library is marked for
+indirect branch tracking (IBT): Rust's precompiled standard library has no `ENDBR64`
+instructions, so a program that links the static library loses its IBT mark. Do not force
+it with `-Wl,-z,ibt`. The 32-bit x86 libraries are not marked.
 
 ## Checks
 
@@ -255,14 +454,31 @@ minimal.exe
 equals cbindgen's output (cbindgen from `PATH`, or the binary named by the `CBINDGEN`
 environment variable; install it with `cargo install cbindgen`), then builds and runs
 `tests/*.c` and `examples/convert.c` under gcc and clang with `-Wall -Wextra -Werror`,
-compiles the header and its init macros as C++11, and runs the smoke test and the leak loop
+compiles the header and its init macros as C++11, checks that the static library holds no
+claxon symbols (`.github/scripts/check-capi-no-claxon.sh`, which lists the symbol table with
+`nm` and fails closed: a stripped library, an nm error or an archive member nm left out fails
+instead of passing unchecked; `check-capi-no-claxon-test.sh` tests it on small archives), and
+runs the smoke test, the `struct_size` test (`tests/struct_size.c`) and the leak loop
 (`tests/leakloop.c`: create, convert and free on every path, many times over) under clang's
 AddressSanitizer, LeakSanitizer and UndefinedBehaviorSanitizer (`ASAN=0` skips that). CI
-does the same in the C library job. The Rust tests of the interface
+does the same in the C library job, runs the claxon check on both libraries, and checks that
+it fails on a library built with `--features flac`. The release workflow runs it on the
+static library of every archive but the MSVC one (`check-capi-archive.sh`; the shared
+libraries there are stripped). The Rust tests of the interface
 (`cargo test -p dsd2pcm-capi`) cover NULL pointers, bad lengths and values, `struct_size`,
 overlapping buffers, cancelling, busy and poisoned handles, allocation after warm-up, and
 byte identity with the Rust API. They also run under Miri
 (`cargo +nightly-2026-11-01 miri test -p dsd2pcm-capi`; CI: `sanitizers.yml`, weekly and on
 pull requests that touch the interface), apart from those that use files or convert many
 frames, which are marked as ignored under Miri, and under ThreadSanitizer (weekly).
-[testing.md](testing.md) has the details and the latest results.
+[testing.md](testing.md) has the details and the latest results. The C library's source
+archive has its own checks ([Offline source build](#offline-source-build)).
+
+## See also
+
+- [User guide](user-guide.md): the same conversion from the command line and Rust
+- [Design](design.md#c-interface-cratesdsd2pcm-capi): how the C layer checks its input
+- [Testing](testing.md): the leak loop and sanitizers for the C library
+- [Releases](release.md): how the binary archives are built and checked
+
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

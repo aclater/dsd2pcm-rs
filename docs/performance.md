@@ -1,8 +1,68 @@
+[dsd2pcm-rs](../README.md) › [Documentation](README.md) › Performance
+
 # Performance
 
-Speed of DSD64 to 24-bit PCM with the default filter, against scarletbook-pcm 0.7.0, whose
-output it matches byte for byte. Numbers are multiples of real time (higher is faster), best
-of three runs over 60 s of audio, measured in memory.
+Speed of DSD64 to 24-bit PCM with the `precise` filter (the default from 0.2.0) and the
+`fast` filter (scarletbook-pcm 0.7.0's, the default up to 0.1.2), against scarletbook-pcm
+0.7.0. `precise` trades CPU time for quality: it takes 1.3 to 1.9 times scarletbook-pcm's
+time. `fast` gives scarletbook-pcm's output byte for byte and is faster than it on x86-64.
+
+## precise and fast against scarletbook-pcm 0.7.0
+
+Measured 2026-11-24 on pre-release builds of 0.2.0: `fast` with the 0.2.0 kernels, and
+`precise` from the build that added it (commit `6d4dfa7`), which does not yet have the 0.2.0 kernel changes
+(its `fast` path ran at 0.1.2's speed there). Intel Core i9-13900H, Fedora, `powersave`
+governor, turbo on; built for the x86-64 baseline (`-C target-cpu=x86-64`, as the release
+builds), AVX2 kernels picked at run time. Inputs: generated music-like DSD64 files
+(`.github/scripts/make-test-dsf.py --music 30 2` and `--music 10 6`), converted in memory;
+one warm-up and five timed runs per cell, median reported. Every `fast` output had the same
+hash as scarletbook-pcm 0.7.0's. "Frames" is runs of four SACD frames with their
+neighbours, as a SACD file system reads them; "file" is whole-file conversion.
+
+Speed relative to scarletbook-pcm 0.7.0 (above 1.00x is faster), and `precise` in multiples
+of real time:
+
+| Setting | Cores | 2 ch `fast` | 2 ch `precise` | 2 ch `precise`, × real time | 6 ch `fast` | 6 ch `precise` | 6 ch `precise`, × real time |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Frames, 88.2 kHz, 40 kHz | P-core, 1 thread | 1.11x | 0.53x | 183 | 1.12x | 0.54x | 60 |
+| Frames, 176.4 kHz, 40 kHz | P-core, 1 thread | 1.15x | 0.63x | 159 | 1.14x | 0.64x | 52 |
+| Frames, 352.8 kHz, wide | P-core, 1 thread | 1.19x | 0.74x | 118 | 1.19x | 0.75x | 38 |
+| File, 176.4 kHz, 40 kHz | P-core, 1 thread | 1.16x | 0.64x | 162 | 1.16x | 0.65x | 54 |
+| Frames, 88.2 kHz, 40 kHz | E-core, 1 thread | 1.18x | 0.52x | 71 | 1.21x | 0.54x | 24 |
+| Frames, 176.4 kHz, 40 kHz | E-core, 1 thread | 1.19x | 0.64x | 60 | 1.21x | 0.65x | 20 |
+| Frames, 352.8 kHz, wide | E-core, 1 thread | 1.18x | 0.71x | 42 | 1.19x | 0.72x | 14 |
+| File, 176.4 kHz, 40 kHz | E-core, 1 thread | 1.17x | 0.64x | 62 | 1.20x | 0.65x | 21 |
+| Frames, 88.2 kHz, 40 kHz | 12 P-core threads | 1.22x | 0.55x | 1217 | 1.21x | 0.56x | – |
+| Frames, 176.4 kHz, 40 kHz | 12 P-core threads | 1.20x | 0.64x | 1052 | 1.22x | 0.65x | – |
+| Frames, 352.8 kHz, wide | 12 P-core threads | 1.22x | 0.75x | 779 | 1.25x | 0.77x | – |
+| Frames, 88.2 kHz, 40 kHz | 8 E-core threads | 1.17x | 0.53x | 544 | 1.19x | 0.54x | – |
+| Frames, 176.4 kHz, 40 kHz | 8 E-core threads | 1.16x | 0.62x | 460 | 1.16x | 0.62x | – |
+| Frames, 352.8 kHz, wide | 8 E-core threads | 1.11x | 0.67x | 315 | 1.13x | 0.68x | – |
+
+- `precise` takes 1.80 to 1.91 times scarletbook-pcm's time at 88.2 kHz, 1.53 to 1.62 times
+  at 176.4 kHz and 1.30 to 1.50 times at 352.8 kHz `wide`. Against `fast` in the same build
+  it costs 1.55 to 2.17 times the time on these settings (1.28 to 1.41 times whole-file on
+  all cores, where scarletbook-pcm, which converts a whole file on one thread, has no row).
+- `fast` is 1.11 to 1.25 times scarletbook-pcm's speed on every setting here.
+- The spread of the five runs in a cell was 1.5 % or less in most cells and 3.9 % at most;
+  each cell is one process, so treat differences under about 2 % as level.
+
+## Weakest realistic CPU
+
+<!-- TODO before the 0.2.0 tag: fill from a timing run on the Intel Core i9-13900H
+(x86-64 baseline build, one E-core): precise against fast, stereo and 5.1, 88.2 and
+176.4 kHz, with the method of the section above. -->
+
+Weakest realistic CPU (x86-64 baseline, single efficiency core): `precise` against `fast`,
+stereo and 5.1, 88.2 and 176.4 kHz. To be measured before the 0.2.0 release.
+
+## fast against scarletbook-pcm 0.7.0 (0.1.x measurements)
+
+The sections below measure the `fast` filter (the default up to 0.1.2), against
+scarletbook-pcm 0.7.0, whose output it matches byte for byte. They were taken on 0.1.x
+releases; the 0.2.0 kernels measured as fast or faster on the same settings
+([above](#precise-and-fast-against-scarletbook-pcm-070)). Numbers are multiples of real
+time (higher is faster), best of three runs over 60 s of audio, measured in memory.
 
 - CPUs: Intel Core i9-13900H (P-core: CPU 0; E-core: CPU 12; `powersave` governor) and
   AMD Ryzen 9 3950X (Zen 2, CPU 4, `performance` governor), Fedora, one benchmark at a time.
@@ -138,6 +198,36 @@ On aarch64 dsd2pcm is level with scarletbook-pcm 0.7.0 (0.97x to 1.04x on Linux,
 `run 1` included); the x86-64 lead comes from the AVX2 kernels. Every run checked that both
 crates give the same bytes on both platforms.
 
+## precise against fast, by rate and cutoff
+
+`--filter precise` against `--filter fast` (not against scarletbook-pcm), whole file,
+2 channels, one thread, best of three over 20 s of audio
+(`cargo run --release --example bench_filters -- FILE.dsf 20`, pinned with `taskset`).
+Measured on the build that added `precise` (commit `6d4dfa7`, 0.1.2's kernels). Multiples of real time, and
+`precise`'s time over `fast`'s:
+
+| Rate | Cutoff | P-core | E-core | Zen 2 | i686 on the P-core, `sse2` level |
+|---|---|---:|---:|---:|---:|
+| 88.2 kHz | 30 | 170 (2.14x) | 63 (2.25x) | 163 (2.15x) | 82 (2.12x) |
+| 88.2 kHz | 40 | 196 (2.06x) | 75 (2.18x) | 191 (2.05x) | 97 (2.07x) |
+| 176.4 kHz | 30 | 149 (1.83x) | 53 (1.86x) | 142 (1.81x) | 71 (1.82x) |
+| 176.4 kHz | 40 | 171 (1.82x) | 64 (1.82x) | 166 (1.79x) | 85 (1.77x) |
+| 176.4 kHz | wide | 95 (2.06x) | 32 (2.28x) | 93 (2.12x) | 40 (2.16x) |
+| 352.8 kHz | 30 | 115 (1.79x) | 42 (1.84x) | 107 (1.75x) | 58 (1.84x) |
+| 352.8 kHz | 40 | 128 (1.78x) | 48 (1.82x) | 119 (1.73x) | 67 (1.81x) |
+| 352.8 kHz | wide | 116 (1.56x) | 43 (1.61x) | 111 (1.50x) | 55 (1.67x) |
+
+On all cores (120 s of audio, 2 channels) `precise` takes 1.18x to 2.00x `fast`'s time
+on the i9-13900H (20 threads) and 1.15x to 1.36x on the Zen 2 (32 threads), converting at
+227 to 449 and 365 to 804 times real time. With two channels the threaded `fast` filter is partly
+limited by work outside the filter, so these ratios vary more from run to run than the
+one-thread ones.
+
+The cost follows the taps per output: the first stage reads a 12-byte window (16 bytes for
+`wide`) instead of 8 (12), and every later stage is two filters of about 80 dB each instead
+of one of 110 dB ([design](design.md#the-precise-filter-filterprecise)). The output is the
+same at every SIMD level, as for `fast`.
+
 ## Known gaps
 
 - Whole-file conversion of the 2-channel file at 176.4 kHz `wide` on the P-core reads 0.99x.
@@ -146,3 +236,12 @@ crates give the same bytes on both platforms.
   writing), not in the filter.
 - aarch64 (above): level with scarletbook-pcm 0.7.0, 2 to 3 % behind at 352.8 kHz `wide`
   and in whole-file conversion at 176.4 kHz.
+
+## See also
+
+- [Design](design.md#speed): why the kernels are fast
+- [PCM quality](pcm-quality.md#the-precise-filter): what `precise` buys for its CPU time
+- [Development](development.md): building and testing
+- [Changelog](../CHANGELOG.md): the changes behind each release
+
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

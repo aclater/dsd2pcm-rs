@@ -1,28 +1,45 @@
-[dsd2pcm-rs](../README.md) › [Documentation](../README.md#documentation) › Design
+[dsd2pcm-rs](../README.md) › [Documentation](README.md) › Design
 
 # Design
 
 The design decisions behind dsd2pcm's DSD-to-PCM conversion. For each one: what was chosen,
 the alternatives, and why. The measured filter responses, noise and distortion are in
-`pcm-quality.md` (in preparation); speed is in [performance.md](performance.md).
+[pcm-quality.md](pcm-quality.md); speed is in [performance.md](performance.md).
 
-## The contract: scarletbook-pcm 0.7.0's samples
+## The contract: deterministic output, the deepest-stopband filter by default
 
-**Chosen.** With the default filter, every output sample equals scarletbook-pcm 0.7.0's
-sample for the same rate, cutoff and gain. That holds on every CPU, at every SIMD level,
-in every build profile, and however the input is split into calls. The tests compare the
-two crates directly (scarletbook-pcm is a dev-dependency) and pin golden hashes at every
-level. Output bytes change only with a major version.
+**Chosen.**
+
+- Output is deterministic within a release: the same version, input and settings give the
+  same bytes on every CPU, at every SIMD level, in every build profile, and however the
+  input is split into calls. Golden hashes at every level pin it.
+- Between releases output may change when measured quality improves. Every such change is
+  listed in the [changelog](../CHANGELOG.md) with its measured effect
+  ([`docs/quality/<version>.md`](quality/README.md)).
+- Releases up to 0.1.2 keep their behaviour as released.
+- The default filter is the one with the deepest measured stopband: `precise` from 0.2.0
+  (150 dB or more where content folds into the passband, against about 110 dB; SINAD 142
+  to 145 dB against 122 dB with a very quiet DSD64 source). With `fast`, every
+  output sample equals scarletbook-pcm 0.7.0's for the same rate, cutoff and gain; the
+  tests compare the two crates directly (scarletbook-pcm is a dev-dependency).
 
 **Why.** A file converted twice, on two machines, or once whole and once frame by frame,
-gives the same bytes. Copies, caches and library scanners can then trust a hash. The
-filters are scarletbook-pcm's published, measured designs, so dsd2pcm takes over their
-quality, and a consumer can switch between the two crates with a mechanical diff.
+gives the same bytes, so copies, caches and library scanners can trust a hash within a
+release. Fixing the bytes across releases as well would have fixed the quality: the 0.1.x
+default's stopband of about 110 dB sets an audio-band floor near -128 dBFS with quiet
+sources, which `precise` removes ([PCM quality](pcm-quality.md#the-precise-filter)). A
+release that changes the bytes says so in its changelog with the measured effect, so a
+consumer that keys a cache on the output can invalidate it by version. `fast` keeps
+scarletbook-pcm's published, measured filters, for lower CPU time and for consumers that
+need its bytes; such a consumer can switch between the two crates with a mechanical diff.
 
-**Alternatives.** A converter of our own design, or pysacd's filter as the default. Either
-would need its own measurements and give other bytes. Our own converter could not be
-compared sample for sample with anything published. pysacd's filter is offered as an
-opt-in preset instead ([below](#the-pysacd-preset)).
+**Alternatives.** Output bytes fixed until a major version, the rule up to 0.1.2: it held
+the default at the 110 dB stopband. A converter of a different design with nothing to
+compare it to: `precise` keeps scarletbook-pcm's structure, exact arithmetic, cutoffs and
+centring and changes only the taps and the stage plan, so it is measured against `fast`
+directly. pysacd's filter as the default: dithered, so DSD silence no longer converts to
+exact zero, and 88.2 and 176.4 kHz only; it is offered as an opt-in preset instead
+([below](#the-pysacd-preset)).
 
 ## The filter chain
 
@@ -89,9 +106,10 @@ scarletbook-pcm: it is the lowest rate that holds every cutoff, `wide` included.
   Above that, DSD's shaped noise rises steeply.
 - **30 kHz** removes more of that noise, for playback chains that do not want ultrasonic
   content.
-- **Wide** follows the Philips blind tests, which found 80 to 100 kHz filters undetectable
-  and a 50 kHz one detectable (the decision recorded in sacdfs's
-  [PCM quality](https://github.com/aclater/sacdfs/blob/main/docs/pcm-quality.md#the-filters)
+- **Wide** follows the Philips blind tests, which report 80 to 100 kHz filters as not
+  detected by their listeners and a 50 kHz one as detected; that is the source's listening
+  result, not tested here (the decision recorded in sacdfs's
+  [PCM quality](https://github.com/dsd-toolbox/sacdfs/blob/main/docs/pcm-quality.md#the-filters)
   page).
 - **Why wide needs 176.4 kHz or more.** At 88.2 kHz the band ends at 44.1 kHz, below the
   80 kHz passband. At 176.4 kHz the stopband starts at the Nyquist frequency, 88.2 kHz, so
@@ -120,12 +138,18 @@ final 24-bit step.
 **No libm at run time.** The taps are committed integers. scarletbook-pcm's design code,
 which uses `cos` and `exp`, never runs in the converter, so a platform's libm cannot change
 a sample. The gain factor `db_to_linear` uses only additions, multiplications and
-divisions in a fixed order (ported unchanged): exactly 1 at 0 dB, identical everywhere.
+divisions in a fixed order (ported unchanged): exactly 1 at 0 dB, identical everywhere. Every
+other floating-point operation at conversion time is one that IEEE 754 and Rust specify
+exactly: additions, multiplications, the fused multiply-add of the AVX2 + FMA level,
+conversions between `f64`, `f32` and integers, `clamp` and `round_ties_even`. No
+transcendental function (`powf`, `powi`, `exp`, `log2`, ...) runs on the output path, so
+musl, glibc, macOS and Windows builds give the same bytes.
 
-**No dither in the default filter.** The 24-bit rounding error is far below the noise
+**No dither in `precise` and `fast`.** The 24-bit rounding error is far below the noise
 floor of DSD itself, so dither would only add noise. It would also need a seeded random
-generator in every frame, and the output would no longer equal scarletbook-pcm's. The
-pysacd preset keeps pysacd's TPDF dither, because that preset reproduces pysacd
+generator in every frame, DSD silence would no longer convert to exact zero, and `fast`'s
+output would no longer equal scarletbook-pcm's. The pysacd preset keeps pysacd's TPDF
+dither, because that preset is pysacd's filter and quantiser
 ([below](#the-pysacd-preset)).
 
 ## The exactness proof and FMA
@@ -213,47 +237,160 @@ whole-area conversion. Only the neighbour bytes nearest the run matter (`context
   conversion (`convert_file`) cuts each block into per-channel pieces of about 64 KiB of
   input and runs them on all cores (`--single-thread` turns that off). The output does not
   depend on how the work was split.
+- **Out of threads.** The calling thread is one of the workers, and the others take pieces
+  as they become free. If the system refuses a worker thread (its thread or memory limit),
+  the conversion goes on with the threads it has, down to the calling thread alone, rather
+  than failing: the output is the same, so a refused thread costs only speed, and an error
+  would make a busy server fail conversions that one thread can do. Nothing is reported;
+  `Error` gains no variant. (In 0.1.2 and earlier the standard library's `spawn` panicked
+  there, and the C interface returned `DSD2PCM_E_INTERNAL`.) The tests inject a thread
+  builder that refuses workers (`convert::tests`).
 - **Shared tables.** The S1 lookup tables and the paired tables are built once per process
-  (`OnceLock`) and shared, read-only, by every converter and thread. A converter only owns
-  its buffers, and after the first call it allocates nothing (`tests/frames_alloc.rs`).
+  (`OnceLock`) and shared, read-only, by every converter and thread; a plan builds the
+  tables it reads when it is made. A converter only owns its buffers.
 - **Blocks.** Runs are converted in blocks of 6 frames, so buffers are bounded by the block
-  size, not the run length.
+  size, not the run length. A block's buffers depend on its length alone, not on where it
+  lies or what is around it, so `Converter::new` sizes them for a whole block and every
+  pass of its plan, ordered or in lanes (`Plan::size`); the passes trade buffers with each
+  other and with the carry, so each set that trades gets the longest length of any of
+  them. A call that succeeds allocates nothing, the first one included
+  (`tests/frames_alloc.rs`: every rate, cutoff, filter, channel count and SIMD level, runs
+  of any length, edge, layout and order). Until 0.2.0 the buffers grew on demand, and a
+  later call could still grow one: a run longer than any before, a short run after a long
+  one, or the edge of an area.
 
 ## The pysacd preset
 
-**Chosen.** `Filter::Pysacd` (`--filter pysacd`) is pysacd's filter as an opt-in preset. It
-uses three Kaiser-windowed FIR stages in `f32` and a TPDF-dithered quantiser (`csrc/dsp.c`,
-relicensed MIT OR Apache-2.0 by its author). Its bytes equal pysacd's reference build
-(`-O2 -ffp-contract=off`, no SIMD dispatch) on every CPU and SIMD level. It covers 88.2 and
-176.4 kHz only, with a fixed response.
+**Chosen.** `Filter::Pysacd` (`--filter pysacd`) is pysacd's filter as an opt-in preset:
+three Kaiser-windowed FIR stages and a TPDF-dithered quantiser (`csrc/dsp.c`, relicensed
+MIT OR Apache-2.0 by its author), with pysacd's taps, response, dither and seeding. Since
+0.2.0 it computes in `f64`, where pysacd computes in `f32`. Its bytes equal a C reference,
+pysacd's `dsp.c` changed to `double` (`tests/pysacd-ref/`), on every CPU and SIMD level. It
+covers 88.2 and 176.4 kHz only, with a fixed response.
 
-- **Why the reference build, not pysacd's wheels.** pysacd's wheels use `-ffast-math`, FMA
-  contraction and per-CPU clones, so their output varies by CPU, up to 7 LSB apart on its
-  test vectors. pysacd also seeds its dither per batch of frames, so its bytes depend on how
-  the input was batched. Neither is a target that can be reproduced. The reference build is.
-  This preset differs from pysacd's wheels, and old pysacd output, by those few LSB.
-- **Exact `f32`.** Each output is `((0 + h0 x0) + h1 x1) + ...`, every product rounded
-  before it is added, as in the C loop. The kernels compute 32 outputs at a time, one per
-  vector lane, and never reassociate a sum or fuse a multiply-add, so every level gives the
-  same bits.
+- **`f64` signal path.** The stage 1 byte tables stay in `f64`, as pysacd's
+  `dsd2pcm_init` computes them before it rounds them to `f32`. The signals between stages
+  are `f64`. Each stage 2 and 3 output is `((0 + h0 x0) + h1 x1) + ...` in `f64`, with
+  pysacd's `f32` taps widened exactly, every product rounded before it is added. The
+  quantiser is `round_ties_even(y × 8388607·db_to_linear(gain) + dither)` in `f64`, with
+  the same `db_to_linear` series as the default filter, not libm. The kernels compute 32
+  outputs at a time, one per vector lane, and never reassociate a sum or fuse a
+  multiply-add, so every level gives the same bits.
+- **Why `f64`.** In `f32`, strictly in tap order (dsd2pcm 0.1.x, and pysacd's reference
+  build), the rounding error grows with the signal, about 133 dB below it. With dsd-measure
+  0.1.1, 1 kHz at 0 dB SACD, the `f64` path measures 127.97 dB SINAD at 88.2 kHz and
+  128.13 dB at 176.4 kHz: +0.72 and +0.25 dB over the `f32` path (127.25 and 127.88 dB), and
+  above pysacd's 0.5.x wheels (127.81 and 128.07 dB). The wheels gain part of that through
+  `-ffast-math`, whose vectorised partial sums shorten each sum, but their bytes differ by
+  CPU. More precision than `f64` gains nothing: the noise floor (-130.7 dBFS at 88.2 kHz)
+  comes from the 110 dB Kaiser stopbands letting DSD64's noise fold into the audio band, and
+  an all-`f64` filter with `f64` taps measures the same. The precise filter, a different
+  response, measures 141.9 and 143.8 dB.
+- **Cost.** A whole conversion on one core takes 1.2 to 1.3 times as long as on the `f32`
+  path at the AVX2 level, and 1.5 to 1.8 times at the generic level
+  ([numbers](pcm-quality.md#comparisons)): an `f64` vector holds half as many lanes.
+- **Why not pysacd's wheels.** pysacd's wheels use `-ffast-math`, FMA contraction and
+  per-CPU clones, so their output varies by CPU, up to 7 LSB apart on its test vectors.
+  pysacd also seeds its dither per batch of frames, so its bytes depend on how the input was
+  batched. Neither is a target that can be reproduced. This preset's bytes differ from
+  every pysacd build, including 0.1.x of this crate, which matched pysacd's `f32` reference
+  build.
 - **Dither seeded per frame.** The generator is seeded at the start of each frame of 4704
   bytes per channel from the frame's index in the area (`0x9E3779B9 ^ (index × 2654435761)`,
   32-bit wrapping). The bytes are then independent of how the area is split: files, threads
   and frame runs agree.
 - **Stream.** Each area is one stream of the C filter started at its first byte. The first
   outputs (52 at 88.2 kHz, 26 at 176.4 kHz) are dropped to remove the delay, and the length
-  equals the default path's.
+  equals the other filters'. The filter's group delay is not a whole number of output
+  samples, so a fraction remains: +0.27 samples at 88.2 kHz and -0.47 at 176.4 kHz.
 - **Tests.** SHA-256 of the C reference's output (`tests/pysacd-ref/`), for silence, all-ones,
   synthetic and random input, 2 and 6 channels, both rates, three gains and large frame
-  indices, at every SIMD level, through files, whole runs and split runs.
+  indices, at every SIMD level, through files, whole runs and split runs; the outputs
+  before quantising are checked too. `gen.sh` builds the reference with
+  `-O2 -ffp-contract=off`, since a fused multiply-add changes the bits.
+
+## The precise filter (`Filter::Precise`)
+
+The default filter from 0.2.0, on the same decimator, kernels and exactness proof as
+`fast`: integer taps, exact integer sums in `f64`, half-to-even rounding at each stage end,
+the same quantiser, the same centring (no delay) and linear phase. Only the tables
+(`decimator/tables_precise.rs`) and the stage plan differ. Its aim is a stopband of 150 dB
+wherever ultrasonic content folds into the passband; `fast`'s is about 110 dB, which
+with a very quiet source sets an audio-band floor near -128 dBFS
+([PCM quality](pcm-quality.md#the-precise-filter)).
+
+The taps come from `tools/filters/design_precise.py` (NumPy, hash-pinned in
+`tools/filters/requirements.txt`), which writes the tables deterministically and checks the
+committed ones (`--check`, run in CI on x86-64; `--report` prints every stage's response
+and the largest partial sum of every plan).
+
+- **Why cascades.** The exactness proof needs every partial sum below 2^53. With samples on
+  the 2^26 grid, a stage's taps can carry about 52 - 26 - log2(sum of the gains) bits, about
+  22 to 24. One 150 dB sharp filter needs about 28-bit taps (in the design trials, rounding
+  its taps to 24 to 27 bits left 120 to 144 dB), so it cannot be exact. Two filters of about 80 dB in a
+  row, each with 21 or 22-bit taps, give the sum of their stopbands in dB: 160 dB and more,
+  with the same exact arithmetic.
+- **S1** is the one stage that cannot be split: it decimates the bit stream, so it must
+  remove everything that folds into the passband by itself. Its sums are taken from tables
+  in 32-bit integers, which leaves room for 2^29-scaled taps (sum of absolute taps below
+  2^31). It is a multiband design: 150 dB and more only in the bands that fold onto what the
+  later stages keep (k x 352.8 kHz +- 48 kHz for the 30 and 40 kHz filters, +- 96 kHz for
+  `wide`), don't-care between them, where the later stages' own stopbands remove what S1
+  passes. 95 taps (a 12-byte window) for 30 and 40 kHz, 127 taps (16 bytes) for `wide`;
+  the kernels gained the 16-byte window as a constant size. Like `fast`'s S1 it has the
+  factor `(1 + z^-1)^2 (1 + z^-4)`, so the idle pattern converts to exact zero.
+- **P**, a short low-pass at 352.8 kHz (25 taps), takes S1's 2^29 grid back to 2^26 and adds
+  its stopband in front of the half-band (128.4 to 176.4 kHz, which folds onto 0 to 48 kHz).
+  At 352.8 kHz output it runs again after the interpolation, against its images.
+- **Plans** (each stage rounds to the 2^26 grid):
+
+| Cutoff | Rate | Stages after S1 |
+|---|---|---|
+| 30, 40 | 88.2 kHz | P, half-band /2, F, F /2 |
+| 30, 40 | 176.4 kHz | P, half-band /2, F, F |
+| 30, 40 | 352.8 kHz | P, half-band /2, F, F, half-band x2, P |
+| wide | 176.4 kHz | F80, F80 /2 |
+| wide | 352.8 kHz | F40, F40 (at 352.8 kHz: 80 kHz passband, stop from 96 kHz) |
+
+  F is F40 (111 taps) or F30 (149 taps) at 176.4 kHz; F80 has 217 taps. A stage after an
+  interpolation by 2 has an even half length, so that its inputs start at an even index.
+- **Taps.** Each stage is designed by the Remez exchange (a NumPy port of scarletbook-pcm
+  0.7.0's `design.rs`, see PROVENANCE.md), rounded to integers summing exactly to 2^q, then
+  improved by a greedy integer search that moves one tap pair at a time while the largest
+  stopband error falls and the passband stays within its ripple. Every stage's passband
+  ripple is at most 1e-4 (linear). The composite's largest deviation from its DC gain to
+  20 kHz is ±0.0019 dB (±0.0022 dB at 352.8 kHz, ±0.0016 dB `wide`); `fast`'s is
+  ±0.0037 to ±0.0040 dB.
+- **Proof and tests.** `exact.rs` proves every plan as for `fast`, so FMA and the lanes
+  stay exact. The proof's bound is a worst case: every input at its own bound with signs
+  matched to the taps. Its largest partial sums are 2^52.95 (352.8 kHz with the 30 kHz
+  filter, the final P), 2^52.59 (the same at 40 kHz) and 2^52.49 (`wide` at 352.8 kHz, the
+  first F40), under the 2^53 limit by 0.05 to 0.5 bit; a table change that crosses it fails
+  `sums_are_exact`. The sums a bit stream can actually reach (from the composite taps,
+  the roundings between stages left out) are up to 2^52.09 in the first stage after S1,
+  which sees S1's sums unrounded (`wide` at 352.8 kHz; P 2^51.56, `wide` F80 2^51.26), and
+  at most about 2^50.1 in every later stage;
+  `plans_match_reference` checks every plan of both filters, at every SIMD level, against a
+  direct computation of its definition in 128-bit integers; `precise_plans_match_the_design`
+  writes the precise plans out as in the table above (taps by table, scale, order), checks
+  the plans against them and runs the literal plans through that computation against the
+  ordered and the lanes paths; `lanes_match_ordered` and the
+  S1 table tests cover the new tables; golden hashes pin the output at every level.
+- **Cost.** More taps per output than `fast`: 1.3 to 1.9 times
+  scarletbook-pcm 0.7.0's time on an Intel Core i9-13900H; see [performance](performance.md) and
+  [PCM quality](pcm-quality.md#the-precise-filter) for the measured CPU time.
 
 ## Release profiles of consumers
 
-**Finding.** The kernels rely on inlining and on the compiler seeing whole loops. A
-consumer's release profile with 16 codegen units, no LTO and overflow checks on measured
-25 % slower than dsd2pcm's own profile (`codegen-units = 1`, thin LTO). The bytes do not
-change. Making the kernels robust to such profiles is planned for 0.1.3. Until then, a
-consumer can build this crate with its own settings:
+**Finding.** The kernels rely on inlining and on the compiler seeing whole loops. Up to
+0.1.2, a consumer's release profile with 16 codegen units, no LTO and overflow checks on
+measured 25 % slower than dsd2pcm's own profile (`codegen-units = 1`, thin LTO). The bytes
+do not change.
+
+**Chosen.** From 0.2.0 the inner loops keep their speed in such a profile (see
+[speed](#speed)): `.github/scripts/profile-ab.sh` times both profiles in CI and fails a pull
+request when the consumer profile is more than 5 % slower. A consumer that stays on 0.1.2
+can build this crate with its own settings:
 
 ```toml
 [profile.release.package.dsd2pcm]
@@ -278,6 +415,11 @@ checked against the file length, so nothing in it is allocated or parsed. `claxo
 Apache-2.0) is handed a minimal stream of `fLaC`, STREAMINFO marked last, and the file from
 the first audio frame, so it only decodes frames; its metadata parsers (Vorbis comment and
 application blocks, the code with its `set_len` on uninitialised buffers) never run.
+The reader looks into the first Vorbis comment block itself, for the
+`WAVEFORMATEXTENSIBLE_CHANNEL_MASK` field only: it reads the length fields, checks each
+against the block, reads comments of up to 64 bytes into a fixed buffer and skips longer
+ones by seeking, so nothing is allocated. A malformed block gives no mask rather than an
+error, so files that opened before still open.
 claxon's byte reader indexes its buffer unchecked with the count `read` returns, so every
 read from the caller's reader passes through an adapter that caps that count at the buffer
 length; an over-reporting `Read` gives errors or wrong samples, never out-of-bounds access
@@ -287,7 +429,7 @@ STREAMINFO must declare 1 to 6 channels and 8, 12, 16, 20 or 24 bits (claxon doe
 decode 32-bit frames: `Unsupported`). Each decoded block is checked against STREAMINFO: same
 channel count, every sample inside the declared bit depth. A `b`-bit sample `v` reads as
 `v * 2^-(b-1)`, the WAV reader's scaling, so 16 and 24-bit FLAC and WAV of the same
-samples give bit-identical `f64` (`tests/flac.rs`). Memory: one decoded block (at most
+samples give byte-identical `f64` (`tests/flac.rs`). Memory: one decoded block (at most
 65 535 frames by 6 channels of `i32`) plus the caller's output; `read_frames` returns at
 most 2^20 frames per call.
 
@@ -296,7 +438,13 @@ FLAC form of WAV's read-to-end rule: the reader decodes the stream once to count
 then restarts at the first frame; a stream without frames is an error. If that pass fails
 and the file ends in an ID3v1 tag (`TAG` and 125 bytes), the frames are counted again
 without those 128 bytes. A stream that ends
-before its declared length is an error; frames after it are ignored. Frame CRCs are checked
+before its declared length is an error (`Truncated`, after the frames that are there, as the
+reference decoder reports it). A stream with more frames than STREAMINFO declares is read
+to its end, as the reference decoder and ffmpeg do: `read_frames` goes on past the declared
+total, `FlacReader::declared_frames` keeps STREAMINFO's count, and once the stream has ended
+`info().frames` is the count delivered. No API of the crate sizes its output from the
+declared count of a PCM input, so none needs an error instead. Bytes after the last frame
+that do not decode as a frame (an ID3v1 tag, padding) are not audio and end the stream. Frame CRCs are checked
 (claxon skips the check only in `cfg(fuzzing)` builds).
 
 ## Progress and cancel
@@ -304,7 +452,7 @@ before its declared length is an error; frames after it are ignored. Frame CRCs 
 `dsd64_to_pcm_with` calls its hook on the calling thread before the first block and after
 each block is written (never from the worker threads), with the output samples per channel
 done and the total; `Break` returns `Error::Cancelled` at once. Both file drivers (the
-default filter's and pysacd's) call it through `convert::report` at their block
+exact filters' and pysacd's) call it through `convert::report` at their block
 boundaries. Whole-file conversion passes the hook through. The frame-run API needs none: each call is one run.
 
 ## C interface (`crates/dsd2pcm-capi`)
@@ -321,6 +469,22 @@ converter handle is a `Mutex<Converter>`: a second thread calling it at the same
 on. Runs given as one buffer per frame are converted in groups of 32 frames, each with its
 real neighbours and its position (`at_frame(first_frame + g)`, for pysacd's dither), so the frame references live on the stack and nothing is allocated; by the
 run property the bytes equal one call.
+
+### Intel CET
+
+On x86_64 Linux the release marks every object of the static library `libdsd2pcm.a` for
+the CET shadow stack (`.github/scripts/clib-shstk.py`), but not the shared library
+`libdsd2pcm.so.1`. The release links the shared library with zig (cargo-zigbuild, for glibc
+2.17), and zig satisfies `-lgcc_s` with its own LLVM libunwind, linked in statically and
+built without shadow-stack support: it restores registers on unwinding without unwinding
+the shadow stack. Every entry point of the C interface runs inside `catch_unwind`, so a
+panic unwinds through that code to the boundary; in a process running with shadow stacks a
+marked shared library would turn that caught panic into a control-protection fault. A
+program that links the static library uses its own libgcc unwinder, which handles the
+shadow stack on distributions built for CET, so the static library can carry the mark.
+`check-capi-archive.sh` fails if the shared library is ever marked while it holds
+libunwind. The way to a marked shared library is to link it against the system's
+`libgcc_s` instead of zig's libunwind (not done yet).
 
 ## Speed
 
@@ -362,7 +526,11 @@ run property the bytes equal one call.
   are the same in both calls: compared byte for byte, never assumed, so a run that jumps,
   repeats or has another neighbour gets fresh values
   (`calls_out_of_order_or_with_other_neighbours`). It saves recomputing the filter margins
-  that the previous call already computed (about 5 % at 88.2 kHz).
+  that the previous call already computed (about 5 % at 88.2 kHz). Only the bytes from where
+  the next adjacent pass starts are kept (a few hundred), and a pass that does not continue
+  the previous one fails the comparison at its first byte, so converters shared out over
+  runs that are not adjacent (`sacdfs_path` mode `pool`) pay next to nothing. Runs of 4096
+  outputs or more (four frames at any rate) run in lanes and do not use the carry.
 - Lanes on 32-bit x86 (level `sse2`): the same 4 runs, with blocks sized for the 8 SSE2
   registers (2 output vectors, 4 sums, in Fir1 and Interp2; 4 output vectors in Dec2,
   which measured faster so). Each tap step slices its windows once and loads whole
@@ -390,10 +558,18 @@ run property the bytes equal one call.
 - Whole-file conversion quantises each piece straight into its slot of a per-block sample
   buffer and interleaves once into the output bytes; stage input is read straight from the
   channel buffer when it holds the whole window.
+- Release profiles: a consumer builds us with its own profile, often codegen units 16, no LTO
+  and overflow checks on. Overflow checks in the inner loops once cost 25 % there (the tap
+  loop's index arithmetic, and the closures of `array::from_fn` that then stayed out of line,
+  so the sums went through the stack). The inner loops now use wrapping index arithmetic
+  where the values are in range (asserted in debug builds; the slices check them again) and
+  plain loops instead of closures. `.github/scripts/profile-ab.sh` times the default profile
+  against that one in CI and fails if it is more than 5 % slower.
 
 ## Robustness
 
-Parsers check every size against the file length, cap allocations (DSF metadata 16 MiB,
+Parsers check every size against the file length, cap allocations (DSF metadata 16 MiB:
+a larger tag is not loaded and `DsfReader::skipped_metadata_len` reports it,
 block size 1 MiB; FLAC one decoded block) and return errors instead of panicking. Chunk
 walking is bounded whatever reader the caller passes. Each reader stops at 4096: DFF
 top-level chunks up to and including `DSD `, DFF property chunks in `PROP`, WAV chunks up to
@@ -403,6 +579,23 @@ reads or `Seek::seek_relative`, never a plain `seek` per chunk, so a buffered re
 a large `BufReader<File>` keeps its buffer and opening a file costs time linear in its
 header. The tests truncate and corrupt valid files byte by byte, and cargo-fuzz targets
 cover every reader (see [fuzzing.md](fuzzing.md)).
+
+Files that bend their format are accepted when the audio is intact and real tools write or
+read them, and refused with a typed error when reading them would give wrong or silently
+missing audio. Each rule has a test with a crafted file (`tests/containers.rs`,
+`tests/flac.rs`):
+
+| Case | Rule | Why |
+|---|---|---|
+| WAV `data` size past the end of the file | Read to the end, whole frames; `WavReader::declared_frames` keeps the declared count | A recording or download cut short; other decoders read what is there |
+| WAV `data` size 0 or `0xFFFFFFFF` | Read to the end if no chunk follows, an error if one does | Placeholder of streaming writers |
+| `WAVE_FORMAT_EXTENSIBLE` valid bits 0, or fewer than the container | Read at the container's width | Samples are left-justified; `flac -d` writes 20 valid bits in 24; 0 is "not given" |
+| Valid bits above the container | `Malformed` | Contradicts the container |
+| Sub-format GUID other than `KSDATAFORMAT`'s PCM or float | `Unsupported` (`Encoding`) | Another format (such as Ambisonic B-format) whose first bytes look like PCM's |
+| DSDIFF `DSD ` chunk not a multiple of the channel count | The partial last turn (under one byte per channel) is not read | Every channel keeps the same length; the audio before it is intact |
+| DSF tag over 16 MiB | Not loaded; `DsfReader::skipped_metadata_len` gives its size | Bounded memory for any file; the audio still reads |
+| FLAC shorter than STREAMINFO declares | `Truncated` after the frames present | As the reference decoder |
+| FLAC longer than STREAMINFO declares | Read to the end; `FlacReader::declared_frames` keeps the declared count, `info().frames` becomes the count delivered | As the reference decoder and ffmpeg; dropping the frames would lose audio unnoticed |
 
 ## Output files
 
@@ -433,10 +626,29 @@ file the user had, nor leave a partial WAV that a reader would take as complete.
   signal number; a second signal ends it at once. Only SIGKILL, a crash or a power loss can
   leave a `.dsd2pcm-PID-N.tmp` behind, which is safe to delete. The library installs no
   signal handlers: that is the application's choice.
+- No-clobber (`OutputOptions::no_clobber`, `-n`, `dsd2pcm_file_options.no_clobber`): an
+  existing output is refused before converting, and the result is put in place with
+  "create, never replace" semantics, because a file can appear at the output path during a
+  long conversion (another conversion of the same name, a copy) and checking first then
+  renaming would replace it. The temporary file is hard-linked to the output path, which
+  fails if anything is there, atomically, on every platform with hard links (Linux, macOS,
+  the BSDs, Windows on NTFS), and the temporary name is then removed. That needs no `unsafe`
+  or platform calls, unlike Linux's `renameat2(RENAME_NOREPLACE)` or macOS's
+  `renamex_np(RENAME_EXCL)`, which also fail on some file systems. Where linking fails for
+  another reason (no hard links: FAT, exFAT, some SMB, NFS and FUSE mounts), the output path
+  is created empty with an exclusive create (`O_EXCL`; `CREATE_NEW` on Windows), which
+  fails the same way, and the result is renamed over it. That path is best effort: a crash
+  in the moment between the two leaves the empty file, and a process with write access to
+  the directory that replaces the empty file in that moment has its file replaced by the
+  rename. With hard links there is no such moment.
+  Kept in `OutputOptions`, apart from `PcmOptions`, because it is about the output file,
+  not the conversion; both are `#[non_exhaustive]` (since 0.2.0 for `PcmOptions`), so later
+  settings can be added to either.
 
 ## Known gaps
 
-The rows where dsd2pcm is not ahead of scarletbook-pcm 0.7.0 are listed in
+`precise` is slower than scarletbook-pcm 0.7.0 on every measured setting, by design. The
+rows where `fast` is not ahead of scarletbook-pcm 0.7.0 are listed in
 [performance.md](performance.md#known-gaps).
 
 ## Sources
@@ -448,11 +660,11 @@ The rows where dsd2pcm is not ahead of scarletbook-pcm 0.7.0 are listed in
   literature: Parks & McClellan 1972; Rabiner, McClellan & Parks 1975; Herrmann, Rabiner &
   Chan 1973; Crochiere & Rabiner 1981; Mintzer 1982; Vaidyanathan & Nguyen 1987; Peled &
   Liu 1974; White 1989; Goldberg 1991.
-- [pysacd](https://github.com/aclater/pysacd): `csrc/dsp.c` and the quantiser of
+- [pysacd](https://github.com/dsd-toolbox/pysacd): `csrc/dsp.c` and the quantiser of
   `process_batch()`, for the pysacd preset; Sebastian Gesemann's dsd2pcm for the byte-table
   technique it uses.
-- sacdfs's [PCM quality](https://github.com/aclater/sacdfs/blob/main/docs/pcm-quality.md)
-  and [design](https://github.com/aclater/sacdfs/blob/main/docs/design.md#pcm-conversion)
+- sacdfs's [PCM quality](https://github.com/dsd-toolbox/sacdfs/blob/main/docs/pcm-quality.md)
+  and [design](https://github.com/dsd-toolbox/sacdfs/blob/main/docs/design.md#pcm-conversion)
   pages: the reasons for the rates, cutoffs and gain, the 0 dB reference and the stateless
   frame interface, as a consumer of the same converter.
 - This repository's history: the reasons recorded with each change (lane thresholds, table
@@ -462,8 +674,8 @@ The rows where dsd2pcm is not ahead of scarletbook-pcm 0.7.0 are listed in
 ## See also
 
 - [Performance](performance.md): the measured speed and its gaps
-- [Usage](usage.md): the options these decisions give
+- [User guide](user-guide.md) and [options](options.md): the choices these decisions give
 - [Provenance](../PROVENANCE.md): where the ported code comes from
 - [Fuzzing](fuzzing.md): how the readers are tested against bad input
 
-Part of the [DSD Toolbox](https://github.com/aclater/dsd-toolbox).
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

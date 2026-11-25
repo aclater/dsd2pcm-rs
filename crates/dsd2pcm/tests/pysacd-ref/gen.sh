@@ -1,9 +1,9 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT OR Apache-2.0
 # Regenerates src/filters/pysacd_taps.rs and tests/pysacd-ref/sha256.txt from pysacd's
-# filter (pysacd/dsp.c and dsp.h, unchanged from pysacd commit 94b2c53) built as pysacd's
-# reference: -O2 -ffp-contract=off, no SIMD dispatch, no -march. Needs a C compiler and
-# cargo fmt.
+# filter (pysacd/dsp.c and dsp.h from pysacd commit 94b2c53, computed in double: see
+# PROVENANCE.md) built with -O2 -ffp-contract=off (no fused multiply-add, which would change
+# the bits), no SIMD dispatch, no -march. Needs a C compiler and cargo fmt.
 set -eu
 cd "$(dirname "$0")"
 tmp=$(mktemp -d)
@@ -15,10 +15,10 @@ out="$tmp/sha256.txt"
 : > "$out"
 hash() { sha256sum < "$1" | cut -d' ' -f1; }
 case_() { # kind ch rate gain tc0
-  "$tmp/ref" run "$tmp/$1_$2.dsd" "$2" "$3" "$4" "$5" "$tmp/o.i32" "$tmp/o.f32"
+  "$tmp/ref" run "$tmp/$1_$2.dsd" "$2" "$3" "$4" "$5" "$tmp/o.i32" "$tmp/o.f64"
   echo "$(hash "$tmp/o.i32")  i32_$1_$2ch_$3_$4dB_tc$5" >> "$out"
   if [ "$4" = 0 ] && [ "$5" = 0 ]; then
-    echo "$(hash "$tmp/o.f32")  f32_$1_$2ch_$3" >> "$out"
+    echo "$(hash "$tmp/o.f64")  f64_$1_$2ch_$3" >> "$out"
   fi
 }
 for kind in silence ff music random; do

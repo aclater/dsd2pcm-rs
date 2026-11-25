@@ -6,7 +6,9 @@
 //! integers are little-endian and sizes are 64-bit. With 1 bit per sample the earliest
 //! sample is the least significant bit of each byte.
 
-use crate::error::{format_err, unsupported, Result};
+use crate::error::{
+    format_err, unsupported, ArgumentKind, FormatErrorKind, Result, UnsupportedKind,
+};
 use crate::io::{
     check_dsd_rate, le_u32, le_u64, read_exact_arr, seek_to, skip, DsdInfo, DsdRead, DsdWrite,
 };
@@ -14,7 +16,9 @@ use std::io::{Read, Seek, SeekFrom, Write};
 
 /// Block size per channel that this writer uses (the only value the specification allows).
 pub const BLOCK_SIZE: usize = 4096;
-/// Largest metadata block carried over from the input (larger tags are dropped).
+/// Largest metadata block carried over from the input. A larger one is not loaded (it would
+/// cost that much memory for any file): the audio still reads, [`DsdRead::metadata`] is
+/// `None` and [`DsfReader::skipped_metadata_len`] gives its size.
 pub const MAX_METADATA: u64 = 16 << 20;
 /// DSD idle (silence) pattern, MSB-first.
 const IDLE: u8 = 0x69;
@@ -37,30 +41,46 @@ pub struct DsfReader<R> {
     /// Bytes per channel still to deliver.
     remaining: u64,
     metadata: Option<Vec<u8>>,
+    skipped_metadata: Option<u64>,
     buf: Vec<u8>,
 }
 
 impl<R: Read + Seek> DsfReader<R> {
+    /// The size of the file's metadata block (ID3v2 tag) when it was not loaded because it
+    /// is larger than [`MAX_METADATA`]; `None` when it was loaded or there is none.
+    pub fn skipped_metadata_len(&self) -> Option<u64> {
+        self.skipped_metadata
+    }
+
     /// Parses the headers and positions the reader at the first audio block.
     pub fn new(mut r: R) -> Result<Self> {
         let file_len = r.seek(SeekFrom::End(0))?;
         r.seek(SeekFrom::Start(0))?;
         let hdr: [u8; 28] = read_exact_arr(&mut r)?;
         if &hdr[0..4] != b"DSD " {
-            return format_err("not a DSF file (no 'DSD ' chunk)");
+            return format_err(
+                FormatErrorKind::NotRecognised,
+                "not a DSF file (no 'DSD ' chunk)",
+            );
         }
         if le_u64(&hdr, 4) != 28 {
-            return format_err("DSF 'DSD ' chunk size is not 28");
+            return format_err(
+                FormatErrorKind::Malformed,
+                "DSF 'DSD ' chunk size is not 28",
+            );
         }
         let meta_ptr = le_u64(&hdr, 20);
 
         let fmt: [u8; 12] = read_exact_arr(&mut r)?;
         if &fmt[0..4] != b"fmt " {
-            return format_err("DSF 'fmt ' chunk missing");
+            return format_err(FormatErrorKind::Malformed, "DSF 'fmt ' chunk missing");
         }
         let fmt_size = le_u64(&fmt, 4);
         if !(52..=4096).contains(&fmt_size) {
-            return format_err(format!("DSF 'fmt ' chunk size {fmt_size} is invalid"));
+            return format_err(
+                FormatErrorKind::Malformed,
+                format!("DSF 'fmt ' chunk size {fmt_size} is invalid"),
+            );
         }
         let body: [u8; 40] = read_exact_arr(&mut r)?;
         skip(&mut r, fmt_size - 52)?;
@@ -73,33 +93,51 @@ impl<R: Read + Seek> DsfReader<R> {
         let samples = le_u64(&body, 24);
         let block = le_u32(&body, 32);
         if version != 1 {
-            return unsupported(format!("DSF format version {version}"));
+            return unsupported(
+                UnsupportedKind::Version,
+                format!("DSF format version {version}"),
+            );
         }
         if format_id != 0 {
-            return unsupported(format!(
-                "DSF format id {format_id} (only raw DSD is defined)"
-            ));
+            return unsupported(
+                UnsupportedKind::Version,
+                format!("DSF format id {format_id} (only raw DSD is defined)"),
+            );
         }
         if !(1..=6).contains(&channels) {
-            return format_err(format!("DSF channel count {channels} is not 1..6"));
+            return format_err(
+                FormatErrorKind::Malformed,
+                format!("DSF channel count {channels} is not 1..6"),
+            );
         }
         check_dsd_rate(rate)?;
         let lsb_first = match bits {
             1 => true,
             8 => false,
-            _ => return format_err(format!("DSF bits per sample {bits} is not 1 or 8")),
+            _ => {
+                return format_err(
+                    FormatErrorKind::Malformed,
+                    format!("DSF bits per sample {bits} is not 1 or 8"),
+                )
+            }
         };
         if block == 0 || block > MAX_BLOCK {
-            return format_err(format!("DSF block size {block} is invalid"));
+            return format_err(
+                FormatErrorKind::Malformed,
+                format!("DSF block size {block} is invalid"),
+            );
         }
 
         let data: [u8; 12] = read_exact_arr(&mut r)?;
         if &data[0..4] != b"data" {
-            return format_err("DSF 'data' chunk missing");
+            return format_err(FormatErrorKind::Malformed, "DSF 'data' chunk missing");
         }
         let data_size = le_u64(&data, 4);
         if data_size < 12 {
-            return format_err("DSF 'data' chunk size is too small");
+            return format_err(
+                FormatErrorKind::Malformed,
+                "DSF 'data' chunk size is too small",
+            );
         }
         let data_len = data_size - 12;
         let data_start = r.stream_position()?;
@@ -107,7 +145,10 @@ impl<R: Read + Seek> DsfReader<R> {
             .checked_add(data_len)
             .is_none_or(|end| end > file_len)
         {
-            return format_err("DSF 'data' chunk runs past the end of the file");
+            return format_err(
+                FormatErrorKind::Truncated,
+                "DSF 'data' chunk runs past the end of the file",
+            );
         }
         let bytes_per_ch = samples.div_ceil(8);
         let blocks = bytes_per_ch.div_ceil(u64::from(block));
@@ -116,9 +157,15 @@ impl<R: Read + Seek> DsfReader<R> {
             .and_then(|v| v.checked_mul(u64::from(channels)));
         match needed {
             Some(n) if n <= data_len => {}
-            _ => return format_err("DSF sample count exceeds the audio data present"),
+            _ => {
+                return format_err(
+                    FormatErrorKind::Truncated,
+                    "DSF sample count exceeds the audio data present",
+                )
+            }
         }
 
+        let mut skipped_metadata = None;
         let metadata = if meta_ptr != 0 && meta_ptr >= data_start + data_len && meta_ptr < file_len
         {
             let len = file_len - meta_ptr;
@@ -129,6 +176,7 @@ impl<R: Read + Seek> DsfReader<R> {
                 seek_to(&mut r, data_start)?;
                 Some(m)
             } else {
+                skipped_metadata = Some(len);
                 None
             }
         } else {
@@ -147,6 +195,7 @@ impl<R: Read + Seek> DsfReader<R> {
             channel_type,
             remaining: bytes_per_ch,
             metadata,
+            skipped_metadata,
             buf: Vec::new(),
         })
     }
@@ -163,8 +212,9 @@ impl<R: Read + Seek> DsdRead for DsfReader<R> {
         }
         let ch = usize::from(self.info.channels);
         if out.len() != ch {
-            return Err(crate::Error::InvalidArgument(
-                "output channel count mismatch".into(),
+            return Err(crate::Error::invalid(
+                ArgumentKind::Buffer,
+                "output channel count mismatch",
             ));
         }
         let groups = (max_bytes.min(crate::io::MAX_CHUNK) / self.block).max(1);
@@ -217,6 +267,36 @@ impl<R: Read + Seek> DsdRead for DsfReader<R> {
     }
 }
 
+/// The channel masks of DSF channel types 1 to 7 (DSF specification 1.01) in the
+/// `WAVE_FORMAT_EXTENSIBLE` bits (FL 0x1, FR 0x2, FC 0x4, LFE 0x8, BL 0x10, BR 0x20). Each
+/// type's channel order is the order of its bits.
+const TYPE_MASKS: [u32; 7] = [
+    0x04, // 1: mono, C
+    0x03, // 2: stereo, FL FR
+    0x07, // 3: 3 channels, FL FR C
+    0x33, // 4: quad, FL FR BL BR
+    0x0F, // 5: 4 channels, FL FR C LFE
+    0x37, // 6: 5 channels, FL FR C BL BR
+    0x3F, // 7: 5.1, FL FR C LFE BL BR
+];
+
+/// The channel mask of DSF channel type `channel_type` (1 to 7) for a file of `channels`
+/// channels, or `None` if the type is unknown or has another number of channels.
+pub fn channel_mask_for_type(channel_type: u32, channels: u16) -> Option<u32> {
+    let i = usize::try_from(channel_type.checked_sub(1)?).ok()?;
+    let mask = *TYPE_MASKS.get(i)?;
+    (mask.count_ones() == u32::from(channels)).then_some(mask)
+}
+
+/// The DSF channel type of a channel mask for `channels` channels: the type with exactly
+/// that mask, or [`default_channel_type`] of the count when no type has it.
+pub fn channel_type_for_mask(mask: u32, channels: u16) -> u32 {
+    match TYPE_MASKS.iter().position(|&m| m == mask) {
+        Some(i) if mask.count_ones() == u32::from(channels) => i as u32 + 1,
+        _ => default_channel_type(channels),
+    }
+}
+
 /// DSF channel-type code for a channel count, as the specification lists them.
 pub fn default_channel_type(channels: u16) -> u32 {
     match channels {
@@ -246,9 +326,10 @@ impl<W: Write + Seek> DsfWriter<W> {
     /// Starts a DSF file with `channels` channels (1..=6) at `rate` Hz.
     pub fn new(mut w: W, channels: u16, rate: u32, channel_type: Option<u32>) -> Result<Self> {
         if !(1..=6).contains(&channels) {
-            return Err(crate::Error::InvalidArgument(format!(
-                "{channels} channels: 1 to 6 are supported"
-            )));
+            return Err(crate::Error::invalid(
+                ArgumentKind::Channels,
+                format!("{channels} channels: 1 to 6 are supported"),
+            ));
         }
         check_dsd_rate(rate)?;
         let ct = match channel_type {
@@ -266,6 +347,14 @@ impl<W: Write + Seek> DsfWriter<W> {
             metadata: None,
             finished: false,
         })
+    }
+
+    /// Sets the channel type from a `WAVE_FORMAT_EXTENSIBLE` channel mask
+    /// ([`channel_type_for_mask`]): the DSF type with that mask, or the type of the channel
+    /// count when none has it (or it does not match the count). The channels must already
+    /// be in the type's order, which is the order of the mask's bits.
+    pub fn set_channel_mask(&mut self, mask: u32) {
+        self.channel_type = channel_type_for_mask(mask, self.channels as u16);
     }
 
     /// Sets an ID3v2 tag to append after the audio data.
@@ -307,10 +396,15 @@ impl<W: Write + Seek> DsfWriter<W> {
     }
 }
 
+impl<W: Write + Seek> crate::io::sealed::Sealed for DsfWriter<W> {}
+
 impl<W: Write + Seek> DsdWrite for DsfWriter<W> {
     fn write_bytes(&mut self, data: &[Vec<u8>]) -> Result<()> {
         if data.len() != self.channels || data.iter().any(|d| d.len() != data[0].len()) {
-            return Err(crate::Error::InvalidArgument("unequal channel data".into()));
+            return Err(crate::Error::invalid(
+                ArgumentKind::Buffer,
+                "unequal channel data",
+            ));
         }
         for (p, d) in self.pending.iter_mut().zip(data) {
             p.extend_from_slice(d);
@@ -328,8 +422,9 @@ impl<W: Write + Seek> DsdWrite for DsfWriter<W> {
         }
         self.flush_blocks(true)?;
         if samples.div_ceil(8) > self.blocks * BLOCK_SIZE as u64 {
-            return Err(crate::Error::InvalidArgument(
-                "sample count exceeds data written".into(),
+            return Err(crate::Error::invalid(
+                ArgumentKind::Buffer,
+                "sample count exceeds data written",
             ));
         }
         let data_len = self.blocks * (BLOCK_SIZE * self.channels) as u64;

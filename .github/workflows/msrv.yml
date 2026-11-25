@@ -1,6 +1,8 @@
 # The minimum supported Rust version, read from rust-version in the workspace's Cargo.toml,
 # still builds every crate's library and binaries: what a user of the crates compiles. Not the
-# tests: a dev-dependency (scarletbook-pcm, edition 2024) needs Rust 1.85.
+# tests: a dev-dependency (scarletbook-pcm, edition 2024) needs Rust 1.85, so the last step
+# builds them with 1.85. The C library's source archive (.github/scripts/make-capi-src.sh)
+# also builds offline with it: its README promises that Rust.
 name: msrv
 
 on:
@@ -31,7 +33,7 @@ jobs:
         shell: bash
     steps:
       - name: Packages
-        run: dnf -y -q --setopt=install_weak_deps=False install git-core gcc && dnf clean all
+        run: dnf -y -q --setopt=install_weak_deps=False install git-core gcc tar gzip python3 diffutils && dnf clean all
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
@@ -52,3 +54,16 @@ jobs:
           prefix-key: v0-rust-ubi10-msrv
       - run: cargo check --workspace --locked
       - run: cargo build --workspace --locked --release
+      # In a container, without unshare -rn: offline by --offline and an empty CARGO_HOME. The
+      # ci.yml job capi-src also takes the network away.
+      - name: The C library's source archive builds offline (.github/scripts/check-capi-src.sh)
+        run: |
+          .github/scripts/make-capi-src.sh "$RUNNER_TEMP/dist"
+          .github/scripts/check-capi-src.sh "$RUNNER_TEMP"/dist/libdsd2pcm-*-src.tar.gz
+      # The tests need a newer Rust than the crates: the test-only dependency
+      # scarletbook-pcm 0.7.0 declares edition 2024 and rust-version 1.85. Build them with
+      # that version, so a dependency update that raises it is noticed (docs/development.md).
+      - name: The tests build with Rust 1.85 (scarletbook-pcm's rust-version)
+        run: |
+          rustup toolchain install 1.85.0 --profile minimal
+          cargo +1.85.0 test --workspace --locked --no-run

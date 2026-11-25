@@ -1,0 +1,33 @@
+# Settings for the shared DSD Toolbox docs tools (dsd-toolbox/dsd-toolbox, tools/docs and
+# docs/docs-tooling.md), run by .github/workflows/docs.yml and docs-audit.yml.
+name = "dsd2pcm-rs"
+kind = "library"            # a Rust crate on crates.io: the README carries a docs.rs badge
+default_branch = "main"
+
+[readme]
+# The derived set without Scorecard: its badge goes in once api.scorecard.dev has data for
+# this repository (it answered 404 on 2026-11-24; see the comment in README.md).
+badges = ["ci", "codeql", "version", "docsrs", "msrv", "licence"]
+
+[lint]
+# The release steps live in docs/release.md, and the post-release audit block with them. The
+# release test plan is the gate before the tag, so the after-release step does not belong there.
+release_files = ["docs/release.md"]
+# "RightMark Audio Analyzer" is a product name (docs/pcm-quality.md).
+allow_words = ["analyzer"]
+
+
+[touched]
+# Code, options and behaviour: the crates (sources, C header, manifests), the measurement suite
+# and the quality and filter tools. A change there also changes README.md, docs/ or
+# CHANGELOG.md, or the pull request says "Docs: none needed" with a reason. Tests, examples,
+# benches, the C test script, the fuzz targets and CI never count as code.
+code = ["crates/**", "suites/**", "tools/quality/**", "tools/filters/**"]
+docs = ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", "docs/**", "**/README.md"]
+ignore = ["**/tests/**", "**/tests.rs", "crates/dsd2pcm-capi/check.sh", "crates/*/examples/**", "crates/*/benches/**", "fuzz/**", ".github/**"]
+
+# docs-run: the README's Quick start downloads the published release, so its container needs
+# the network. Same Fedora 43 image as the built-in default, pinned by the same digest.
+[run.images.fedora-net]
+ref = "registry.fedoraproject.org/fedora@sha256:59be9ed15831f74e408c5f3d59fc77fc8371f4642de2673c16c37e880b4dd937"
+network = true

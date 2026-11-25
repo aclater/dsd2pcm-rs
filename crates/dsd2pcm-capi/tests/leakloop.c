@@ -247,7 +247,7 @@ static void file_cycle(const char *dsf, const char *wav, const char *junk, const
     dsd2pcm_file_options py = DSD2PCM_FILE_OPTIONS_INIT;
     py.rate_hz = 88200;
     py.filter = DSD2PCM_FILTER_PYSACD;
-    py.threads = (uint32_t)(it % 2);
+    py.threads = (uint32_t)(it % 3); /* all cores, one, two */
     CHECK(dsd2pcm_convert_file(dsf, wav, &py, NULL) == DSD2PCM_OK);
     o.user_data = NULL;
     o.progress = NULL;
@@ -260,7 +260,7 @@ static void file_cycle(const char *dsf, const char *wav, const char *junk, const
     bad.rate_hz = 44100;
     CHECK(dsd2pcm_convert_file(dsf, wav, &bad, NULL) == DSD2PCM_E_INVALID_ARGUMENT);
     bad = o;
-    bad.threads = 2;
+    bad.no_clobber = 2;
     CHECK(dsd2pcm_convert_file(dsf, wav, &bad, NULL) == DSD2PCM_E_INVALID_ARGUMENT);
     bad = o;
     bad.struct_size = 0;
@@ -320,7 +320,7 @@ int main(int argc, char **argv) {
     for (int it = 0; it < iterations; it++) {
         for (int r = 0; r < 3; r++)
             for (uint32_t cutoff = 0; cutoff <= 2; cutoff++)
-                for (uint32_t filter = 0; filter <= 1; filter++) {
+                for (uint32_t filter = 0; filter <= DSD2PCM_FILTER_FAST; filter++) {
                     uint32_t ch = 1 + (uint32_t)(it + r + (int)cutoff) % DSD2PCM_MAX_CHANNELS;
                     frames_cycle(rates[r], cutoff, filter, ch, gains[(it + r) % 3], area);
                 }

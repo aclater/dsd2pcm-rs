@@ -66,11 +66,13 @@ unsafe fn path<'a>(p: *const c_char, name: &str) -> Result<&'a Path, Fail> {
 
 /// Reads a struct that starts with its `struct_size`, after checking that size: the
 /// smaller of the caller's size and ours is copied into a zeroed `T`, so a field the
-/// caller's (older) layout lacks reads as 0, and fields of a newer layout are not read.
+/// caller's (older) layout lacks reads as 0. Bytes of a larger (newer) layout past ours
+/// must be 0: they hold fields this version does not know, and a non-zero one asks for
+/// something it cannot do. No byte past the caller's `struct_size` is read.
 ///
 /// # Safety
-/// `p` is NULL or points to a readable `u32` and, if that is at least `T::V1_SIZE`, to
-/// that many readable bytes.
+/// `p` is NULL or points to a readable `u32` and, if that is at least `T::V1_SIZE` and at
+/// most [`MAX_STRUCT_SIZE`], to that many readable bytes.
 pub(crate) unsafe fn read_struct<T: Versioned>(p: *const T, name: &str) -> Result<T, Fail> {
     if p.is_null() {
         return Err(null(name));
@@ -79,6 +81,20 @@ pub(crate) unsafe fn read_struct<T: Versioned>(p: *const T, name: &str) -> Resul
     let size = unsafe { p.cast::<u32>().read_unaligned() };
     check_struct_size::<T>(size, name)?;
     let n = (size as usize).min(size_of::<T>());
+    if size as usize > n {
+        // SAFETY: `p` is readable for `size` bytes (checked size, contract); the bytes are
+        // plain data, read as `u8`, and nothing writes them during the call (contract).
+        let tail = unsafe { std::slice::from_raw_parts(p.cast::<u8>().add(n), size as usize - n) };
+        if let Some(i) = tail.iter().position(|&b| b != 0) {
+            return Err(invalid(format!(
+                "{name}->struct_size {size}: byte {} is not 0, but this version of the \
+                 library knows only the first {n} bytes of {} (a field from a newer header \
+                 that it cannot honour)",
+                n + i,
+                T::NAME
+            )));
+        }
+    }
     let mut v = std::mem::MaybeUninit::<T>::zeroed();
     // SAFETY: `p` is readable for `size >= n` bytes (checked size, contract); `v` is a
     // local of `size_of::<T>() >= n` bytes, so they cannot overlap.
@@ -90,7 +106,8 @@ pub(crate) unsafe fn read_struct<T: Versioned>(p: *const T, name: &str) -> Resul
 }
 
 /// The bytes to write to an output struct that starts with its `struct_size`: the smaller
-/// of the caller's size and ours, after checking the caller's size. `None` for NULL.
+/// of the caller's size and ours, after checking the caller's size. `None` for NULL. The
+/// caller's bytes past ours (fields of a newer header) are left as they are.
 ///
 /// # Safety
 /// `p` is NULL or points to a readable `u32`.
@@ -208,7 +225,7 @@ pub unsafe extern "C" fn dsd2pcm_convert_file(
         // SAFETY: NULL or a struct starting with its `struct_size` (contract). Checked
         // before the conversion, so a bad size fails at once.
         let report_bytes = unsafe { out_struct(report, "report") }?;
-        let opts = file_options(&o)?;
+        let (opts, out_opts) = file_options(&o)?;
         let (cb, user_data) = (o.progress, o.user_data);
         let mut hook = |p: dsd::Progress| match cb {
             // SAFETY: a C function pointer supplied by the caller, called with the
@@ -216,7 +233,15 @@ pub unsafe extern "C" fn dsd2pcm_convert_file(
             Some(f) if unsafe { f(p.done, p.total, user_data) } != 0 => ControlFlow::Break(()),
             _ => ControlFlow::Continue(()),
         };
-        let rep = dsd::convert_file_with(input, output, &opts, &mut hook)?;
+        let rep = match dsd::convert_file_to(input, output, &opts, &out_opts, &mut hook) {
+            Ok(rep) => rep,
+            Err(dsd::Error::Io(e))
+                if out_opts.no_clobber && e.kind() == std::io::ErrorKind::AlreadyExists =>
+            {
+                return Err(Fail(DSD2PCM_E_EXISTS, dsd::Error::Io(e).to_string()));
+            }
+            Err(e) => return Err(e.into()),
+        };
         if let Some(n) = report_bytes {
             // SAFETY: not NULL; writable for `struct_size >= n` bytes (contract).
             unsafe { write_struct(report, file_report(&rep), n) };
@@ -348,7 +373,8 @@ const GROUP: usize = 32;
 /// `frame_clipped` is NULL (with `frame_clipped_len` 0) or one entry per frame of the run;
 /// each entry is set to the samples clamped in that frame over all channels. `stats` may be
 /// NULL. On an error nothing is written. The output equals the run's part of a conversion
-/// of the whole area; after the first call the converter allocates nothing.
+/// of the whole area. A call that succeeds allocates nothing (`dsd2pcm_frames_new` sizes the
+/// buffers), the first one included.
 ///
 /// Output buffers must not overlap each other or any input buffer.
 ///

@@ -1,15 +1,24 @@
+[dsd2pcm-rs](../README.md) › [Documentation](README.md) › Development
+
 # Development
 
 CI (`.github/workflows`) runs fmt, clippy, the docs build and the tests on Linux (x86_64,
 aarch64, i686), macOS (arm64) and Windows (x86_64), the tests once per SIMD level the CPU
 has, plus a short soak test, the C tests under AddressSanitizer and LeakSanitizer, the
-minimum Rust version, cargo-deny, a fuzz smoke test, CodeQL and zizmor; Miri and
+minimum Rust version, cargo-deny, a fuzz smoke test, CodeQL, zizmor and the check that
+the precise filter's tables are what `tools/filters/design_precise.py --check` generates; Miri and
 ThreadSanitizer run weekly ([testing.md](testing.md)). The speed workflow (`bench.yml`, by
-hand only) is described in [docs/performance.md](performance.md). The tests need Rust 1.85
-or later (a test-only dependency uses edition 2024); the crates themselves build with 1.83.
+hand only) is described in [docs/performance.md](performance.md).
+
+Rust versions: the library, the command-line tool and the C library build with Rust <!-- facts:msrv -->1.83<!-- /facts -->
+(`rust-version` in `Cargo.toml`). The test suite needs Rust 1.85 or later, because its
+dev-dependency scarletbook-pcm 0.7.0 uses edition 2024 (rust-version 1.85).
+`.github/workflows/msrv.yml` checks and builds the workspace with <!-- facts:msrv -->1.83<!-- /facts --> and builds the tests
+with 1.85.
 Locally:
 
-```
+<!-- docs-run: checkout=1 image=fedora-net timeout=7200 setup="dnf -y -q --setopt=install_weak_deps=False install gcc gcc-c++ git-core && .github/scripts/rust-setup.sh 1.100.0 clippy,rustfmt && mkdir -p ~/.local && ln -s ~/.cargo/bin ~/.local/bin" -->
+```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 CARGO_PROFILE_DEV_OPT_LEVEL=2 .github/scripts/test-simd-levels.sh
@@ -23,4 +32,21 @@ manual steps.
 CHANGELOG, SECURITY.md and `docs/` (lychee, `.github/lychee.toml`), runs the README's
 Quick start block literally on the release it names, and fails when the workspace version,
 the lock files, the newest CHANGELOG section and the release references in the docs
-disagree (`python3 -I .github/scripts/check-doc-versions.py`).
+disagree (`python3 -I .github/scripts/check-doc-versions.py`). It also runs the shared
+[DSD Toolbox docs tools](https://github.com/dsd-toolbox/dsd-toolbox/blob/main/docs/docs-tooling.md),
+pinned to one commit, with the settings in `.docs.toml`: the docs lint, the link check of
+every Markdown file, the facts regions, on pull requests a docs change with every code
+change, and weekly the marked command blocks (against the published release, or in a copy
+of the commit for build and test commands) and a refresh of the facts regions, pushed to the
+branch `docs/facts-update` for a pull request. Every command block is marked to run or
+skipped with a reason. The
+`docs-audit` workflow runs after each release ([releasing](release.md#after-the-release-run-the-docs-audit)).
+
+## See also
+
+- [Contributing](../CONTRIBUTING.md): how changes get in
+- [Testing](testing.md): checks for long-lived processes
+- [Fuzzing](fuzzing.md): the fuzz targets
+- [Releases](release.md): publishing a version
+
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! `Filter::Pysacd` gives the bytes of pysacd's reference (tests/pysacd-ref: pysacd's
-//! dsp.c built with `-O2 -ffp-contract=off`, fed each area as one stream) at every SIMD
-//! level, through every entry point and however the work is split.
+//! `Filter::Pysacd` gives the bytes of its C reference (tests/pysacd-ref: pysacd's dsp.c
+//! computed in double, built with `-O2 -ffp-contract=off`, fed each area as one stream) at
+//! every SIMD level, through every entry point and however the work is split.
 
 #[path = "pysacd-ref/inputs.rs"]
 mod inputs;
@@ -12,7 +12,7 @@ use dsd2pcm::dsf::{DsfReader, DsfWriter};
 use dsd2pcm::frames::{Converter, Gain, PcmConfig, PcmOut, Run};
 use dsd2pcm::io::DsdWrite;
 use dsd2pcm::wav::{WavFormat, WavWriter};
-use dsd2pcm::{Cutoff, Filter, PcmOptions, PcmRate};
+use dsd2pcm::{Cutoff, Filter, PcmOptions, PcmRate, Threads};
 use inputs::{gen, reference, FRAME};
 use std::io::Cursor;
 
@@ -108,7 +108,11 @@ fn file(area: &[u8], ch: usize, rate: PcmRate, gain: f64, threads: bool) -> (Vec
     .unwrap();
     let mut opts = PcmOptions::new(rate);
     opts.gain_db = gain;
-    opts.threads = threads;
+    opts.threads = if threads {
+        Threads::All
+    } else {
+        Threads::Single
+    };
     opts.filter = Filter::Pysacd;
     let rep = dsd64_to_pcm(Box::new(r), &mut wav, &opts).unwrap();
     wav.finish().unwrap();

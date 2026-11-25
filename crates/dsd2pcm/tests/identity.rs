@@ -1,10 +1,12 @@
-//! Output samples are identical to scarletbook-pcm 0.7.0 for every rate, cutoff and gain.
+//! With `Filter::Fast`, output samples are identical to scarletbook-pcm 0.7.0 for every rate,
+//! cutoff and gain. Golden hashes pin the output of every filter, and of the default filter
+//! (precise) as `PcmOptions::new` sets it, at every SIMD level.
 
 use dsd2pcm::convert::dsd64_to_pcm;
 use dsd2pcm::dsf::{DsfReader, DsfWriter};
 use dsd2pcm::io::DsdWrite;
 use dsd2pcm::wav::{WavFormat, WavWriter};
-use dsd2pcm::{Cutoff, PcmOptions, PcmRate};
+use dsd2pcm::{Cutoff, PcmOptions, PcmRate, Threads};
 use std::io::Cursor;
 
 const FRAME: usize = 4704;
@@ -68,6 +70,7 @@ fn theirs(chans: &[Vec<u8>], rate: PcmRate, cutoff: Cutoff, gain_db: f64) -> (Ve
         Cutoff::Standard => sb::Cutoff::Standard,
         Cutoff::Low => sb::Cutoff::Low,
         Cutoff::Wide => sb::Cutoff::Wide,
+        c => unreachable!("cutoff {c:?}"),
     };
     let cfg =
         sb::PcmConfig::new(rate, cutoff, ch as u8).with_gain(sb::Gain::from_db(gain_db).unwrap());
@@ -100,13 +103,11 @@ fn identical_to_scarletbook_pcm() {
                 continue;
             }
             for gain_db in [0.0, -3.0, 6.0] {
-                let opts = PcmOptions {
-                    rate,
-                    cutoff,
-                    gain_db,
-                    threads: true,
-                    filter: dsd2pcm::Filter::Default,
-                };
+                let opts = PcmOptions::new(rate)
+                    .with_cutoff(cutoff)
+                    .with_gain_db(gain_db)
+                    .with_threads(Threads::All)
+                    .with_filter(dsd2pcm::Filter::Fast);
                 let (a, ca) = ours(&chans, &opts);
                 let (b, cb) = theirs(&chans, rate, cutoff, gain_db);
                 assert_eq!(a.len(), b.len(), "{rate:?} {cutoff:?} {gain_db}");
@@ -125,13 +126,15 @@ fn identical_to_scarletbook_pcm() {
 fn identical_mono_and_six_channels() {
     for ch in [1usize, 6] {
         let chans = material(ch, 3, 0xfeed_beef ^ ch as u64);
-        let opts = PcmOptions {
-            rate: PcmRate::Hz176400,
-            cutoff: Cutoff::Standard,
-            gain_db: 0.0,
-            threads: ch > 1,
-            filter: dsd2pcm::Filter::Default,
-        };
+        let opts = PcmOptions::new(PcmRate::Hz176400)
+            .with_cutoff(Cutoff::Standard)
+            .with_gain_db(0.0)
+            .with_threads(if ch > 1 {
+                Threads::All
+            } else {
+                Threads::Single
+            })
+            .with_filter(dsd2pcm::Filter::Fast);
         let (a, _) = ours(&chans, &opts);
         let (b, _) = theirs(&chans, PcmRate::Hz176400, Cutoff::Standard, 0.0);
         assert!(a == b, "{ch} channels differ");
@@ -151,8 +154,9 @@ const ALL: [(PcmRate, Cutoff); 8] = [
 
 /// SHA-256 of the output bytes and clip counts for every channel count (1, 2, 6), input
 /// (the test material and full scale, all 0xFF) and gain (0, -3 and +7.5 dB, which clips),
-/// for one rate and cutoff.
-fn digest(rate: PcmRate, cutoff: Cutoff) -> String {
+/// for one rate, cutoff and filter (`None`: the default filter, as [`PcmOptions::new`] sets
+/// it). The fast filter's output is checked against scarletbook-pcm's as well.
+fn digest(rate: PcmRate, cutoff: Cutoff, filter: Option<dsd2pcm::Filter>) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     for ch in [1usize, 2, 6] {
@@ -162,21 +166,28 @@ fn digest(rate: PcmRate, cutoff: Cutoff) -> String {
         ];
         for chans in &inputs {
             for gain_db in [0.0, -3.0, 7.5] {
-                let opts = PcmOptions {
-                    rate,
-                    cutoff,
-                    gain_db,
-                    // Both the threaded and the single-thread driver.
-                    threads: gain_db != -3.0,
-                    filter: dsd2pcm::Filter::Default,
+                // Both the threaded and the single-thread driver.
+                let threads = if gain_db != -3.0 {
+                    Threads::All
+                } else {
+                    Threads::Single
                 };
+                let mut opts = PcmOptions::new(rate)
+                    .with_cutoff(cutoff)
+                    .with_gain_db(gain_db)
+                    .with_threads(threads);
+                if let Some(f) = filter {
+                    opts = opts.with_filter(f);
+                }
                 let (bytes, clipped) = ours(chans, &opts);
-                // The hashed output is scarletbook-pcm's.
-                let (b, cb) = theirs(chans, rate, cutoff, gain_db);
-                assert!(
-                    bytes == b && clipped == cb,
-                    "{rate:?} {cutoff:?} {gain_db} dB"
-                );
+                if opts.filter == dsd2pcm::Filter::Fast {
+                    // The hashed output is scarletbook-pcm's.
+                    let (b, cb) = theirs(chans, rate, cutoff, gain_db);
+                    assert!(
+                        bytes == b && clipped == cb,
+                        "{rate:?} {cutoff:?} {gain_db} dB"
+                    );
+                }
                 h.update(&bytes);
                 for c in clipped {
                     h.update(c.to_le_bytes());
@@ -187,11 +198,35 @@ fn digest(rate: PcmRate, cutoff: Cutoff) -> String {
     h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Golden output hashes, the same at every SIMD level of this CPU (each forced in turn) and
-/// on every platform. They change only with a major version.
-#[test]
-fn golden_hashes_at_every_simd_level() {
+/// The digests of `filter` (`None`: the default) at every rate and cutoff, at every SIMD
+/// level of this CPU (each forced in turn), checked against `golden`.
+fn check_golden(filter: Option<dsd2pcm::Filter>, golden: [&str; 8]) {
     use dsd2pcm::decimator::{with_simd_level, SimdLevel};
+    let levels = SimdLevel::available();
+    let got: Vec<Vec<String>> = ALL
+        .into_iter()
+        .map(|(rate, cutoff)| {
+            levels
+                .iter()
+                .map(|&level| with_simd_level(level, || digest(rate, cutoff, filter)).unwrap())
+                .collect()
+        })
+        .collect();
+    for ((rate, cutoff), d) in ALL.into_iter().zip(&got) {
+        eprintln!("{filter:?} {rate:?} {cutoff:?}: {d:?}");
+    }
+    for (((rate, cutoff), d), golden) in ALL.into_iter().zip(&got).zip(golden) {
+        for (level, d) in levels.iter().zip(d) {
+            assert_eq!(d, golden, "{filter:?} {rate:?} {cutoff:?} at {level:?}");
+        }
+    }
+}
+
+/// The fast filter's golden output hashes (scarletbook-pcm 0.7.0's output, the default of
+/// 0.1.x), the same at every SIMD level of this CPU (each forced in turn) and on every
+/// platform. They are those of 0.1.x's default filter, unchanged.
+#[test]
+fn golden_hashes_fast_at_every_simd_level() {
     const GOLDEN: [&str; 8] = [
         "56c126ccdc7ad14f156a408fc41433350ad64799cb029d5c1daf112ea6f2e5e2",
         "fbf0ced5f83210c736a5ac42b4f71bfe7e35f33eb0b65b663ac3c12b0e209348",
@@ -202,24 +237,33 @@ fn golden_hashes_at_every_simd_level() {
         "30de64ebe6a071f889121069306e49b7c8094b9bba4b0c0dd69bbba5214c6be2",
         "14d04a339fd56e168d5566edc241dae92910fde490ef96a92bf89bbf2f2bf40e",
     ];
-    let levels = SimdLevel::available();
-    let got: Vec<Vec<String>> = ALL
-        .into_iter()
-        .map(|(rate, cutoff)| {
-            levels
-                .iter()
-                .map(|&level| with_simd_level(level, || digest(rate, cutoff)).unwrap())
-                .collect()
-        })
-        .collect();
-    for ((rate, cutoff), d) in ALL.into_iter().zip(&got) {
-        eprintln!("{rate:?} {cutoff:?}: {d:?}");
-    }
-    for (((rate, cutoff), d), golden) in ALL.into_iter().zip(&got).zip(GOLDEN) {
-        for (level, d) in levels.iter().zip(d) {
-            assert_eq!(d, golden, "{rate:?} {cutoff:?} at {level:?}");
-        }
-    }
+    check_golden(Some(dsd2pcm::Filter::Fast), GOLDEN);
+}
+
+/// The precise filter's golden output hashes, as [`golden_hashes_fast_at_every_simd_level`]
+/// (computed at the generic, sse2, avx2 and avx2fma levels on x86-64, all equal).
+const GOLDEN_PRECISE: [&str; 8] = [
+    "18acb04ec74f4fe8c1393a9de446e3d29672a2d404d4d1bbd2a707e88ab81bf6",
+    "2d0dd8496e57d1ce0215d86c75ad6515fcc8999bef6ab24cfd69d5c583f6aae0",
+    "5b98d636b7a8d6adefe8aa0ecf64439e29c8772a0b2ff9a0452cd1f6ff0f4802",
+    "cb1691c219858053f0f188ce99f60a1fa6d35f5cdf35a169118ec8e0a1aaa31b",
+    "2ff237858fb9f93576afac5f9378adf54bf7f2bb29a1de3189e7841875e1ff65",
+    "c33b9582063e2a62009dcf12caf68fc68714d2c4505b82c40a0d25bc29d6d065",
+    "bd4a8286a40a6d6ee09c2a16110e47228f694b4bc717efb2dc5c68c2feb7555d",
+    "bfeef94a939fc912ffed9819371d4daa3829723dc9957e1207e8b07555e939ba",
+];
+
+#[test]
+fn golden_hashes_precise_at_every_simd_level() {
+    check_golden(Some(dsd2pcm::Filter::Precise), GOLDEN_PRECISE);
+}
+
+/// The default filter, as `PcmOptions::new` sets it, is the precise filter since 0.2.0: its
+/// golden hashes at every SIMD level.
+#[test]
+fn golden_hashes_default_at_every_simd_level() {
+    assert_eq!(dsd2pcm::Filter::default(), dsd2pcm::Filter::Precise);
+    check_golden(None, GOLDEN_PRECISE);
 }
 
 /// A real DSD64 file (path in `DSD2PCM_REAL_DSF`), cut to whole 4704-byte frames.
@@ -244,13 +288,11 @@ fn identical_on_real_file() {
             if cutoff == Cutoff::Wide && rate == PcmRate::Hz88200 {
                 continue;
             }
-            let opts = PcmOptions {
-                rate,
-                cutoff,
-                gain_db: 0.0,
-                threads: true,
-                filter: dsd2pcm::Filter::Default,
-            };
+            let opts = PcmOptions::new(rate)
+                .with_cutoff(cutoff)
+                .with_gain_db(0.0)
+                .with_threads(Threads::All)
+                .with_filter(dsd2pcm::Filter::Fast);
             let (a, _) = ours(&chans, &opts);
             let (b, _) = theirs(&chans, rate, cutoff, 0.0);
             assert!(a == b, "real file differs: {rate:?} {cutoff:?}");

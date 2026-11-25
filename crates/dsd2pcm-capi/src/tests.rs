@@ -109,6 +109,7 @@ fn file_opts(rate_hz: u32) -> dsd2pcm_file_options {
         gain_db: 0.0,
         progress: None,
         user_data: null_mut(),
+        no_clobber: 0,
     }
 }
 
@@ -143,6 +144,16 @@ fn convert_file_matches_rust_and_reports() {
         ),
         (88_200, DSD2PCM_CUTOFF_LOW, -3.0, 1, DSD2PCM_FILTER_DEFAULT),
         (352_800, DSD2PCM_CUTOFF_WIDE, 0.0, 0, DSD2PCM_FILTER_DEFAULT),
+        (88_200, DSD2PCM_CUTOFF_LOW, 0.0, 1, DSD2PCM_FILTER_PRECISE),
+        (176_400, DSD2PCM_CUTOFF_LOW, 6.0, 0, DSD2PCM_FILTER_FAST),
+        (352_800, DSD2PCM_CUTOFF_WIDE, -3.0, 1, DSD2PCM_FILTER_FAST),
+        (
+            352_800,
+            DSD2PCM_CUTOFF_WIDE,
+            -3.0,
+            0,
+            DSD2PCM_FILTER_PRECISE,
+        ),
         (
             176_400,
             DSD2PCM_CUTOFF_STANDARD,
@@ -169,7 +180,7 @@ fn convert_file_matches_rust_and_reports() {
             dsd2pcm_convert_file(cstr(&inp).as_ptr(), cstr(&ours).as_ptr(), &o, &mut rep)
         };
         assert_eq!(rc, DSD2PCM_OK, "{}", last_error());
-        let opts = file_options(&o).ok().unwrap();
+        let (opts, _) = file_options(&o).ok().unwrap();
         let want = dsd::convert_file(&inp, &theirs, &opts).unwrap();
         assert_eq!(
             std::fs::read(&ours).unwrap(),
@@ -232,7 +243,9 @@ fn convert_file_rejects_nulls_and_bad_values() {
     assert_eq!(mutate(&|x| x.rate_hz = 44_100), DSD2PCM_E_INVALID_ARGUMENT);
     assert_eq!(mutate(&|x| x.rate_hz = 0), DSD2PCM_E_INVALID_ARGUMENT);
     assert_eq!(mutate(&|x| x.cutoff = 3), DSD2PCM_E_INVALID_ARGUMENT);
-    assert_eq!(mutate(&|x| x.filter = 2), DSD2PCM_E_INVALID_ARGUMENT);
+    assert_eq!(mutate(&|x| x.filter = 4), DSD2PCM_E_INVALID_ARGUMENT);
+    assert_eq!(mutate(&|x| x.filter = DSD2PCM_FILTER_PRECISE), DSD2PCM_OK);
+    assert_eq!(mutate(&|x| x.filter = DSD2PCM_FILTER_FAST), DSD2PCM_OK);
     // pysacd's filter: 88.2 and 176.4 kHz, standard cutoff only.
     assert_eq!(mutate(&|x| x.filter = DSD2PCM_FILTER_PYSACD), DSD2PCM_OK);
     assert_ne!(
@@ -249,7 +262,15 @@ fn convert_file_rejects_nulls_and_bad_values() {
         }),
         DSD2PCM_OK
     );
-    assert_eq!(mutate(&|x| x.threads = 2), DSD2PCM_E_INVALID_ARGUMENT);
+    // Any thread count gives the same bytes (counts above 256 run on 256 threads).
+    let threads_out = |t: u32| {
+        assert_eq!(mutate(&|x| x.threads = t), DSD2PCM_OK, "{}", last_error());
+        std::fs::read(d.path("out.wav")).unwrap()
+    };
+    let one = threads_out(1);
+    for t in [0, 2, 3, u32::MAX] {
+        assert!(threads_out(t) == one, "threads {t}");
+    }
     assert_eq!(mutate(&|x| x.gain_db = 25.0), DSD2PCM_E_INVALID_ARGUMENT);
     assert_eq!(
         mutate(&|x| x.gain_db = f64::NAN),
@@ -475,6 +496,10 @@ fn frames_convert_matches_rust() {
         (176_400, 2u32, 6.0, DSD2PCM_FILTER_DEFAULT, 0u64, true),
         (88_200, 1, 0.0, DSD2PCM_FILTER_DEFAULT, 5, false),
         (352_800, 6, 3.0, DSD2PCM_FILTER_DEFAULT, 0, true),
+        (352_800, 2, 3.0, DSD2PCM_FILTER_PRECISE, 0, true),
+        (176_400, 1, 0.0, DSD2PCM_FILTER_PRECISE, 7, false),
+        (88_200, 2, 6.0, DSD2PCM_FILTER_FAST, 0, true),
+        (352_800, 6, 0.0, DSD2PCM_FILTER_FAST, 3, false),
         (176_400, 2, 6.0, DSD2PCM_FILTER_PYSACD, 1234, true),
         (88_200, 6, 0.0, DSD2PCM_FILTER_PYSACD, 0, false),
         (176_400, 1, -1.5, DSD2PCM_FILTER_PYSACD, u64::MAX - 40, true),
@@ -956,12 +981,17 @@ unsafe impl std::alloc::GlobalAlloc for Counting {
 #[global_allocator]
 static COUNTING: Counting = Counting;
 
-/// After the first call, `dsd2pcm_frames_convert` allocates nothing, in either buffer
-/// layout and format.
+/// `dsd2pcm_frames_convert` allocates nothing, the first call included (a one-frame run at
+/// the edge of the area, then longer runs), in either buffer layout and format.
 #[test]
 #[cfg_attr(miri, ignore = "too slow: 40-frame conversions, covered natively")]
-fn frames_convert_allocates_nothing_after_warm_up() {
-    for filter in [DSD2PCM_FILTER_DEFAULT, DSD2PCM_FILTER_PYSACD] {
+fn frames_convert_allocates_nothing() {
+    for filter in [
+        DSD2PCM_FILTER_DEFAULT,
+        DSD2PCM_FILTER_PRECISE,
+        DSD2PCM_FILTER_FAST,
+        DSD2PCM_FILTER_PYSACD,
+    ] {
         alloc_case(filter);
     }
 }
@@ -980,15 +1010,17 @@ fn alloc_case(filter: u32) {
     sep.frame_ptrs = ptrs.as_ptr();
     sep.frame_count = n;
     let cont = contiguous(Some(before), run, Some(after));
+    let first = contiguous(None, &a[..fb], None);
     let mut out = vec![0i32; n * 2352 * 6];
     let mut fc = vec![0u64; n];
     let mut st = stats_init();
     let mut go = |r: &dsd2pcm_run, fmt: u32| {
-        let len = if fmt == 0 {
-            n * 2352 * 6 * 3
+        let frames = if r.frame_ptrs.is_null() {
+            r.frames_len / fb
         } else {
-            n * 2352 * 6 * 4
+            r.frame_count
         };
+        let len = frames * 2352 * 6 * if fmt == 0 { 3 } else { 4 };
         // SAFETY (test): valid buffers of the given lengths.
         unsafe {
             dsd2pcm_frames_convert(
@@ -998,19 +1030,37 @@ fn alloc_case(filter: u32) {
                 out.as_mut_ptr().cast(),
                 len,
                 fc.as_mut_ptr(),
-                n,
+                frames,
                 &mut st,
             )
         }
     };
-    assert_eq!(go(&cont, 0), DSD2PCM_OK);
     let before_count = ALLOCS.with(|a| a.get());
-    for (r, fmt) in [(&cont, 0), (&sep, 0), (&cont, 1), (&sep, 1)] {
+    for (r, fmt) in [(&first, 0), (&cont, 0), (&sep, 0), (&cont, 1), (&sep, 1)] {
         assert_eq!(go(r, fmt), DSD2PCM_OK);
     }
     assert_eq!(ALLOCS.with(|a| a.get()), before_count, "filter {filter}");
     // SAFETY (test): live handle.
     unsafe { dsd2pcm_frames_free(h) };
+}
+
+/// The filter constants keep their 0.1.x values (`DSD2PCM_FILTER_FAST` is new in 0.2.0) and
+/// name the library's filters: 0, the default, is the precise filter since 0.2.0.
+#[test]
+fn filter_constants() {
+    assert_eq!(DSD2PCM_FILTER_DEFAULT, 0);
+    assert_eq!(DSD2PCM_FILTER_PYSACD, 1);
+    assert_eq!(DSD2PCM_FILTER_PRECISE, 2);
+    assert_eq!(DSD2PCM_FILTER_FAST, 3);
+    let f = |c| filter(c).ok().unwrap();
+    assert_eq!(f(DSD2PCM_FILTER_DEFAULT), Filter::Precise);
+    assert_eq!(f(DSD2PCM_FILTER_DEFAULT), Filter::default());
+    assert_eq!(f(DSD2PCM_FILTER_PRECISE), Filter::Precise);
+    assert_eq!(f(DSD2PCM_FILTER_FAST), Filter::Fast);
+    assert_eq!(f(DSD2PCM_FILTER_PYSACD), Filter::Pysacd);
+    for bad in [4, 5, u32::MAX] {
+        assert!(filter(bad).is_err(), "filter {bad}");
+    }
 }
 
 #[test]
@@ -1066,7 +1116,10 @@ fn dsd128_with_pysacd_is_unsupported() {
     }
 }
 
-/// A caller's struct with a field this version does not know.
+/// A caller's struct with a field this version does not know. Pass the library a pointer to
+/// the whole value (`(&raw const v).cast()`), not `&v.known`: the library reads an input
+/// struct's `struct_size` bytes, past `known`, which a reference to `known` alone does not
+/// cover.
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct Newer<T> {
@@ -1074,17 +1127,14 @@ struct Newer<T> {
     extra: u64,
 }
 
-fn newer<T: Versioned>(mut known: T) -> Newer<T> {
+fn newer<T: Versioned>(mut known: T, extra: u64) -> Newer<T> {
     known.set_struct_size(size_of::<Newer<T>>() as u32);
-    Newer {
-        known,
-        extra: 0xDEAD_BEEF,
-    }
+    Newer { known, extra }
 }
 
-/// `struct_size` below the 0.1.0 size is refused for every struct, before anything is read
-/// or written; a larger one (a newer header) is accepted, and only our fields are read or
-/// written.
+/// `struct_size` below the 0.1.0 size or above `MAX_STRUCT_SIZE` is refused for every
+/// struct, before anything is read or written; a larger one (a newer header) is accepted
+/// when the input struct's bytes past ours are 0, and only our fields are read or written.
 #[test]
 fn struct_size_is_checked() {
     let cfg = frames_cfg(176_400, 1);
@@ -1107,10 +1157,16 @@ fn struct_size_is_checked() {
             )
         }
     };
-    fn too_small<T>(k: usize) -> u32 {
-        [0, 4, size_of::<T>() as u32 - 1][k]
+    fn too_small<T: Versioned>(k: usize) -> u32 {
+        [
+            0,
+            4,
+            T::V1_SIZE as u32 - 1,
+            MAX_STRUCT_SIZE as u32 + 1,
+            u32::MAX,
+        ][k]
     }
-    for k in 0..3 {
+    for k in 0..5 {
         let r = dsd2pcm_run {
             struct_size: too_small::<dsd2pcm_run>(k),
             ..run
@@ -1139,11 +1195,26 @@ fn struct_size_is_checked() {
         );
         assert!(hh.is_null());
     }
-    // Newer, larger structs.
-    let r = newer(run);
-    let mut st = newer(stats_init());
+    // Newer, larger structs: an input struct's unknown bytes must be 0.
+    let bad = newer(run, 1 << 40);
+    let mut st = newer(stats_init(), 0xDEAD_BEEF);
     assert_eq!(
-        convert(&r.known, &mut st.known, &mut out),
+        convert(
+            (&raw const bad).cast::<dsd2pcm_run>(),
+            (&raw mut st).cast::<dsd2pcm_stats>(),
+            &mut out
+        ),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    assert!(last_error().contains("is not 0"), "{}", last_error());
+    assert_eq!(st.known.channels, 0, "nothing written");
+    let r = newer(run, 0);
+    assert_eq!(
+        convert(
+            (&raw const r).cast::<dsd2pcm_run>(),
+            (&raw mut st).cast::<dsd2pcm_stats>(),
+            &mut out
+        ),
         DSD2PCM_OK,
         "{}",
         last_error()
@@ -1154,10 +1225,20 @@ fn struct_size_is_checked() {
         size_of::<Newer<dsd2pcm_stats>>()
     );
     assert_eq!(st.known.channels, 1);
-    let c = newer(cfg);
     let mut hh = null_mut();
+    let c = newer(cfg, 1);
     // SAFETY (test): valid pointers.
-    assert_eq!(unsafe { dsd2pcm_frames_new(&c.known, &mut hh) }, DSD2PCM_OK);
+    assert_eq!(
+        unsafe { dsd2pcm_frames_new((&raw const c).cast::<dsd2pcm_frames_config>(), &mut hh) },
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    assert!(hh.is_null());
+    let c = newer(cfg, 0);
+    // SAFETY (test): valid pointers.
+    assert_eq!(
+        unsafe { dsd2pcm_frames_new((&raw const c).cast::<dsd2pcm_frames_config>(), &mut hh) },
+        DSD2PCM_OK
+    );
     // SAFETY (test): live handles.
     unsafe {
         dsd2pcm_frames_free(hh);
@@ -1189,10 +1270,22 @@ fn struct_size_is_checked_for_files() {
     assert_eq!(call(&good, &mut rep), DSD2PCM_E_INVALID_ARGUMENT);
     assert_eq!(rep.out_samples, 5, "nothing written");
     assert!(!out.exists(), "refused before converting");
-    let o = newer(good);
-    let mut rep = newer(report_init());
+    let bad = newer(good, 1);
+    let mut rep = newer(report_init(), 0xDEAD_BEEF);
     assert_eq!(
-        call(&o.known, &mut rep.known),
+        call(
+            (&raw const bad).cast::<dsd2pcm_file_options>(),
+            (&raw mut rep).cast::<dsd2pcm_file_report>()
+        ),
+        DSD2PCM_E_INVALID_ARGUMENT
+    );
+    assert!(!out.exists(), "refused before converting");
+    let o = newer(good, 0);
+    assert_eq!(
+        call(
+            (&raw const o).cast::<dsd2pcm_file_options>(),
+            (&raw mut rep).cast::<dsd2pcm_file_report>()
+        ),
         DSD2PCM_OK,
         "{}",
         last_error()
@@ -1292,12 +1385,31 @@ fn versioned_structs_old_and_new_callers() {
             b: 5,
             appended: 6,
         },
-        extra: 0xDEAD_BEEF,
+        extra: 0,
     };
-    let p = (&mut new as *mut Newest).cast::<LaterStruct>();
+    // Every access until the last use of `p` goes through `pn`, which `p` derives from: a
+    // direct write to `new` would invalidate `p` (Stacked Borrows).
+    let pn = &raw mut new;
+    let p = pn.cast::<LaterStruct>();
     // SAFETY (test): `p` is readable for its struct_size bytes.
     let v = unsafe { read_struct(p.cast_const(), "new") }.ok().unwrap();
     assert_eq!((v.a, v.b, v.appended), (4, 5, 6));
+    // A field we do not know, set: refused, whichever of its bytes is set.
+    for byte in 0..8 {
+        // SAFETY (test): `pn` points to `new`, and no reference to it is live.
+        unsafe { (*pn).extra = 1 << (8 * byte) };
+        // SAFETY (test): as above.
+        let e = unsafe { read_struct(p.cast_const(), "new") }.err().unwrap();
+        assert_eq!(e.0, DSD2PCM_E_INVALID_ARGUMENT);
+        assert!(
+            e.1.contains(&format!("byte {} is not 0", 24 + byte)),
+            "{}",
+            e.1
+        );
+    }
+    // An output struct's unknown bytes are the caller's: left alone.
+    // SAFETY (test): `pn` points to `new`, and no reference to it is live.
+    unsafe { (*pn).extra = 0xDEAD_BEEF };
     // SAFETY (test): as above.
     let n = unsafe { out_struct(p, "new") }.ok().unwrap().unwrap();
     assert_eq!(n, size_of::<LaterStruct>());
@@ -1306,4 +1418,69 @@ fn versioned_structs_old_and_new_callers() {
     assert_eq!(new.known.struct_size as usize, size_of::<Newest>());
     assert_eq!((new.known.a, new.known.appended), (1, 3));
     assert_eq!(new.extra, 0xDEAD_BEEF);
+}
+
+/// `no_clobber` 1: an existing output is refused with `DSD2PCM_E_EXISTS` before converting
+/// and left as it was; a new one is written. Other values are invalid. A caller built
+/// against the 0.1.0 header (its struct ends before `no_clobber`) gets the old behaviour:
+/// only its bytes are read, so whatever follows them is not taken as `no_clobber`.
+#[test]
+#[cfg_attr(miri, ignore = "file I/O")]
+fn no_clobber() {
+    let d = TempDir::new("no-clobber");
+    let (inp, out) = (d.path("in.dsf"), d.path("out.wav"));
+    write_dsf(&inp, 2, 2);
+    let call = |o: *const dsd2pcm_file_options| {
+        // SAFETY (test): valid strings; `o` is readable for its struct_size bytes.
+        unsafe { dsd2pcm_convert_file(cstr(&inp).as_ptr(), cstr(&out).as_ptr(), o, null_mut()) }
+    };
+    let keep = dsd2pcm_file_options {
+        no_clobber: 1,
+        ..file_opts(88_200)
+    };
+    assert_eq!(call(&keep), DSD2PCM_OK, "{}", last_error());
+    let first = std::fs::read(&out).unwrap();
+    std::fs::write(&out, b"precious").unwrap();
+    assert_eq!(call(&keep), DSD2PCM_E_EXISTS);
+    assert!(last_error().contains("no-clobber"), "{}", last_error());
+    assert_eq!(std::fs::read(&out).unwrap(), b"precious");
+    // SAFETY (test): a static string.
+    let name = unsafe { CStr::from_ptr(dsd2pcm_status_str(DSD2PCM_E_EXISTS)) };
+    assert_eq!(name.to_str().unwrap(), "output exists");
+    let bad = dsd2pcm_file_options {
+        no_clobber: 2,
+        ..keep
+    };
+    assert_eq!(call(&bad), DSD2PCM_E_INVALID_ARGUMENT);
+    assert!(last_error().contains("no_clobber 2"), "{}", last_error());
+    // An old caller: the 0.1.0 bytes with struct_size 0.1.0, then (where a newer caller's
+    // no_clobber would be) a 1 that must not be read. In a u64 buffer for alignment.
+    let n = dsd2pcm_file_options::V1_SIZE;
+    let mut buf = vec![0u64; n / 8 + 1];
+    let p = buf.as_mut_ptr().cast::<u8>();
+    // SAFETY (test): `keep` is a live struct of more than `n` bytes; `buf` holds at least
+    // n + 4 bytes and does not overlap it.
+    unsafe {
+        std::ptr::copy_nonoverlapping((&keep as *const dsd2pcm_file_options).cast::<u8>(), p, n);
+        std::ptr::copy_nonoverlapping((n as u32).to_ne_bytes().as_ptr(), p, 4);
+        std::ptr::copy_nonoverlapping(1u32.to_ne_bytes().as_ptr(), p.add(n), 4);
+    }
+    assert_eq!(
+        call(p.cast::<dsd2pcm_file_options>()),
+        DSD2PCM_OK,
+        "{}",
+        last_error()
+    );
+    assert_eq!(std::fs::read(&out).unwrap(), first, "replaced, as in 0.1.0");
+}
+
+/// The sizes with the fields appended since 0.1.0.
+#[test]
+fn current_sizes() {
+    let want = match (size_of::<usize>(), std::mem::align_of::<u64>()) {
+        (8, _) => 56,
+        (4, 4) => 40,
+        _ => 48,
+    };
+    assert_eq!(size_of::<dsd2pcm_file_options>(), want);
 }

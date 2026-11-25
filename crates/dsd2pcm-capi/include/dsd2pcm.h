@@ -56,6 +56,10 @@ template <typename T> static inline T dsd2pcm_init_() {
 // An internal error (a caught panic, or a handle unusable after one). Please report it.
 #define DSD2PCM_E_INTERNAL 8
 
+// The output file exists and `dsd2pcm_file_options.no_clobber` is set: it is left as it
+// was. (Since 0.2.0.)
+#define DSD2PCM_E_EXISTS 9
+
 // Output layout: packed 3-byte little-endian samples (24-bit WAV and FLAC).
 #define DSD2PCM_FORMAT_S24LE 0
 
@@ -71,7 +75,9 @@ template <typename T> static inline T dsd2pcm_init_() {
 // Low-pass filter: passband to 80 kHz (176 400 and 352 800 Hz only).
 #define DSD2PCM_CUTOFF_WIDE 2
 
-// Filter and quantiser: scarletbook-pcm 0.7.0's (the default).
+// Filter and quantiser: the default, which is the precise filter since 0.2.0
+// (`DSD2PCM_FILTER_PRECISE`, the same bytes). In 0.1.x it was scarletbook-pcm 0.7.0's,
+// now `DSD2PCM_FILTER_FAST`. A zero `filter` field (the `*_INIT` macros) means this.
 #define DSD2PCM_FILTER_DEFAULT 0
 
 // Filter and quantiser: pysacd's filter with its TPDF-dithered quantiser, at 88200 and
@@ -79,6 +85,17 @@ template <typename T> static inline T dsd2pcm_init_() {
 // its index in the area: files count from their start, frame runs from
 // `dsd2pcm_run.first_frame`.
 #define DSD2PCM_FILTER_PYSACD 1
+
+// Filter and quantiser: the precise filter (the default since 0.2.0), at every rate and
+// cutoff, rounded without dither: at least 150 dB of stopband where ultrasonic content
+// folds into the passband, SINAD 142 to 145 dB with a quiet source.
+#define DSD2PCM_FILTER_PRECISE 2
+
+// Filter and quantiser: lower CPU, lower quality: scarletbook-pcm 0.7.0's filters at
+// every rate and cutoff, rounded without dither, the same bytes as scarletbook-pcm (the
+// default of 0.1.x). SINAD about 122 dB with a quiet source (116 dB with the wide cutoff),
+// at about 0.55 times the precise filter's CPU time on one core. (Since 0.2.0.)
+#define DSD2PCM_FILTER_FAST 3
 
 // The ABI version: it changes on any incompatible change to the interface. Compatible
 // changes only append fields to the structs (see `struct_size`) or add functions.
@@ -103,7 +120,7 @@ typedef int (*dsd2pcm_progress_fn)(uint64_t done, uint64_t total, void *user_dat
 
 // Settings for `dsd2pcm_convert_file`. Start from `DSD2PCM_FILE_OPTIONS_INIT` (all zeros
 // but `struct_size`) and set `rate_hz`; the other zeros are the defaults: standard cutoff,
-// default filter, 0 dB, all cores, no callback.
+// default filter (precise), 0 dB, all cores, no callback, an existing output replaced.
 typedef struct dsd2pcm_file_options {
   // Size of this struct as the caller compiled it: `sizeof(...)` (the `*_INIT` macro sets
   // it). Must be at least the 0.1.0 size; the library reads or writes only the fields it
@@ -113,9 +130,11 @@ typedef struct dsd2pcm_file_options {
   uint32_t rate_hz;
   // `DSD2PCM_CUTOFF_*`.
   uint32_t cutoff;
-  // `DSD2PCM_FILTER_*`; 0 is the default.
+  // `DSD2PCM_FILTER_*`; 0 is the default (`DSD2PCM_FILTER_PRECISE` since 0.2.0).
   uint32_t filter;
-  // 0: convert on all cores; 1: on the calling thread only. Other values are reserved.
+  // 0: convert on all cores; 1: on the calling thread only; n > 1: on at most n threads
+  // (the calling one included, at most 256). The output is the same with any value.
+  // Values above 1 were refused before 0.2.0.
   uint32_t threads;
   // Gain in dB, -120 to +24.
   double gain_db;
@@ -123,6 +142,11 @@ typedef struct dsd2pcm_file_options {
   dsd2pcm_progress_fn progress;
   // Passed to `progress` unchanged.
   void *user_data;
+  // 0: replace an existing output file. 1: refuse it with `DSD2PCM_E_EXISTS` and leave
+  // it as it was; the result is put in place without ever replacing a file that appears
+  // during the conversion. Other values are reserved. Appended in 0.2.0: a caller built
+  // against an older header passes the 0.1.0 size, and this reads as 0.
+  uint32_t no_clobber;
 } dsd2pcm_file_options;
 
 // What `dsd2pcm_convert_file` did; written on success only. Start from
@@ -150,7 +174,7 @@ typedef struct dsd2pcm_file_report {
 
 // Settings for `dsd2pcm_frames_new`. Start from `DSD2PCM_FRAMES_CONFIG_INIT` and set
 // `rate_hz` and `channels`; the other zeros are the defaults: standard cutoff, default
-// filter, 0 dB.
+// filter (precise), 0 dB.
 typedef struct dsd2pcm_frames_config {
   // Size of this struct as the caller compiled it: `sizeof(...)` (the `*_INIT` macro sets
   // it). Must be at least the 0.1.0 size; the library reads or writes only the fields it
@@ -160,7 +184,7 @@ typedef struct dsd2pcm_frames_config {
   uint32_t rate_hz;
   // `DSD2PCM_CUTOFF_*`.
   uint32_t cutoff;
-  // `DSD2PCM_FILTER_*`; 0 is the default.
+  // `DSD2PCM_FILTER_*`; 0 is the default (`DSD2PCM_FILTER_PRECISE` since 0.2.0).
   uint32_t filter;
   // Channels of the frames, 1 to 6.
   uint32_t channels;
@@ -198,8 +222,8 @@ typedef struct dsd2pcm_run {
   // `after`'s length in bytes: one frame, or 0 with NULL.
   size_t after_len;
   // Index of the run's first frame in its area. `DSD2PCM_FILTER_PYSACD` seeds its
-  // dither from it (frame `first_frame + i` for the run's frame `i`); the default filter
-  // ignores it.
+  // dither from it (frame `first_frame + i` for the run's frame `i`); the other filters
+  // ignore it.
   uint64_t first_frame;
 } dsd2pcm_run;
 
@@ -312,7 +336,8 @@ size_t dsd2pcm_frames_output_bytes(const struct dsd2pcm_frames *conv,
 // `frame_clipped` is NULL (with `frame_clipped_len` 0) or one entry per frame of the run;
 // each entry is set to the samples clamped in that frame over all channels. `stats` may be
 // NULL. On an error nothing is written. The output equals the run's part of a conversion
-// of the whole area; after the first call the converter allocates nothing.
+// of the whole area. A call that succeeds allocates nothing (`dsd2pcm_frames_new` sizes the
+// buffers), the first one included.
 //
 // Output buffers must not overlap each other or any input buffer.
 //

@@ -1,3 +1,5 @@
+[dsd2pcm-rs](../README.md) › [Documentation](README.md) › Fuzzing
+
 # Fuzzing
 
 The `fuzz/` directory holds [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) targets.
@@ -15,13 +17,15 @@ It is a separate crate, outside the main workspace, and needs a nightly toolchai
 Its dependencies are checked with their own cargo-deny config, `fuzz/deny.toml`, which
 also allows libFuzzer's NCSA licence; from the repository root:
 
-```
+<!-- docs-run: checkout=1 image=fedora-net timeout=7200 setup="dnf -y -q --setopt=install_weak_deps=False install gcc gcc-c++ git-core && .github/scripts/rust-setup.sh 1.100.0 && mkdir -p ~/.local && ln -s ~/.cargo/bin ~/.local/bin && curl -sSfL -o /tmp/deny.tar.gz https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz && echo '9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f  /tmp/deny.tar.gz' | sha256sum -c && tar -C /tmp -xzf /tmp/deny.tar.gz && cp /tmp/cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny ~/.cargo/bin/" -->
+```sh
 cargo deny --manifest-path fuzz/Cargo.toml check
 ```
 
 ## Setup
 
-```
+<!-- docs-run: checkout=1 -->
+```sh
 rustup toolchain install nightly
 cargo install cargo-fuzz
 ```
@@ -32,7 +36,8 @@ Small valid files made by the crate's own writers, and the FLAC test files of
 `crates/dsd2pcm/tests/data/flac` with unknown-length and ID3 variants. From the repository
 root:
 
-```
+<!-- docs-run: checkout=1 -->
+```sh
 cd fuzz
 cargo run --release --bin make_seeds
 ```
@@ -45,7 +50,8 @@ The corpora and any `fuzz/artifacts` are not committed.
 
 From the `fuzz` directory, one target for ten minutes on four processes:
 
-```
+<!-- docs-run: skip="fuzzes for 600 seconds on four processes by design (-max_total_time=600); the fuzz workflow runs every target for 60 seconds on each pull request and 10 minutes weekly" -->
+```sh
 cargo +nightly fuzz run -O dsf_read -- -fork=4 -max_total_time=600 -max_len=32768 -rss_limit_mb=2048 -malloc_limit_mb=2048 -timeout=10
 ```
 
@@ -57,10 +63,19 @@ replays it. Every fixed finding also gets a regression test in `crates/dsd2pcm/t
 
 ## Coverage
 
-```
+<!-- docs-run: checkout=1 -->
+```sh
 rustup component add llvm-tools-preview --toolchain nightly
 cargo +nightly fuzz coverage dsf_read
 ```
 
 This replays the corpus and writes `fuzz/coverage/dsf_read/coverage.profdata` for
 `llvm-cov`.
+
+## See also
+
+- [Development](development.md): the other checks
+- [Design](design.md#robustness): how the parsers guard against bad input
+- [Security policy](../SECURITY.md): reporting a vulnerability
+
+Part of the [DSD Toolbox](https://github.com/dsd-toolbox/dsd-toolbox).

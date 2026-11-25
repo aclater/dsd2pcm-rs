@@ -1,0 +1,199 @@
+# Release quality comparison for dsd2pcm: a release against the previous one.
+# Licence: CC BY 4.0 (LICENSES/CC-BY-4.0.txt); the dsd2pcm-rs authors.
+#
+# Measurement suite: dsd-measure, https://github.com/dsd-toolbox/dsd-measure
+# Pinned: version 0.1.2, tag v0.1.2, commit 3eaec2df13634f3bfc3968326a1dd7604ddfaf08.
+#   pipx install git+https://github.com/dsd-toolbox/dsd-measure@3eaec2df13634f3bfc3968326a1dd7604ddfaf08
+#
+# The two versions are installed under target/quality/ (new: the candidate, old: the
+# previous release from its tag) and measured in one run, on one machine:
+#   cargo install --locked --path crates/dsd2pcm-cli --root target/quality/new
+#   cargo install --locked --git https://github.com/dsd-toolbox/dsd2pcm-rs --tag v0.1.2 --root target/quality/old dsd2pcm-cli
+#   dsd-measure run suites/dsd2pcm.toml --only reference_floor levels noise alias_tones
+# The null tests and the rest are in docs/release-test-plan.md, item 11.
+# --single-thread keeps the run light; the output bytes are the same with any thread count.
+# dsd2pcm prints no version, so each device declares one (`version`); dsd-measure records
+# it with the SHA-256 of the executable. Change both versions with the tags.
+#
+# Coverage: every filter at every output rate it supports.
+#   precise  the default from 0.2.0 (`default` is another name for it): cutoff 40 at
+#            88200, 176400 and 352800; cutoff wide at 176400 and 352800. Its null test
+#            is against the previous release's default (fast), at the same cutoff and rate.
+#   fast     cutoff 40 at 88200, 176400 and 352800; cutoff wide at 176400 and 352800 (the
+#            only rates that have it). The default of 0.1.x; from 0.2.0 it is named `fast`
+#            and `default` means precise. While the old build is 0.1.x its "old fast"
+#            devices pass --filter default (0.1.x has no `fast`); from an old build of
+#            0.2.0 or later, change them to --filter fast. Wide is included
+#            because it changes the in-band figures (5.5 dB more noise in the trial);
+#            cutoff 30 is left out because it shares the design and arithmetic of cutoff
+#            40 and only moves the band edge.
+#   pysacd   88200 and 176400, fixed response (no --cutoff, no 352800 output).
+#
+# Metrics, from each device's results.json and each null report (dsd-measure 0.1.2):
+#   SINAD             metrics.tone_0dbsacd.sinad_db       1 kHz at 0 dB SACD
+#   THD+N             metrics.tone_0dbsacd.thdn_db        same tone, = -SINAD
+#   THD               metrics.tone_0dbsacd.thd_db         same tone, harmonics only
+#   noise floor       metrics.noise.unweighted_dbfs       20 Hz-20 kHz, unweighted
+#   alias rejection   metrics.alias_tones.worst_image_db  88200 and 176400 only: no test
+#                                                         tone fits above the Nyquist
+#                                                         frequency of 352800
+#   null-test depth   dsd-measure null, old against new, each filter, cutoff and rate, on
+#                     the quick-profile multitone signal (multitone.dsf, SHA-256
+#                     100d1ba2cb46d98374ee5b8591b995712d12cd21c7d9370d50a1d68da3c030fc)
+#
+# Repeatability, measured 2026-11-24 on an AMD Ryzen AI Max+ 395 by running the whole
+# procedure three times on the same two builds (0.1.2 and 0.1.1): spread 0.00 dB for
+# SINAD, THD+N, noise floor and alias rejection (every results.json byte-identical between
+# runs), and every null "identical" each time. The signals, the reference modulator and
+# the converter are deterministic. So any change of 0.01 dB or more (the resolution of the
+# published table), or a null that is no longer identical, is a real change and is flagged.
+
+[suite]
+name = "dsd2pcm release comparison"
+profile = "quick"
+in_rate = 88200
+out = "target/quality/report"
+
+# ---- fast filter (0.1.x: default), cutoff 40 -----------------------------------------
+
+[[device]]
+name = "new fast 40 88200"
+adapter = "cli"
+class = "A"
+command = "target/quality/new/bin/dsd2pcm {input} {output} --filter fast --cutoff 40 --rate 88200 --single-thread"
+version = "0.2.0"
+
+[[device]]
+name = "old fast 40 88200"
+adapter = "cli"
+class = "A"
+command = "target/quality/old/bin/dsd2pcm {input} {output} --filter default --cutoff 40 --rate 88200 --single-thread"
+version = "0.1.2"
+
+[[device]]
+name = "new fast 40 176400"
+adapter = "cli"
+class = "A"
+command = "target/quality/new/bin/dsd2pcm {input} {output} --filter fast --cutoff 40 --rate 176400 --single-thread"
+version = "0.2.0"
+
+[[device]]
+name = "old fast 40 176400"
+adapter = "cli"
+class = "A"
+command = "target/quality/old/bin/dsd2pcm {input} {output} --filter default --cutoff 40 --rate 176400 --single-thread"
+version = "0.1.2"
+
+[[device]]
+name = "new fast 40 352800"
+adapter = "cli"
+class = "A"
+command = "target/quality/new/bin/dsd2pcm {input} {output} --filter fast --cutoff 40 --rate 352800 --single-thread"
+version = "0.2.0"
+
+[[device]]
+name = "old fast 40 352800"
+adapter = "cli"
+class = "A"
+command = "target/quality/old/bin/dsd2pcm {input} {output} --filter default --cutoff 40 --rate 352800 --single-thread"
+version = "0.1.2"
+
+# ---- fast filter (0.1.x: default), cutoff wide ---------------------------------------
+
+[[device]]
+name = "new fast wide 176400"
+adapter = "cli"
+class = "A"
+command = "target/quality/new/bin/dsd2pcm {input} {output} --filter fast --cutoff wide --rate 176400 --single-thread"
+version = "0.2.0"
+
+[[device]]
+name = "old fast wide 176400"
+adapter = "cli"
+class = "A"
+command = "target/quality/old/bin/dsd2pcm {input} {output} --filter default --cutoff wide --rate 176400 --single-thread"
+version = "0.1.2"
+
+[[device]]
+name = "new fast wide 352800"
+adapter = "cli"
+class = "A"
+command = "target/quality/new/bin/dsd2pcm {input} {output} --filter fast --cutoff wide --rate 352800 --single-thread"
+version = "0.2.0"
+
+[[device]]
+name = "old fast wide 352800"
+adapter = "cli"
+class = "A"
+command = "target/quality/old/bin/dsd2pcm {input} {output} --filter default --cutoff wide --rate 352800 --single-thread"
+version = "0.1.2"
+
+# ---- pysacd-compatible filter (fixed response) -----------------------------------------
+
+[[device]]
+name = "new pysacd 88200"
+adapter = "cli"
+class = "A"
+command = "target/quality/new/bin/dsd2pcm {input} {output} --filter pysacd --rate 88200 --single-thread"
+version = "0.2.0"
+
+[[device]]
+name = "old pysacd 88200"
+adapter = "cli"
+class = "A"
+command = "target/quality/old/bin/dsd2pcm {input} {output} --filter pysacd --rate 88200 --single-thread"
+version = "0.1.2"
+
+[[device]]
+name = "new pysacd 176400"
+adapter = "cli"
+class = "A"
+command = "target/quality/new/bin/dsd2pcm {input} {output} --filter pysacd --rate 176400 --single-thread"
+version = "0.2.0"
+
+[[device]]
+name = "old pysacd 176400"
+adapter = "cli"
+class = "A"
+command = "target/quality/old/bin/dsd2pcm {input} {output} --filter pysacd --rate 176400 --single-thread"
+version = "0.1.2"
+
+# ---- precise filter (the default from 0.2.0) ------------------------------------------
+# 0.2.0 is the first release that ships it: only "new" devices; their null tests are
+# against the "old fast" devices (0.1.x's default). From the release after, add the
+# "old precise ..." devices: the same with target/quality/old/bin/dsd2pcm.
+
+[[device]]
+name = "new precise 40 88200"
+adapter = "cli"
+class = "A"
+command = "target/quality/new/bin/dsd2pcm {input} {output} --filter precise --cutoff 40 --rate 88200 --single-thread"
+version = "0.2.0"
+
+[[device]]
+name = "new precise 40 176400"
+adapter = "cli"
+class = "A"
+command = "target/quality/new/bin/dsd2pcm {input} {output} --filter precise --cutoff 40 --rate 176400 --single-thread"
+version = "0.2.0"
+
+[[device]]
+name = "new precise 40 352800"
+adapter = "cli"
+class = "A"
+command = "target/quality/new/bin/dsd2pcm {input} {output} --filter precise --cutoff 40 --rate 352800 --single-thread"
+version = "0.2.0"
+
+[[device]]
+name = "new precise wide 176400"
+adapter = "cli"
+class = "A"
+command = "target/quality/new/bin/dsd2pcm {input} {output} --filter precise --cutoff wide --rate 176400 --single-thread"
+version = "0.2.0"
+
+[[device]]
+name = "new precise wide 352800"
+adapter = "cli"
+class = "A"
+command = "target/quality/new/bin/dsd2pcm {input} {output} --filter precise --cutoff wide --rate 352800 --single-thread"
+version = "0.2.0"

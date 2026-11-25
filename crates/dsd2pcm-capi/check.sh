@@ -4,12 +4,15 @@
 #   crates/dsd2pcm-capi/check.sh
 # 1. include/dsd2pcm.h is what cbindgen generates from the sources (CBINDGEN names the
 #    cbindgen binary; default: cbindgen on PATH).
-# 2. Every tests/*.c (smoke.c, minimal.c, leakloop.c) and examples/convert.c builds against the header
-#    and the static library with -Wall -Wextra -Werror under gcc and clang (CCS lists the
-#    compilers), and passes; the C++ compiler accepts the header and its init macros.
-# 3. smoke.c and leakloop.c (LEAKLOOP_ITERATIONS times, default 100) under clang with
-#    AddressSanitizer, LeakSanitizer and UndefinedBehaviorSanitizer, unless ASAN=0. The
+# 2. Every tests/*.c (smoke.c, minimal.c, leakloop.c, struct_size.c) and
+#    examples/convert.c builds against the header and the static library with -Wall
+#    -Wextra -Werror under gcc and clang (CCS lists the compilers), and passes; the C++
+#    compiler accepts the header and its init macros.
+# 3. smoke.c, struct_size.c and leakloop.c (LEAKLOOP_ITERATIONS times, default 100) under
+#    clang with AddressSanitizer, LeakSanitizer and UndefinedBehaviorSanitizer, unless
+#    ASAN=0. The
 #    sanitizer runtime is clang's shared one (-shared-libasan), preloaded.
+# Also: the static library holds no claxon symbols (.github/scripts/check-capi-no-claxon.sh).
 set -eu
 
 crate=crates/dsd2pcm-capi
@@ -33,6 +36,9 @@ libs=$(cargo rustc --release -q -p dsd2pcm-capi --lib --crate-type staticlib \
     -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p' | tail -n 1)
 lib="$target/release/libdsd2pcm.a"
 test -f "$lib"
+# Built for this package alone, without the `flac` feature: no claxon code in it. (A
+# workspace build turns the feature on through the command-line tool.)
+.github/scripts/check-capi-no-claxon.sh "$lib"
 
 for cc in $ccs; do
     echo "== $cc"
@@ -63,12 +69,14 @@ if [ "${ASAN:-1}" != 0 ]; then
     if [ ! -f "$rt" ]; then
         rt=$(find "$(clang -print-resource-dir)/lib" -name 'libclang_rt.asan*.so' | head -n 1)
     fi
-    # shellcheck disable=SC2086
-    clang -std=c11 -O1 -g -fno-omit-frame-pointer -Wall -Wextra -Werror \
-        -fsanitize=address,undefined -fno-sanitize-recover=all -shared-libasan \
-        -I "$crate/include" "$crate/tests/smoke.c" "$lib" $libs -o "$work/smoke-asan"
-    env LD_PRELOAD="$rt" ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
-        "$work/smoke-asan" "$work"
+    for t in smoke struct_size; do
+        # shellcheck disable=SC2086
+        clang -std=c11 -O1 -g -fno-omit-frame-pointer -Wall -Wextra -Werror \
+            -fsanitize=address,undefined -fno-sanitize-recover=all -shared-libasan \
+            -I "$crate/include" "$crate/tests/$t.c" "$lib" $libs -o "$work/$t-asan"
+        env LD_PRELOAD="$rt" ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
+            "$work/$t-asan" "$work"
+    done
     # shellcheck disable=SC2086
     clang -std=c11 -O1 -g -fno-omit-frame-pointer -Wall -Wextra -Werror \
         -fsanitize=address,undefined -fno-sanitize-recover=all -shared-libasan \

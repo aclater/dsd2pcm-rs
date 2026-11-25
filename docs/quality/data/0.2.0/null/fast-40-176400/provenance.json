@@ -1,0 +1,81 @@
+{
+ "source": {
+  "name": "multitone.dsf",
+  "format": "DSF",
+  "dsd_rate": 2822400,
+  "channels": 1,
+  "seconds": 15.86077097505669,
+  "sha256": "100d1ba2cb46d98374ee5b8591b995712d12cd21c7d9370d50a1d68da3c030fc"
+ },
+ "devices": [
+  {
+   "describe": {
+    "name": "old fast 40 176400",
+    "adapter": "cli",
+    "command": "target/quality/old/bin/dsd2pcm {input} {output} --filter default --cutoff 40 --rate 176400 --single-thread",
+    "shell": false,
+    "input_ext": "dsf",
+    "gain_db": 0.0
+   },
+   "info": {
+    "output_sha256": "525d98e511c7c8a85b5f73feae98bc315dafada746f8c1ced09272b7e4cb585a",
+    "output_format": {
+     "container": "wav",
+     "kind": "int",
+     "bits": 24,
+     "rate": 176400,
+     "channels": 1
+    }
+   },
+   "rate": 176400,
+   "channels": 1,
+   "samples": 2797840
+  },
+  {
+   "describe": {
+    "name": "new fast 40 176400",
+    "adapter": "cli",
+    "command": "target/quality/new/bin/dsd2pcm {input} {output} --filter fast --cutoff 40 --rate 176400 --single-thread",
+    "shell": false,
+    "input_ext": "dsf",
+    "gain_db": 0.0
+   },
+   "info": {
+    "output_sha256": "525d98e511c7c8a85b5f73feae98bc315dafada746f8c1ced09272b7e4cb585a",
+    "output_format": {
+     "container": "wav",
+     "kind": "int",
+     "bits": 24,
+     "rate": 176400,
+     "channels": 1
+    }
+   },
+   "rate": 176400,
+   "channels": 1,
+   "samples": 2797840
+  }
+ ],
+ "options": {
+  "trim_start": 0.5,
+  "trim_end": 0.5,
+  "start": 0.0,
+  "duration": null,
+  "rate": null,
+  "max_delay": 0.5,
+  "polarity": "auto",
+  "gain": "match",
+  "channels": null,
+  "diff_wav": false,
+  "diff_gain_db": 0.0,
+  "band_hz": 20000.0
+ },
+ "command": "dsd-measure null --suite suites/dsd2pcm.toml --source target/quality/signals/multitone.dsf --device old fast 40 176400 --device new fast 40 176400 -o target/quality/run1/null/fast-40-176400",
+ "versions": {
+  "dsd_measure": "0.1.2",
+  "reference_chain": "2",
+  "python": "3.15.2",
+  "numpy": "2.5.5",
+  "scipy": "1.18.1",
+  "matplotlib": "3.11.2"
+ }
+}

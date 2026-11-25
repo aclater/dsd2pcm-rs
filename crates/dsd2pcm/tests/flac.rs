@@ -159,7 +159,7 @@ fn unknown_length_without_frames_is_an_error() {
     f.truncate(frames_at(&f));
     let e = FlacReader::new(Cursor::new(f)).unwrap_err();
     assert!(
-        matches!(e, Error::Format(ref m) if m.contains("no audio frames")),
+        matches!(e, Error::Format(ref m) if m.message().contains("no audio frames")),
         "{e}"
     );
 }
@@ -177,15 +177,35 @@ fn short_stream_is_an_error() {
     let mut r = FlacReader::new(Cursor::new(g)).unwrap();
     let e = read_all(&mut r, 1 << 20).unwrap_err();
     assert!(
-        matches!(e, Error::Format(ref m) if m.contains("ended after 4100 of 5000")),
+        matches!(e, Error::Format(ref m) if m.message().contains("ended after 4100 of 5000")),
         "{e}"
     );
-    // Declared shorter: the rest is ignored.
+    // Declared shorter than the stream, inside a block (2000), at a block boundary
+    // (2304 = 2 x 1152) or at one frame: every frame of the stream is delivered, as the
+    // reference decoder does; `declared_frames` keeps STREAMINFO's count and
+    // `info().frames` is the count delivered once the stream has ended.
+    for total in [2000u64, 2304, 1] {
+        let mut g = f.clone();
+        set_total(&mut g, total);
+        let mut r = FlacReader::new(Cursor::new(g)).unwrap();
+        assert_eq!((r.info().frames, r.declared_frames()), (total, total));
+        let got = read_all(&mut r, 999).unwrap();
+        assert_eq!(got, expected(16, 2, 4100), "{total}");
+        assert_eq!((r.info().frames, r.declared_frames()), (4100, total));
+        let mut out = vec![Vec::new(), Vec::new()];
+        assert_eq!(r.read_frames(999, &mut out).unwrap(), 0);
+    }
+    // ... and the same with a trailing ID3v1 tag, which is not audio.
     let mut g = f.clone();
     set_total(&mut g, 2000);
+    g.extend_from_slice(b"TAG");
+    g.resize(g.len() + 125, b' ');
     let mut r = FlacReader::new(Cursor::new(g)).unwrap();
-    let got = read_all(&mut r, 999).unwrap();
-    assert_eq!(got[0], expected(16, 2, 2000)[0]);
+    assert_eq!(read_all(&mut r, 3000).unwrap(), expected(16, 2, 4100));
+    // A whole file declares what it holds.
+    let mut r = FlacReader::new(Cursor::new(f.clone())).unwrap();
+    read_all(&mut r, 3000).unwrap();
+    assert_eq!((r.info().frames, r.declared_frames()), (4100, 4100));
     // Truncated inside a frame.
     let mut r = FlacReader::new(Cursor::new(f[..f.len() - 100].to_vec())).unwrap();
     assert!(matches!(read_all(&mut r, 1 << 20), Err(Error::Format(_))));
@@ -200,7 +220,7 @@ fn rejects_unsupported_streams() {
     f[SI + 12] = (f[SI + 12] & 0xF1) | (6 << 1);
     let e = FlacReader::new(Cursor::new(f)).unwrap_err();
     assert!(
-        matches!(e, Error::Format(ref m) if m.contains("channel count 7")),
+        matches!(e, Error::Format(ref m) if m.message().contains("channel count 7")),
         "{e}"
     );
     // A frame with a channel count other than STREAMINFO's.
@@ -218,7 +238,7 @@ fn rejects_unsupported_streams() {
     assert_eq!(r.bits_per_sample(), 16);
     let e = read_all(&mut r, 100).unwrap_err();
     assert!(
-        matches!(e, Error::Format(ref m) if m.contains("bit depth")),
+        matches!(e, Error::Format(ref m) if m.message().contains("bit depth")),
         "{e}"
     );
 }
@@ -390,6 +410,12 @@ fn trailing_id3v1_tag() {
         assert_eq!(r.info().frames, 4100);
         assert_eq!(read_all(&mut r, 3000).unwrap(), expected(16, 2, 4100));
     }
+    // With the length declared, trailing bytes that do not decode as a frame are not audio
+    // and are ignored.
+    let mut f = fixture("s16_2ch_44100.flac");
+    f.extend_from_slice(&[0x55; 128]);
+    let mut r = FlacReader::new(Cursor::new(f)).unwrap();
+    assert_eq!(read_all(&mut r, 3000).unwrap(), expected(16, 2, 4100));
     // Other trailing junk with an unknown length is still an error.
     let mut f = fixture("s16_2ch_44100.flac");
     set_total(&mut f, 0);
@@ -398,4 +424,108 @@ fn trailing_id3v1_tag() {
         FlacReader::new(Cursor::new(f)),
         Err(Error::Format(_))
     ));
+}
+
+/// `f` with its Vorbis comment blocks turned into padding.
+fn without_comments(f: &[u8]) -> Vec<u8> {
+    let mut f = f.to_vec();
+    let mut at = 4;
+    loop {
+        let (last, kind) = (f[at] & 0x80, f[at] & 0x7F);
+        let len = u32::from_be_bytes([0, f[at + 1], f[at + 2], f[at + 3]]) as usize;
+        if kind == 4 {
+            f[at] = last | 1;
+        }
+        if last != 0 {
+            return f;
+        }
+        at += 4 + len;
+    }
+}
+
+/// `f` with a Vorbis comment block of `comments` inserted after STREAMINFO.
+fn with_comments(f: &[u8], comments: &[&[u8]], count: Option<u32>) -> Vec<u8> {
+    let mut body = Vec::new();
+    let vendor = b"reference libFLAC 1.4.3 20230623";
+    body.extend((vendor.len() as u32).to_le_bytes());
+    body.extend(vendor);
+    body.extend(count.unwrap_or(comments.len() as u32).to_le_bytes());
+    for c in comments {
+        body.extend((c.len() as u32).to_le_bytes());
+        body.extend(*c);
+    }
+    // STREAMINFO's header is at 4; the new block takes its "last" flag.
+    let last = f[4] & 0x80;
+    let mut out = f[..42].to_vec();
+    out[4] &= 0x7F;
+    out.push(last | 4);
+    out.extend(&(body.len() as u32).to_be_bytes()[1..]);
+    out.extend(body);
+    out.extend(&f[42..]);
+    out
+}
+
+/// The `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` Vorbis comment, as the reference encoder writes
+/// it, gives the channel mask; a malformed comment block is ignored, as before.
+#[test]
+fn channel_mask_from_vorbis_comment() {
+    let f = fixture("s16_2ch_44100.flac");
+    let mask = |f: Vec<u8>| -> Option<u32> {
+        let r = FlacReader::new(Cursor::new(f)).unwrap();
+        let m = r.channel_mask();
+        assert_eq!(PcmRead::channel_mask(&r), m);
+        m
+    };
+    // The reference encoder's own comment (make.sh: from a WAVE_FORMAT_EXTENSIBLE input).
+    assert_eq!(mask(f.clone()), Some(0x03));
+    let six = FlacReader::new(Cursor::new(fixture("s24_6ch_96000.flac"))).unwrap();
+    assert_eq!(six.channel_mask(), Some(0x3F));
+    let mono = FlacReader::new(Cursor::new(fixture("s8_1ch_8000.flac"))).unwrap();
+    assert_eq!(mono.channel_mask(), Some(0x01));
+    // Only the first Vorbis comment block counts: one without the field before the
+    // encoder's block gives none.
+    let first = with_comments(&f, &[&b"TITLE=first"[..]], None);
+    assert_eq!(mask(first), None);
+    // Without it: none.
+    let f = without_comments(&f);
+    assert_eq!(mask(f.clone()), None);
+    let long = [b'x'; 200];
+    for (comments, want) in [
+        (
+            &[&b"WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x0003"[..]][..],
+            Some(3),
+        ),
+        (
+            &[
+                &b"TITLE=t"[..],
+                &long[..],
+                &b"waveformatextensible_channel_mask=0X30"[..],
+            ][..],
+            Some(0x30),
+        ),
+        (
+            &[&b"WAVEFORMATEXTENSIBLE_CHANNEL_MASK=51"[..]][..],
+            Some(51),
+        ),
+        (&[&b"WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0xZZ"[..]][..], None),
+        (&[&b"TITLE=no mask"[..]][..], None),
+        (&[][..], None),
+    ] {
+        assert_eq!(
+            mask(with_comments(&f, comments, None)),
+            want,
+            "{comments:?}"
+        );
+    }
+    // The samples are unaffected by the comment block.
+    let c = &[&b"WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x3"[..]][..];
+    let mut r = FlacReader::new(Cursor::new(with_comments(&f, c, None))).unwrap();
+    assert_eq!(read_all(&mut r, 1000).unwrap(), expected(16, 2, 4100));
+    // A count past the block, a comment length past the block: ignored.
+    assert_eq!(mask(with_comments(&f, c, Some(u32::MAX))), Some(3));
+    assert_eq!(mask(with_comments(&f, &[][..], Some(u32::MAX))), None);
+    let mut bad = with_comments(&f, c, None);
+    let at = 42 + 4 + 4 + 32 + 4;
+    bad[at..at + 4].copy_from_slice(&1000u32.to_le_bytes());
+    assert_eq!(mask(bad), None);
 }

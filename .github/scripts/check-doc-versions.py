@@ -12,7 +12,8 @@ The version is `[workspace.package] version` in Cargo.toml. It must also be:
   tags (`vX.Y.Z`), archive names (`dsd2pcm-X.Y.Z-...`, `libdsd2pcm-X.Y.Z-...`), the C
   example's output (`dsd2pcm X.Y.Z:`), and in docs/release.md the example versions
   (`vX.Y.Z`, `"X.Y.Z"`, `=X.Y.Z`);
-- the supported series in SECURITY.md (`X.Y.x`).
+- the supported series in SECURITY.md (`X.Y.x`);
+- the `version:` of CITATION.cff.
 
 Between a version bump and its tag the docs already name the new version, whose release
 does not exist yet: this check only compares text, and the Quick start check
@@ -108,6 +109,14 @@ def main() -> int:
     for rel in MUST_MATCH:
         if not found.get(rel):
             errors.append(f"{rel}: no release reference found; update the patterns in {Path(__file__).name}")
+
+    citation = root / "CITATION.cff"
+    if citation.exists():
+        m = re.search(r'^version:\s*"?([^"\s]+)"?\s*$', citation.read_text(encoding="utf-8"), re.M)
+        if m is None:
+            errors.append("CITATION.cff: no version")
+        elif m.group(1) != version:
+            errors.append(f"CITATION.cff: version {m.group(1)}, not {version}")
 
     security = root / "SECURITY.md"
     if security.exists():

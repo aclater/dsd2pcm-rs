@@ -6,7 +6,9 @@
 //! sample in the most significant bit. Integers are big-endian, chunk sizes 64-bit, and
 //! chunks are padded to an even length. DST-compressed files are rejected.
 
-use crate::error::{format_err, unsupported, Result};
+use crate::error::{
+    format_err, unsupported, ArgumentKind, FormatErrorKind, Result, UnsupportedKind,
+};
 use crate::io::{
     check_dsd_rate, read_exact_arr, seek_to, skip, DsdInfo, DsdRead, DsdWrite, MAX_CHUNKS,
 };
@@ -18,11 +20,48 @@ fn be_u64(b: &[u8; 12]) -> u64 {
     u64::from_be_bytes(a)
 }
 
+/// The `WAVE_FORMAT_EXTENSIBLE` speaker bit of a DSDIFF channel ID (`CHNL` chunk):
+/// `SLFT`/`MLFT` front left, `SRGT`/`MRGT` front right, `C` centre, `LFE`, `LS` and `RS`
+/// back (surround) left and right. `None` for any other ID (such as `C000`).
+fn speaker_bit(id: &[u8]) -> Option<u32> {
+    Some(match id {
+        b"SLFT" | b"MLFT" => 0x01,
+        b"SRGT" | b"MRGT" => 0x02,
+        b"C   " => 0x04,
+        b"LFE " => 0x08,
+        b"LS  " => 0x10,
+        b"RS  " => 0x20,
+        _ => return None,
+    })
+}
+
+/// The channel mask of a list of DSDIFF channel IDs: every ID a speaker, each speaker once,
+/// in the order of the mask's bits (the order `WAVE_FORMAT_EXTENSIBLE` needs); `None`
+/// otherwise.
+fn channel_mask_of_ids(ids: &[u8]) -> Option<u32> {
+    let mut mask = 0u32;
+    for id in ids.chunks_exact(4) {
+        let bit = speaker_bit(id)?;
+        if bit <= mask {
+            return None; // repeated, or out of order
+        }
+        mask |= bit;
+    }
+    Some(mask)
+}
+
 /// DFF reader over any seekable byte source.
+///
+/// The `DSD ` chunk holds one byte per channel in turn. A chunk whose length is not a
+/// multiple of the channel count ends in a partial turn, which a conforming writer never
+/// leaves: those last bytes (fewer than the channel count, so under 8 samples of some
+/// channels) are not read, and every channel gets `length / channels` bytes. The file is
+/// otherwise read as usual, since its audio is intact.
 #[derive(Debug)]
 pub struct DffReader<R> {
     r: R,
     info: DsdInfo,
+    channel_mask: Option<u32>,
     remaining: u64,
     buf: Vec<u8>,
 }
@@ -34,25 +73,38 @@ impl<R: Read + Seek> DffReader<R> {
         r.seek(SeekFrom::Start(0))?;
         let hdr: [u8; 12] = read_exact_arr(&mut r)?;
         if &hdr[0..4] != b"FRM8" {
-            return format_err("not a DSDIFF file (no 'FRM8' chunk)");
+            return format_err(
+                FormatErrorKind::NotRecognised,
+                "not a DSDIFF file (no 'FRM8' chunk)",
+            );
         }
         let form_type: [u8; 4] = read_exact_arr(&mut r)?;
         if &form_type != b"DSD " {
-            return format_err("DSDIFF form type is not 'DSD '");
+            return format_err(
+                FormatErrorKind::NotRecognised,
+                "DSDIFF form type is not 'DSD '",
+            );
         }
         let form_end = 12u64.saturating_add(be_u64(&hdr)).min(file_len);
         let mut pos = 16u64;
         let mut rate = None;
         let mut channels = None;
+        let mut channel_mask = None;
         let mut have_cmpr = false;
         let mut chunks = 0;
         loop {
             if chunks == MAX_CHUNKS {
-                return format_err("DSDIFF file has too many chunks");
+                return format_err(
+                    FormatErrorKind::LimitExceeded,
+                    "DSDIFF file has too many chunks",
+                );
             }
             chunks += 1;
             if pos + 12 > form_end {
-                return format_err("DSDIFF file has no 'DSD ' audio chunk");
+                return format_err(
+                    FormatErrorKind::Malformed,
+                    "DSDIFF file has no 'DSD ' audio chunk",
+                );
             }
             let ck: [u8; 12] = read_exact_arr(&mut r)?;
             let size = be_u64(&ck);
@@ -62,20 +114,30 @@ impl<R: Read + Seek> DffReader<R> {
             match id {
                 b"DSD " => {
                     let Some(end) = end else {
-                        return format_err("DSDIFF 'DSD ' chunk runs past the end of the file");
+                        return format_err(
+                            FormatErrorKind::Truncated,
+                            "DSDIFF 'DSD ' chunk runs past the end of the file",
+                        );
                     };
                     let (Some(rate), Some(ch)) = (rate, channels) else {
                         return format_err(
+                            FormatErrorKind::Malformed,
                             "DSDIFF 'DSD ' chunk before the sample rate and channels",
                         );
                     };
                     if !have_cmpr {
-                        return format_err("DSDIFF file has no 'CMPR' chunk");
+                        return format_err(
+                            FormatErrorKind::Malformed,
+                            "DSDIFF file has no 'CMPR' chunk",
+                        );
                     }
                     let len = end - body;
                     let per_ch = len / u64::from(ch);
                     let Some(samples) = per_ch.checked_mul(8) else {
-                        return format_err("DSDIFF 'DSD ' chunk is too large");
+                        return format_err(
+                            FormatErrorKind::LimitExceeded,
+                            "DSDIFF 'DSD ' chunk is too large",
+                        );
                     };
                     return Ok(DffReader {
                         r,
@@ -84,36 +146,57 @@ impl<R: Read + Seek> DffReader<R> {
                             sample_rate: rate,
                             samples,
                         },
+                        channel_mask,
                         remaining: per_ch,
                         buf: Vec::new(),
                     });
                 }
-                b"DST " => return unsupported("DST-compressed DSDIFF; decompress it first"),
+                b"DST " => {
+                    return unsupported(
+                        UnsupportedKind::Compression,
+                        "DST-compressed DSDIFF; decompress it first",
+                    )
+                }
                 b"PROP" => {
                     let Some(end) = end else {
-                        return format_err("DSDIFF 'PROP' chunk runs past the end of the file");
+                        return format_err(
+                            FormatErrorKind::Truncated,
+                            "DSDIFF 'PROP' chunk runs past the end of the file",
+                        );
                     };
                     let pt: [u8; 4] = read_exact_arr(&mut r)?;
                     if &pt != b"SND " {
-                        return format_err("DSDIFF 'PROP' chunk is not of type 'SND '");
+                        return format_err(
+                            FormatErrorKind::Malformed,
+                            "DSDIFF 'PROP' chunk is not of type 'SND '",
+                        );
                     }
                     let mut p = body + 4;
                     let mut subs = 0;
                     while p + 12 <= end {
                         if subs == MAX_CHUNKS {
-                            return format_err("DSDIFF 'PROP' chunk has too many property chunks");
+                            return format_err(
+                                FormatErrorKind::LimitExceeded,
+                                "DSDIFF 'PROP' chunk has too many property chunks",
+                            );
                         }
                         subs += 1;
                         let sc: [u8; 12] = read_exact_arr(&mut r)?;
                         let ssize = be_u64(&sc);
                         let sbody = p + 12;
                         let Some(send) = sbody.checked_add(ssize).filter(|&e| e <= end) else {
-                            return format_err("DSDIFF property chunk runs past its 'PROP' chunk");
+                            return format_err(
+                                FormatErrorKind::Truncated,
+                                "DSDIFF property chunk runs past its 'PROP' chunk",
+                            );
                         };
                         match &sc[0..4] {
                             b"FS  " => {
                                 if ssize < 4 {
-                                    return format_err("DSDIFF 'FS  ' chunk is too small");
+                                    return format_err(
+                                        FormatErrorKind::Malformed,
+                                        "DSDIFF 'FS  ' chunk is too small",
+                                    );
                                 }
                                 let v: [u8; 4] = read_exact_arr(&mut r)?;
                                 let fs = u32::from_be_bytes(v);
@@ -123,34 +206,54 @@ impl<R: Read + Seek> DffReader<R> {
                             }
                             b"CHNL" => {
                                 if ssize < 2 {
-                                    return format_err("DSDIFF 'CHNL' chunk is too small");
+                                    return format_err(
+                                        FormatErrorKind::Malformed,
+                                        "DSDIFF 'CHNL' chunk is too small",
+                                    );
                                 }
                                 let v: [u8; 2] = read_exact_arr(&mut r)?;
                                 let n = u16::from_be_bytes(v);
                                 if !(1..=6).contains(&n) {
-                                    return format_err(format!(
-                                        "DSDIFF channel count {n} is not 1..6"
-                                    ));
+                                    return format_err(
+                                        FormatErrorKind::Malformed,
+                                        format!("DSDIFF channel count {n} is not 1..6"),
+                                    );
                                 }
                                 if ssize < 2 + 4 * u64::from(n) {
-                                    return format_err("DSDIFF 'CHNL' chunk is too small");
+                                    return format_err(
+                                        FormatErrorKind::Malformed,
+                                        "DSDIFF 'CHNL' chunk is too small",
+                                    );
                                 }
                                 channels = Some(n);
-                                skip(&mut r, ssize - 2)?;
+                                let mut ids = [0u8; 4 * 6];
+                                let ids = &mut ids[..4 * usize::from(n)];
+                                r.read_exact(ids)?;
+                                channel_mask = channel_mask_of_ids(ids);
+                                skip(&mut r, ssize - 2 - 4 * u64::from(n))?;
                             }
                             b"CMPR" => {
                                 if ssize < 4 {
-                                    return format_err("DSDIFF 'CMPR' chunk is too small");
+                                    return format_err(
+                                        FormatErrorKind::Malformed,
+                                        "DSDIFF 'CMPR' chunk is too small",
+                                    );
                                 }
                                 let v: [u8; 4] = read_exact_arr(&mut r)?;
                                 match &v {
                                     b"DSD " => {}
                                     b"DST " => {
                                         return unsupported(
+                                            UnsupportedKind::Compression,
                                             "DST-compressed DSDIFF; decompress it first",
                                         )
                                     }
-                                    _ => return unsupported("DSDIFF compression type"),
+                                    _ => {
+                                        return unsupported(
+                                            UnsupportedKind::Compression,
+                                            "DSDIFF compression type",
+                                        )
+                                    }
                                 }
                                 have_cmpr = true;
                                 skip(&mut r, ssize - 4)?;
@@ -165,18 +268,27 @@ impl<R: Read + Seek> DffReader<R> {
                 }
                 b"FVER" => {
                     if size < 4 || end.is_none() {
-                        return format_err("DSDIFF 'FVER' chunk is invalid");
+                        return format_err(
+                            FormatErrorKind::Malformed,
+                            "DSDIFF 'FVER' chunk is invalid",
+                        );
                     }
                     let v: [u8; 4] = read_exact_arr(&mut r)?;
                     if v[0] != 1 {
-                        return unsupported(format!("DSDIFF version {}.{}", v[0], v[1]));
+                        return unsupported(
+                            UnsupportedKind::Version,
+                            format!("DSDIFF version {}.{}", v[0], v[1]),
+                        );
                     }
                     skip(&mut r, size - 4)?;
                     pos = body + size;
                 }
                 _ => {
                     let Some(end) = end else {
-                        return format_err("DSDIFF chunk runs past the end of the file");
+                        return format_err(
+                            FormatErrorKind::Truncated,
+                            "DSDIFF chunk runs past the end of the file",
+                        );
                     };
                     seek_to(&mut r, end)?;
                     pos = end;
@@ -198,8 +310,9 @@ impl<R: Read + Seek> DsdRead for DffReader<R> {
     fn read_bytes(&mut self, max_bytes: usize, out: &mut [Vec<u8>]) -> Result<usize> {
         let ch = usize::from(self.info.channels);
         if out.len() != ch {
-            return Err(crate::Error::InvalidArgument(
-                "output channel count mismatch".into(),
+            return Err(crate::Error::invalid(
+                ArgumentKind::Buffer,
+                "output channel count mismatch",
             ));
         }
         let n = (max_bytes.clamp(1, crate::io::MAX_CHUNK) as u64).min(self.remaining) as usize;
@@ -213,6 +326,13 @@ impl<R: Read + Seek> DsdRead for DffReader<R> {
         }
         self.remaining -= n as u64;
         Ok(n)
+    }
+
+    /// The mask of the `CHNL` chunk's channel IDs when each is a speaker (`SLFT`, `SRGT`,
+    /// `MLFT`, `MRGT`, `C`, `LFE`, `LS`, `RS`), none twice, in the mask's bit order; `None`
+    /// otherwise (for example numbered IDs such as `C000`).
+    fn channel_mask(&self) -> Option<u32> {
+        self.channel_mask
     }
 }
 
@@ -230,9 +350,10 @@ impl<W: Write + Seek> DffWriter<W> {
     /// Starts a DFF file with `channels` channels (1..=6) at `rate` Hz.
     pub fn new(mut w: W, channels: u16, rate: u32) -> Result<Self> {
         if !(1..=6).contains(&channels) {
-            return Err(crate::Error::InvalidArgument(format!(
-                "{channels} channels: 1 to 6 are supported"
-            )));
+            return Err(crate::Error::invalid(
+                ArgumentKind::Channels,
+                format!("{channels} channels: 1 to 6 are supported"),
+            ));
         }
         check_dsd_rate(rate)?;
         let ids: &[&[u8; 4]] = match channels {
@@ -297,10 +418,15 @@ impl<W: Write + Seek> DffWriter<W> {
     }
 }
 
+impl<W: Write + Seek> crate::io::sealed::Sealed for DffWriter<W> {}
+
 impl<W: Write + Seek> DsdWrite for DffWriter<W> {
     fn write_bytes(&mut self, data: &[Vec<u8>]) -> Result<()> {
         if data.len() != self.channels || data.iter().any(|d| d.len() != data[0].len()) {
-            return Err(crate::Error::InvalidArgument("unequal channel data".into()));
+            return Err(crate::Error::invalid(
+                ArgumentKind::Buffer,
+                "unequal channel data",
+            ));
         }
         let n = data[0].len();
         let mut out = Vec::with_capacity(n * self.channels);

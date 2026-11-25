@@ -49,7 +49,7 @@ fi
 on_crates_io() {
     local code
     code=$(curl -sS -o /dev/null -w '%{http_code}' --proto =https --tlsv1.2 \
-        -A "dsd2pcm-rs release workflow (https://github.com/aclater/dsd2pcm-rs)" \
+        -A "dsd2pcm-rs release workflow (https://github.com/dsd-toolbox/dsd2pcm-rs)" \
         "https://crates.io/api/v1/crates/$1/$2")
     case "$code" in
         200) return 0 ;;

@@ -187,12 +187,14 @@ where
     O: IntoIterator<Item = &'a mut f64>,
     O::IntoIter: ExactSizeIterator,
 {
-    // S1's 8-byte window and the wide filter's 12-byte one, with a constant table count, so
-    // that the loops unroll.
+    // S1's 8-byte window and the wide filter's 12-byte one, and the precise filter's 12 and
+    // 16 bytes, with a constant table count, so that the loops unroll.
     const W8: usize = s1_tables(8, S1Layout::Wide);
     const W12: usize = s1_tables(12, S1Layout::Wide);
+    const W16: usize = s1_tables(16, S1Layout::Wide);
     const B8: usize = s1_tables(8, S1Layout::Byte);
     const B12: usize = s1_tables(12, S1Layout::Byte);
+    const B16: usize = s1_tables(16, S1Layout::Byte);
     match (&lut.tables, lut.bytes) {
         (S1Tables::Wide(t), 8) if t.len() == W8 => {
             s1_n::<u64, WIDE_BITS, { 1 << WIDE_BITS }, 8, W8, _>(
@@ -212,11 +214,23 @@ where
                 out,
             )
         }
+        (S1Tables::Wide(t), 16) if t.len() == W16 => {
+            s1_n::<u64, WIDE_BITS, { 1 << WIDE_BITS }, 16, W16, _>(
+                t[..].try_into().unwrap(),
+                bytes,
+                start,
+                stride,
+                out,
+            )
+        }
         (S1Tables::Byte(t), 8) if t.len() == B8 => {
             s1_n::<u32, 8, 256, 8, B8, _>(t[..].try_into().unwrap(), bytes, start, stride, out)
         }
         (S1Tables::Byte(t), 12) if t.len() == B12 => {
             s1_n::<u32, 8, 256, 12, B12, _>(t[..].try_into().unwrap(), bytes, start, stride, out)
+        }
+        (S1Tables::Byte(t), 16) if t.len() == B16 => {
+            s1_n::<u32, 8, 256, 16, B16, _>(t[..].try_into().unwrap(), bytes, start, stride, out)
         }
         _ => s1_any(lut, bytes, start, stride, out),
     }
@@ -353,16 +367,11 @@ fn add_pairs<const L: usize, M: Mac>(
     }
 }
 
-/// Runs `f` on each block of `L` outputs and stores the rounded, rescaled sums. `out.len()`
-/// is a multiple of `L`.
+/// Stores a block's sums, rescaled and rounded.
 #[inline(always)]
-fn blocks<const L: usize>(out: &mut [f64], scale: f64, f: impl Fn(usize, &mut [f64; L])) {
-    for (bi, o) in out.chunks_exact_mut(L).enumerate() {
-        let mut acc = [0.0f64; L];
-        f(bi * L, &mut acc);
-        for (d, a) in o.iter_mut().zip(acc) {
-            *d = round_even(a * scale);
-        }
+fn store<const L: usize>(acc: &[f64; L], scale: f64, out: &mut [f64]) {
+    for (d, &a) in out.iter_mut().zip(acc) {
+        *d = round_even(a * scale);
     }
 }
 
@@ -410,12 +419,15 @@ impl Sym {
 pub(super) fn fir1<const L: usize, M: Mac>(s: &Sym, x: &[f64], out: &mut [f64]) {
     let m = s.half_len();
     let (h0, h) = (s.full[0], &s.full[1..]);
-    blocks(out, s.scale, |i, acc| {
+    for (bi, o) in out.chunks_exact_mut(L).enumerate() {
+        let i = bi * L;
+        let mut acc = [0.0f64; L];
         for (l, a) in acc.iter_mut().enumerate() {
             *a = h0 * x[i + m + l];
         }
-        add_pairs::<L, M>(acc, h, x, i + m + 1, i + m - 1);
-    });
+        add_pairs::<L, M>(&mut acc, h, x, i + m + 1, i + m - 1);
+        store(&acc, s.scale, o);
+    }
 }
 
 /// Dec2: `out[i]` centred on `xe[i + e]` (`e` = the even taps after the centre), with the
@@ -424,15 +436,18 @@ pub(super) fn fir1<const L: usize, M: Mac>(s: &Sym, x: &[f64], out: &mut [f64]) 
 pub(super) fn dec2<const L: usize, M: Mac>(s: &Sym, xe: &[f64], xo: &[f64], out: &mut [f64]) {
     let (e, o) = (s.even.len() - 1, s.odd.len());
     let (h0, he) = (s.even[0], &s.even[1..]);
-    blocks(out, s.scale, |i, acc| {
+    for (bi, d) in out.chunks_exact_mut(L).enumerate() {
+        let i = bi * L;
+        let mut acc = [0.0f64; L];
         for (l, a) in acc.iter_mut().enumerate() {
             *a = h0 * xe[i + e + l];
         }
         if e > 0 {
-            add_pairs::<L, M>(acc, he, xe, i + e + 1, i + e - 1);
+            add_pairs::<L, M>(&mut acc, he, xe, i + e + 1, i + e - 1);
         }
-        add_pairs::<L, M>(acc, &s.odd, xo, i + o, i + o - 1);
-    });
+        add_pairs::<L, M>(&mut acc, &s.odd, xo, i + o, i + o - 1);
+        store(&acc, s.scale, d);
+    }
 }
 
 /// The odd outputs of Interp2: `out[i]` between `w[i + o]` and `w[i + o + 1]`. The
@@ -440,9 +455,12 @@ pub(super) fn dec2<const L: usize, M: Mac>(s: &Sym, xe: &[f64], xo: &[f64], out:
 #[inline(always)]
 pub(super) fn interp2_odd<const L: usize, M: Mac>(s: &Sym, w: &[f64], out: &mut [f64]) {
     let o = s.odd.len();
-    blocks(out, s.scale * 2.0, |i, acc| {
-        add_pairs::<L, M>(acc, &s.odd, w, i + o + 1, i + o)
-    });
+    for (bi, d) in out.chunks_exact_mut(L).enumerate() {
+        let i = bi * L;
+        let mut acc = [0.0f64; L];
+        add_pairs::<L, M>(&mut acc, &s.odd, w, i + o + 1, i + o);
+        store(&acc, s.scale * 2.0, d);
+    }
 }
 
 /// Rounds `v` (on the 2^26 grid) times `gain` to 24 bits, clamped, into `q`; returns the
