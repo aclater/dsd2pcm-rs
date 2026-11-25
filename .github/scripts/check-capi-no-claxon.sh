@@ -20,13 +20,23 @@
 # objects with it) in place of the object's symbol table, and fails on bitcode from a newer
 # LLVM than its own: Xcode's nm on Rust's compiler_builtins members gives "Unknown attribute
 # kind". --no-llvm-bc makes it read the symbol table, as the linker does. GNU nm has no such
-# option and never reads bitcode. Tests: check-capi-no-claxon-test.sh.
+# option and never reads bitcode.
+#
+# nm and ar read a copy of each library under a fixed relative name, from its directory: nm
+# -A prefixes each line with the path as nm got it, and MSYS2 hands a native (MinGW) program
+# an absolute path rewritten to Windows form (/d/a/x.a becomes D:/a/x.a), which would then
+# not match the path given here. A relative name is passed unchanged, and holds no colon.
+# Tests: check-capi-no-claxon-test.sh.
 set -euo pipefail
 # Pipelines end in `grep PATTERN >/dev/null`, not `grep -q`: grep -q stops at the first
 # match, and the writer's SIGPIPE would then fail the pipeline under pipefail.
 
 nm=${NM:-nm}
 [[ $# -gt 0 ]] || { echo "usage: $0 LIBRARY..." >&2; exit 2; }
+# nm runs from the work directory: a relative NM is made absolute first.
+if [[ "$nm" == */* ]]; then
+    nm=$(cd "$(dirname "$nm")" && pwd)/$(basename "$nm")
+fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 opts=(-A)
@@ -37,8 +47,9 @@ status=0
 fail() { echo "::error::$*"; status=2; }
 for lib in "$@"; do
     [[ -f "$lib" ]] || { fail "$lib: no such file"; continue; }
+    cp "$lib" "$work/library" || { fail "cannot copy $lib"; continue; }
     rc=0
-    "$nm" "${opts[@]}" "$lib" > "$work/syms" 2> "$work/err" || rc=$?
+    (cd "$work" && "$nm" "${opts[@]}" library) > "$work/syms" 2> "$work/err" || rc=$?
     # The one message nm may give: a member without symbols (GNU: "nm: MEMBER: no symbols";
     # LLVM: "LIB:MEMBER: no symbols"). Anything else means a part of the library went unread.
     grep -v ': no symbols$' "$work/err" > "$work/other" || true
@@ -58,10 +69,10 @@ for lib in "$@"; do
     # symbols (GNU nm on Rust's empty crates): such a member is read again on its own and
     # counts as read when nm, without an error, lists no symbol in it.
     if [[ "$(head -c 7 "$lib" | tr -d '\0')" == '!<arch>' ]]; then
-        ar t "$lib" > "$work/members" || { fail "ar cannot list $lib"; continue; }
+        (cd "$work" && ar t library) > "$work/members" || { fail "ar cannot list $lib"; continue; }
         grep -Ev '^(__\.SYMDEF.*|/|//|/SYM64/)$' "$work/members" | sort -u > "$work/want" || true
         {
-            awk -v p="$lib:" 'index($0, p) == 1 { m = substr($0, length(p) + 1); sub(/:.*/, "", m); print m }' "$work/syms"
+            awk -v p="library:" 'index($0, p) == 1 { m = substr($0, length(p) + 1); sub(/:.*/, "", m); print m }' "$work/syms"
             sed -n 's/: no symbols$//p' "$work/err" | sed 's/.*: *//; s/.*://'
         } | sort -u > "$work/seen"
         unread=()
@@ -69,7 +80,7 @@ for lib in "$@"; do
             # ar p of a name that two members share gives both, which nm then cannot read: an
             # error, so the check fails closed.
             rc=0
-            { ar p "$lib" "$m" > "$work/member" && "$nm" "${opts[@]}" "$work/member" > "$work/msyms" 2> "$work/merr"; } || rc=$?
+            (cd "$work" && ar p library "$m" > member && "$nm" "${opts[@]}" member > msyms 2> merr) || rc=$?
             if [[ $rc -ne 0 || -s "$work/msyms" ]] || grep -v ': no symbols$' "$work/merr" > /dev/null; then
                 unread+=("$m")
             fi

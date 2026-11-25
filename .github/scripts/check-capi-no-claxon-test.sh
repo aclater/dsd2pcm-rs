@@ -100,6 +100,25 @@ cat > "$work/nm-warns" << 'EOF'
 nm "$@"
 echo "nm: warning: something went unread" >&2
 EOF
+# An nm that gets absolute paths rewritten to Windows form, as MSYS2 does for a native (MinGW)
+# program: its -A prefixes and messages then name D:/tmp/x.a where it was given /tmp/x.a.
+cat > "$work/nm-msys" << 'EOF'
+#!/bin/bash
+rc=0
+err=$(mktemp)
+out=$(nm "$@" 2> "$err") || rc=$?
+msg=$(cat "$err")
+rm -f "$err"
+for a in "$@"; do
+    if [[ "$a" == /* ]]; then
+        out=${out//"$a:"/"D:$a:"}
+        msg=${msg//"$a:"/"D:$a:"}
+    fi
+done
+[[ -z "$out" ]] || printf '%s\n' "$out"
+[[ -z "$msg" ]] || printf '%s\n' "$msg" >&2
+exit "$rc"
+EOF
 chmod +x "$work"/nm-*
 
 expect 0 "a clean archive passes (a member without symbols is not an error)" "none from claxon" "$work/libclean.a"
@@ -115,6 +134,11 @@ expect 2 "a member left out of nm's listing fails the check" "not in nm's listin
 expect 2 "an nm error exit fails the check" "cannot read" "$work/libclean.a" NM="$work/nm-fails"
 expect 2 "an nm message other than \"no symbols\" fails the check" "cannot read" "$work/libclean.a" NM="$work/nm-warns"
 expect 2 "an error outranks a planted symbol" "cannot read" "$work/libplanted.a" NM="$work/nm-fails"
+# MSYS2's rewrite of absolute paths (the Windows-gnu job: 275 of 279 members "not in nm's
+# listing" when the check matched nm's prefixes against the path it was given).
+expect 0 "an nm given Windows-form paths (MSYS2) passes a clean archive" "none from claxon" "$work/libclean.a" NM="$work/nm-msys"
+expect 1 "an nm given Windows-form paths finds a planted claxon symbol" "claxon symbols" "$work/libplanted.a" NM="$work/nm-msys"
+expect 2 "an nm given Windows-form paths still fails on a member it cannot read" "cannot read|not in nm's listing" "$work/libjunk.a" NM="$work/nm-msys"
 
 if [[ $failures -ne 0 ]]; then
     echo "::error::$failures tests of check-capi-no-claxon.sh failed"

@@ -16,7 +16,7 @@
 #   library must export the user's function and nothing of libdsd2pcm.a. A program linked
 #   against it runs.
 # - the static library holds no claxon symbols (check-capi-no-claxon.sh, after its tests,
-#   check-capi-no-claxon-test.sh, on Linux and macOS; the shared library is stripped in
+#   check-capi-no-claxon-test.sh, on Linux, macOS and Windows; the shared library is stripped in
 #   releases, so its symbol table is checked in CI instead).
 set -euo pipefail
 # Pipelines end in `grep PATTERN >/dev/null`, not `grep -q`: grep -q stops at the first
@@ -150,6 +150,6 @@ $cc -o "$work/embedded" "$work/main.c" -L"$work" -lembed "${erpath[@]}"
 "$work/embedded"
 # The claxon check's own tests first, with this platform's compiler, ar and nm, so that it
 # can pass neither on a planted claxon symbol nor on an archive nm cannot read.
-case "$os" in Linux | Darwin) CC=$cc "$(dirname "$0")/check-capi-no-claxon-test.sh" ;; esac
+CC=$cc "$(dirname "$0")/check-capi-no-claxon-test.sh"
 "$(dirname "$0")/check-capi-no-claxon.sh" "$dir/lib/libdsd2pcm.a"
 echo "C library archive: shared, static and embedded programs built and ran; no claxon code"
