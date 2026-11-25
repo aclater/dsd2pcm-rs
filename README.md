@@ -24,6 +24,7 @@ crate, a C library and a command-line tool.
 
 Every release is tested in CI on all its release platforms (nine from 0.2.0 on); the speed figures come from an
 Intel Core i9-13900H (P- and E-cores) and an AMD Ryzen 9 3950X.
+Linux aarch64 builds are tested in CI on GitHub's hosted ARM runners and under emulation; one long-running memory test does not yet pass there and is being investigated. Release testing on our own ARM hardware resumes when our ARM test machine arrives.
 
 ## Quick start
 
