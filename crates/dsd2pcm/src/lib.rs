@@ -40,7 +40,7 @@ pub use convert::{
     convert_file, convert_file_to, convert_file_with, open_input, Input, OutputOptions, PcmOptions,
     Progress, ProgressHook, Report, Threads,
 };
-pub use decimator::{Cutoff, PcmRate};
+pub use decimator::{simd_level, Cutoff, PcmRate};
 pub use error::{
     ArgumentError, ArgumentKind, Error, FormatError, FormatErrorKind, Result, UnsupportedError,
     UnsupportedKind,

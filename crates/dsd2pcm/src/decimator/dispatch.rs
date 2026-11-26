@@ -60,6 +60,16 @@ impl SimdLevel {
         self != SimdLevel::Sse2 || cfg!(any(target_arch = "x86", target_arch = "x86_64"))
     }
 
+    /// The level's name: the word `DSD2PCM_SIMD` takes for it.
+    fn name(self) -> &'static str {
+        match self {
+            SimdLevel::Generic => "generic",
+            SimdLevel::Sse2 => "sse2",
+            SimdLevel::Avx2 => "avx2",
+            SimdLevel::Avx2Fma => "avx2fma",
+        }
+    }
+
     fn parse(s: &str) -> Option<SimdLevel> {
         match s.trim().to_ascii_lowercase().as_str() {
             "generic" | "scalar" => Some(SimdLevel::Generic),
@@ -69,6 +79,15 @@ impl SimdLevel {
             _ => None,
         }
     }
+}
+
+/// The SIMD level the kernels use now, by name: `"generic"`, `"sse2"`, `"avx2"` or
+/// `"avx2fma"`, the words `DSD2PCM_SIMD` takes. It is the best level this CPU has, capped by
+/// `DSD2PCM_SIMD` if that is set to a level this target knows. Every level gives the same
+/// output bytes; the name is for logs and bug reports. Later versions may add names, so do not
+/// match on the set. (Since 0.2.1.)
+pub fn simd_level() -> &'static str {
+    Isa::current().0.name()
 }
 
 std::thread_local! {
@@ -542,5 +561,74 @@ mod pysacd_avx2 {
         clips: &mut [u64],
     ) {
         pk::quantise_kernel(chans, n0, tc0, per_frame, scale, out, clips)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NAMES: [&str; 4] = ["generic", "sse2", "avx2", "avx2fma"];
+
+    /// The level `DSD2PCM_SIMD` asks for, if it names one (an unknown value is ignored).
+    fn env_level() -> Option<SimdLevel> {
+        std::env::var("DSD2PCM_SIMD")
+            .ok()
+            .and_then(|s| SimdLevel::parse(&s))
+    }
+
+    #[test]
+    fn names_parse_back_and_are_distinct() {
+        for (l, n) in [
+            SimdLevel::Generic,
+            SimdLevel::Sse2,
+            SimdLevel::Avx2,
+            SimdLevel::Avx2Fma,
+        ]
+        .into_iter()
+        .zip(NAMES)
+        {
+            assert_eq!(l.name(), n);
+            assert_eq!(SimdLevel::parse(n), Some(l));
+        }
+    }
+
+    #[test]
+    fn simd_level_is_a_known_name_this_cpu_can_run() {
+        let name = simd_level();
+        assert!(NAMES.contains(&name), "{name}");
+        let l = SimdLevel::parse(name).unwrap();
+        assert!(SimdLevel::available().contains(&l), "{name}");
+        // The name is the level the kernels get: `Isa::current` and the name agree.
+        assert_eq!(Isa::current().level(), l);
+    }
+
+    #[test]
+    fn simd_level_follows_the_environment_cap() {
+        let best = *SimdLevel::available().last().unwrap();
+        let want = match env_level() {
+            Some(e) => Isa(best).cap(e).0,
+            None => best,
+        };
+        assert_eq!(simd_level(), want.name());
+    }
+
+    #[test]
+    fn simd_level_follows_with_simd_level_at_every_level() {
+        for l in SimdLevel::available() {
+            // The environment variable caps on top of the scope.
+            let want = match env_level() {
+                Some(e) => Isa(l).cap(e).0,
+                None => l,
+            };
+            assert_eq!(with_simd_level(l, simd_level), Some(want.name()), "{l:?}");
+        }
+        // Back to the unscoped answer afterwards.
+        let after = simd_level();
+        assert_eq!(
+            with_simd_level(SimdLevel::Generic, simd_level),
+            Some("generic")
+        );
+        assert_eq!(simd_level(), after);
     }
 }

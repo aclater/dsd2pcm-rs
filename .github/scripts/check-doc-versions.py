@@ -9,9 +9,12 @@ The version is `[workspace.package] version` in Cargo.toml. It must also be:
 - the version of the workspace crates in Cargo.lock and of `dsd2pcm` in fuzz/Cargo.lock;
 - the newest version section of CHANGELOG.md (only `## Unreleased` may come before it);
 - every release reference in README.md, SECURITY.md and docs/: release download URLs and
-  tags (`vX.Y.Z`), archive names (`dsd2pcm-X.Y.Z-...`, `libdsd2pcm-X.Y.Z-...`), the C
-  example's output (`dsd2pcm X.Y.Z:`), and in docs/release.md the example versions
-  (`vX.Y.Z`, `"X.Y.Z"`, `=X.Y.Z`);
+  tags (`vX.Y.Z`), archive names for every platform and the two source archives
+  (`dsd2pcm-X.Y.Z-...`, `libdsd2pcm-X.Y.Z-...`, `-src`), `git archive --prefix=dsd2pcm-X.Y.Z/`
+  and the `cd` into an unpacked archive, the C example's output (`dsd2pcm X.Y.Z:`), the
+  `--version` example's first line (`dsd2pcm X.Y.Z` alone), and in docs/release.md the example versions
+  (`vX.Y.Z`, `"X.Y.Z"`, `=X.Y.Z`, `for X.Y.Z)`, the `## X.Y.Z - date` heading, the
+  awk pattern that cuts the release notes, and the tag message);
 - the supported series in SECURITY.md (`X.Y.x`);
 - the `version:` of CITATION.cff.
 
@@ -28,7 +31,11 @@ import tomllib
 from pathlib import Path
 
 V = r"(\d+\.\d+\.\d+)"
-PLATFORMS = r"(?:x86_64-linux|aarch64-linux|i686-linux|aarch64-macos|x86_64-windows)"
+ARCH = r"(?:x86_64|aarch64|i686)"
+OS = r"(?:linux(?:-musl)?|macos|windows(?:-gnu)?)"
+# Every archive name the release publishes: per platform, and the two source archives.
+PLATFORMS = rf"(?:{ARCH}-{OS}|src)\b"
+ESC = r"((?:\d+\\\.){2}\d+)"  # a version written for a regular expression: 0\.2\.1
 
 # Release references in any doc.
 DOC_PATTERNS = [
@@ -37,6 +44,10 @@ DOC_PATTERNS = [
     re.compile(r"refs/tags/v" + V),
     re.compile(r"\b(?:lib)?dsd2pcm-" + V + r"-" + PLATFORMS),
     re.compile(r"\bdsd2pcm " + V + r":"),
+    re.compile(r"^dsd2pcm " + V + r"$"),  # the `--version` example's first line
+    re.compile(r"--prefix=dsd2pcm-" + V + r"/"),
+    re.compile(r"\bcd (?:dist/)?(?:lib)?dsd2pcm-" + V + r"\b"),
+    re.compile(r"\bgit tag -a v" + V + r' -m "dsd2pcm ' + V + r'"'),  # both versions
     re.compile(r"gh release (?:download|view) v" + V),
     re.compile(r"git (?:tag -a|push origin) v" + V),
 ]
@@ -45,6 +56,9 @@ RELEASE_MD_PATTERNS = [
     re.compile(r"(?<![\w.])v" + V + r"\b"),
     re.compile(r'"=?' + V + r'"'),
     re.compile(r"`=" + V + r"`"),
+    re.compile(r"\bfor " + V + r"\)"),  # "(... for X.Y.Z)" after the examples
+    re.compile(r"`## " + V + r" - "),
+    re.compile(r"\^## " + ESC + r" "),  # the awk pattern that cuts the release notes
 ]
 # Files that must hold at least one release reference, so a reworded doc cannot slip out
 # of the check unnoticed.
@@ -104,8 +118,10 @@ def main() -> int:
             for pat in patterns:
                 for m in pat.finditer(line):
                     found[rel] = found.get(rel, 0) + 1
-                    if m.group(1) != version:
-                        errors.append(f"{rel}:{n}: {m.group(0)!r} names {m.group(1)}, not {version}")
+                    for g in m.groups():  # a pattern may hold two versions (the tag and its message)
+                        named = g.replace("\\.", ".")
+                        if named != version:
+                            errors.append(f"{rel}:{n}: {m.group(0)!r} names {named}, not {version}")
     for rel in MUST_MATCH:
         if not found.get(rel):
             errors.append(f"{rel}: no release reference found; update the patterns in {Path(__file__).name}")

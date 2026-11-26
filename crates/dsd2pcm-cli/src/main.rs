@@ -15,6 +15,7 @@ mod windows;
 
 const USAGE: &str = "usage: dsd2pcm [OPTIONS] [--] IN.dsf|IN.dff OUT.wav
 options: [--rate 88200|176400|352800] [--cutoff 30|40|wide] [--gain DB] [--filter precise|fast|pysacd] [--single-thread | --threads N] [-n|--no-clobber]
+       dsd2pcm -V|--version
 
 Converts DSD64 to 24-bit PCM WAV. Defaults: --rate 176400 --cutoff 40 --gain 0 --filter precise.
 Cutoffs: 30 (pass 30 kHz, stop 36 kHz), 40 (pass 40 kHz, stop 48 kHz),
@@ -34,6 +35,18 @@ Filters (figures from docs/pcm-quality.md and docs/performance.md):
 during the conversion (default: replace OUT).
 --: every later argument is a file name, even one that starts with '-'.
 File names may be in any encoding the system allows.";
+
+/// The `Err` value that asks `main` for the version output (not a message).
+const VERSION_REQUEST: &str = "\0version";
+
+/// The output of `--version`: the version and the SIMD level in use now.
+fn version_text() -> String {
+    format!(
+        "dsd2pcm {}\nsimd: {}",
+        env!("CARGO_PKG_VERSION"),
+        dsd2pcm::simd_level()
+    )
+}
 
 /// Parses the arguments (without the program name). File names stay `OsString`s, so any
 /// name the operating system allows works; option values must be UTF-8. Messages quote
@@ -105,6 +118,7 @@ fn parse(args: Vec<OsString>) -> Result<(PathBuf, PathBuf, PcmOptions, OutputOpt
             }
             "-n" | "--no-clobber" => out_opts.no_clobber = true,
             "-h" | "--help" => return Err(String::new()),
+            "-V" | "--version" => return Err(VERSION_REQUEST.into()),
             "--" => {
                 pos.extend(it.by_ref().map(PathBuf::from));
                 break;
@@ -133,6 +147,10 @@ fn main() -> ExitCode {
     }
     let (inp, out, opts, out_opts) = match parse(std::env::args_os().skip(1).collect()) {
         Ok(v) => v,
+        Err(e) if e == VERSION_REQUEST => {
+            println!("{}", version_text());
+            return ExitCode::SUCCESS;
+        }
         Err(e) if e.is_empty() => {
             println!("{USAGE}");
             return ExitCode::SUCCESS;

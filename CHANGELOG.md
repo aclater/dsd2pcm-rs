@@ -9,6 +9,17 @@ with its measured effect. Releases up to 0.1.2 keep their behaviour as released.
 
 ## Unreleased
 
+## 0.2.1 - 2026-11-26
+
+A small release: the version and the SIMD level in use, for bug reports. No output byte changes
+(the golden hashes and the identity tests are unchanged); no change to the filters, the readers or
+the C ABI (version 1).
+
+### Added
+
+- `dsd2pcm --version` (also `-V`) prints the version and the SIMD level in use (`simd: avx2fma`), for bug reports.
+- The library reports that level: `dsd2pcm::simd_level()` in Rust and `dsd2pcm_simd_level()` in the C interface (appended; the ABI version stays 1). No output byte changes.
+
 ## 0.2.0 - 2026-11-24
 
 Quality: [docs/quality/0.2.0.md](docs/quality/0.2.0.md), every filter measured against 0.1.2

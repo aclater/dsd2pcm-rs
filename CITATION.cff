@@ -12,7 +12,7 @@ abstract: "DSD to 24-bit PCM conversion (DSF, DFF and SACD frames) as a Rust cra
 # as a single string and fails on a list, and "MIT OR Apache-2.0" is not a valid value.
 license: Apache-2.0
 # The workspace version (Cargo.toml); .github/scripts/check-doc-versions.py checks it.
-version: "0.2.0"
+version: "0.2.1"
 keywords:
   - DSD
   - PCM

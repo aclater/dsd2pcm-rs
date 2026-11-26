@@ -24,7 +24,7 @@ mod tables_precise;
 
 pub(crate) use dispatch::Isa;
 #[doc(hidden)]
-pub use dispatch::{with_simd_level, SimdLevel};
+pub use dispatch::{simd_level, with_simd_level, SimdLevel};
 
 use crate::error::{ArgumentKind, Error, Result};
 
