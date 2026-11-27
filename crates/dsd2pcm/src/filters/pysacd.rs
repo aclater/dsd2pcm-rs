@@ -685,7 +685,8 @@ mod tests {
                                 }
                             }
                             let name = format!("f64_{kind}_{ch}ch_{}", rate.hz());
-                            let got = format!("{:x}", h.finalize());
+                            let got: String =
+                                h.finalize().iter().map(|b| format!("{b:02x}")).collect();
                             assert_eq!(got, test_inputs::reference(&name), "{name} {level:?}");
                         }
                     }

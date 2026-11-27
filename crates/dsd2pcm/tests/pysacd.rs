@@ -25,7 +25,7 @@ fn sha(q: &[i32]) -> String {
     for v in q {
         h.update(v.to_le_bytes());
     }
-    format!("{:x}", h.finalize())
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn name(kind: &str, ch: usize, rate: PcmRate, gain: i32, tc0: u64) -> String {
