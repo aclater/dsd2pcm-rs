@@ -9,6 +9,10 @@ with its measured effect. Releases up to 0.1.2 keep their behaviour as released.
 
 ## Unreleased
 
+### Fixed
+
+- The command-line tool refuses `--threads N` together with `--single-thread` (usage error, exit status 2); until now the later one won silently.
+
 ## 0.2.1 - 2026-11-26
 
 A small release: the version and the SIMD level in use, for bug reports. No output byte changes

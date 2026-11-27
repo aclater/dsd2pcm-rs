@@ -255,6 +255,19 @@ fn threads_count() {
             stderr(&o)
         );
     }
+    // The two are alternatives, in either order: a usage error, nothing written.
+    for args in [
+        ["--single-thread", "--threads", "2"],
+        ["--threads", "2", "--single-thread"],
+        ["--single-thread", "--threads", "1"],
+    ] {
+        let mut a = os(&["in.dsf", "both.wav"]);
+        a.extend(os(&args));
+        let o = run(&d, &a);
+        assert_eq!(o.status.code(), Some(2), "{args:?}: {}", stderr(&o));
+        assert!(stderr(&o).contains("cannot be used together"), "{args:?}");
+        assert!(!d.join("both.wav").exists(), "{args:?}");
+    }
     let o = run(&d, &os(&["--help"]));
     assert!(String::from_utf8_lossy(&o.stdout).contains("--threads N"));
     std::fs::remove_dir_all(&d).unwrap();

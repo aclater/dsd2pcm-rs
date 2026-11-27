@@ -28,8 +28,8 @@ option values must be UTF-8, and a value that is not is a usage error.
 | `--cutoff` | `30`, `40`, `wide` | `40` | Filter: passband to 30 kHz, 40 kHz, or 80 kHz (`wide`, 176.4 and 352.8 kHz only). `80` is accepted for `wide`. |
 | `--gain` | -120 to +24 (dB) | `0` | Applied before quantising to 24 bits. |
 | `--filter` | `precise`, `fast`, `pysacd` | `precise` | `precise`: at least 150 dB of stopband, every rate and cutoff; `default` is accepted for it. `fast`: scarletbook-pcm 0.7.0's filter, byte-identical with it, lower quality (about 110 dB of stopband) at about 0.55 times precise's CPU time ([performance](performance.md#precise-against-fast-by-rate-and-cutoff)); the default up to 0.1.2. `pysacd`: pysacd's filter and dithered quantiser computed in `f64`, 88.2 and 176.4 kHz only, standard cutoff only. |
-| `--single-thread` | | all cores | Convert on the calling thread only. |
-| `--threads` | 1 to 256 | all cores | Convert on at most N threads, the calling one included (`Threads::Count` in Rust, `threads` in C). `1` is `--single-thread`; 0, a count above 256 or anything else is a usage error. The output bytes are the same with any count. |
+| `--single-thread` | | all cores | Convert on the calling thread only. Not with `--threads` (a usage error, exit status 2). |
+| `--threads` | 1 to 256 | all cores | Convert on at most N threads, the calling one included (`Threads::Count` in Rust, `threads` in C). `1` is `--single-thread`; 0, a count above 256 or anything else is a usage error, and so is giving `--threads` and `--single-thread` together. The output bytes are the same with any count. |
 | `-n`, `--no-clobber` | | off | Refuse an existing `OUT` (exit status 1, the file left as it was), and never replace a file that appears at `OUT` during the conversion. |
 | `--` | | | Ends the options: every later argument is a file name. |
 | `-h`, `--help` | | | Print the usage to standard output and exit. |
