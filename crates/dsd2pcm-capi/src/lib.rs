@@ -501,7 +501,6 @@ pub(crate) fn file_report(r: &dsd::Report) -> dsd2pcm_file_report {
     out
 }
 
-/// The static name of a status code.
 /// [`dsd2pcm::simd_level`] as a NUL-terminated static string.
 pub(crate) fn simd_level_str() -> &'static [u8] {
     match dsd2pcm::simd_level() {
@@ -513,6 +512,7 @@ pub(crate) fn simd_level_str() -> &'static [u8] {
     }
 }
 
+/// The static name of a status code.
 pub(crate) fn status_str(status: c_int) -> &'static [u8] {
     match status {
         DSD2PCM_OK => b"ok\0",

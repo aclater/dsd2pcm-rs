@@ -48,6 +48,8 @@ fn version_text() -> String {
     )
 }
 
+const BOTH_THREAD_OPTIONS: &str = "--single-thread and --threads cannot be used together";
+
 /// Parses the arguments (without the program name). File names stay `OsString`s, so any
 /// name the operating system allows works; option values must be UTF-8. Messages quote
 /// argument text with `{:?}`, so control characters in it reach the terminal escaped.
@@ -56,6 +58,8 @@ fn parse(args: Vec<OsString>) -> Result<(PathBuf, PathBuf, PcmOptions, OutputOpt
     let mut pos = Vec::new();
     let mut opts = PcmOptions::new(PcmRate::Hz176400);
     let mut out_opts = OutputOptions::default();
+    // `--single-thread` and `--threads N` are alternatives: giving both is a usage error.
+    let (mut single_thread, mut threads_option) = (false, false);
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
         // A name that is not UTF-8 is never an option.
@@ -101,8 +105,18 @@ fn parse(args: Vec<OsString>) -> Result<(PathBuf, PathBuf, PcmOptions, OutputOpt
                     v => return Err(format!("filter {v:?}: precise, fast or pysacd")),
                 }
             }
-            "--single-thread" => opts.threads = Threads::Single,
+            "--single-thread" => {
+                if threads_option {
+                    return Err(BOTH_THREAD_OPTIONS.into());
+                }
+                single_thread = true;
+                opts.threads = Threads::Single;
+            }
             "--threads" => {
+                if single_thread {
+                    return Err(BOTH_THREAD_OPTIONS.into());
+                }
+                threads_option = true;
                 let v = val("--threads")?;
                 let bad = || format!("--threads {v:?}: a whole number from 1 to {}", Threads::MAX);
                 let n = v

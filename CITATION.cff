@@ -13,6 +13,8 @@ abstract: "DSD to 24-bit PCM conversion (DSF, DFF and SACD frames) as a Rust cra
 license: Apache-2.0
 # The workspace version (Cargo.toml); .github/scripts/check-doc-versions.py checks it.
 version: "0.2.1"
+# The day of the tag (UTC); check-doc-versions.py compares it with the CHANGELOG heading.
+date-released: 2026-11-26
 keywords:
   - DSD
   - PCM
