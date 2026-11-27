@@ -24,5 +24,11 @@ updates:
     groups:
       cargo:
         patterns: ["*"]
+    # sha2 0.11 needs rustc 1.88, above the 1.85 floor the tests are built with (the `msrv`
+    # check); it is a dev-dependency that only hex-formats test digests. Not proposed again
+    # until the floor moves.
+    ignore:
+      - dependency-name: "sha2"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     commit-message:
       prefix: deps
