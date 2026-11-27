@@ -37,7 +37,7 @@ option values must be UTF-8, and a value that is not is a usage error.
 
 `--version` prints two lines:
 
-```
+```text
 dsd2pcm 0.2.1
 simd: avx2fma
 ```

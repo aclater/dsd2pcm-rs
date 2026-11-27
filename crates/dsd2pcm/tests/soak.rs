@@ -210,10 +210,65 @@ fn rss_kib() -> Option<u64> {
     line.split_whitespace().nth(1)?.parse().ok()
 }
 
-/// Threads of this process, on Linux.
+/// Threads of this process, on Linux, without the harness's threads of the OTHER soak test.
+/// The harness runs each test on a thread named after it and starts them in its own time: the
+/// other test's thread can appear (or end) between a baseline and a later count, which is no
+/// worker of the library. This test's own thread and the library's workers are counted, and
+/// so are the main thread and any other: an unnamed thread inherits its creator's name on
+/// Linux, so the workers started from this test carry THIS test's name in `/proc`, and
+/// skipping that name would hide them (and the thread-leak check could never fail).
 fn threads() -> Option<usize> {
-    Some(std::fs::read_dir("/proc/self/task").ok()?.count())
+    let me = std::thread::current();
+    threads_besides_other_tests(me.name().unwrap_or(""))
 }
+
+/// [`threads`] for the test thread named `own`.
+fn threads_besides_other_tests(own: &str) -> Option<usize> {
+    // `comm` is a name cut to 15 bytes.
+    let cut = |s: &str| s.as_bytes()[..s.len().min(15)].to_vec();
+    let own = cut(own);
+    let mut n = 0;
+    for task in std::fs::read_dir("/proc/self/task").ok()? {
+        // A thread that ended since the listing is not counted.
+        let Ok(comm) = std::fs::read_to_string(task.ok()?.path().join("comm")) else {
+            continue;
+        };
+        let comm = comm.trim_end_matches('\n').as_bytes().to_vec();
+        let other_test = comm != own && TEST_NAMES.iter().any(|t| cut(t) == comm);
+        if !other_test {
+            n += 1;
+        }
+    }
+    Some(n)
+}
+
+/// The positive control of the thread count: one parked thread started from this test
+/// without a name (it carries this test's name in `/proc`) must be counted. Run first in each
+/// soak test, under the lock.
+fn thread_count_sees_a_worker() {
+    let before = threads().expect("/proc/self/task");
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let parked = std::thread::spawn(move || {
+        let _ = rx.recv();
+    });
+    let t0 = Instant::now();
+    let seen = loop {
+        let n = threads().unwrap();
+        if n > before || t0.elapsed().as_secs() >= 1 {
+            break n;
+        }
+        std::thread::yield_now();
+    };
+    drop(tx);
+    parked.join().unwrap();
+    assert!(
+        seen > before,
+        "the thread count did not see a parked worker: {seen} threads, {before} before"
+    );
+}
+
+/// The names of this file's tests: the harness's threads for them.
+const TEST_NAMES: [&str; 2] = ["soak", "soak_catches_a_leak"];
 
 /// Waits up to a second for the thread count to fall back to `base`: a joined thread can
 /// stay listed for a moment after `join` returns. Returns the last count.
@@ -719,6 +774,7 @@ fn judge(name: &str, m: &Measured) -> Option<Verdicts> {
 #[ignore = "soak test: minutes to hours; run with --ignored (see the file's comment)"]
 fn soak() {
     let _one = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    thread_count_sees_a_worker();
     let env = |name: &str| -> Option<u64> {
         let v = std::env::var(name).ok()?;
         Some(v.parse().unwrap_or_else(|_| panic!("{name}: a number")))
@@ -754,6 +810,7 @@ fn soak() {
 #[ignore = "soak test: about a minute; run with --ignored (see the file's comment)"]
 fn soak_catches_a_leak() {
     let _one = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    thread_count_sees_a_worker();
     // 1 MiB per iteration, written: the live heap and the resident set both catch it.
     let name = "leak of 1 MiB per iteration";
     let leak = Leak {

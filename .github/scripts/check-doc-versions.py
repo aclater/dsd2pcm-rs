@@ -16,7 +16,7 @@ The version is `[workspace.package] version` in Cargo.toml. It must also be:
   (`vX.Y.Z`, `"X.Y.Z"`, `=X.Y.Z`, `for X.Y.Z)`, the `## X.Y.Z - date` heading, the
   awk pattern that cuts the release notes, and the tag message);
 - the supported series in SECURITY.md (`X.Y.x`);
-- the `version:` of CITATION.cff.
+- the `version:` of CITATION.cff, and its `date-released:` equals the date of that CHANGELOG heading.
 
 Between a version bump and its tag the docs already name the new version, whose release
 does not exist yet: this check only compares text, and the Quick start check
@@ -96,16 +96,19 @@ def main() -> int:
 
     # CHANGELOG.md: the first section heading after any "Unreleased" one.
     newest = None
-    for line in (root / "CHANGELOG.md").read_text(encoding="utf-8").splitlines():
-        m = re.match(r"^## +\[?([^\]\s]+)\]?", line)
-        if not m:
-            continue
-        if m.group(1).lower() == "unreleased":
-            continue
-        newest = m.group(1)
-        break
-    if newest != version:
-        errors.append(f"CHANGELOG.md: newest version section is {newest!r}, not {version}")
+    if not (root / "CHANGELOG.md").exists():
+        errors.append("CHANGELOG.md: missing")
+    else:
+        for line in (root / "CHANGELOG.md").read_text(encoding="utf-8").splitlines():
+            m = re.match(r"^## +\[?([^\]\s]+)\]?", line)
+            if not m:
+                continue
+            if m.group(1).lower() == "unreleased":
+                continue
+            newest = m.group(1)
+            break
+        if newest != version:
+            errors.append(f"CHANGELOG.md: newest version section is {newest!r}, not {version}")
 
     docs = [root / "README.md", root / "SECURITY.md"] + sorted((root / "docs").rglob("*.md"))
     found = {}
@@ -133,6 +136,24 @@ def main() -> int:
             errors.append("CITATION.cff: no version")
         elif m.group(1) != version:
             errors.append(f"CITATION.cff: version {m.group(1)}, not {version}")
+        text = citation.read_text(encoding="utf-8")
+        released = re.search(r"^date-released:\s*\"?(\d{4}-\d{2}-\d{2})\"?\s*$", text, re.M)
+        changelog = root / "CHANGELOG.md"
+        heading = None
+        if changelog.exists():
+            heading = re.search(
+                r"^## +\[?" + re.escape(version) + r"\]? +- +(\d{4}-\d{2}-\d{2})",
+                changelog.read_text(encoding="utf-8"),
+                re.M,
+            )
+        if released is None:
+            errors.append("CITATION.cff: no date-released")
+        elif heading is None:
+            errors.append(f"CHANGELOG.md: missing, or the {version} heading has no date")
+        elif released.group(1) != heading.group(1):
+            errors.append(
+                f"CITATION.cff: date-released {released.group(1)}, CHANGELOG.md says {heading.group(1)}"
+            )
 
     security = root / "SECURITY.md"
     if security.exists():
