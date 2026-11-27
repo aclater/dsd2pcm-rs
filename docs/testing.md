@@ -12,8 +12,33 @@ and no undefined behaviour or data races. These checks cover that, on Linux.
 | C leak loop under AddressSanitizer, LeakSanitizer and UBSan | `crates/dsd2pcm-capi/tests/leakloop.c`, `ci.yml` (C library) | every pull request and push |
 | Miri: the C interface's tests and the core crate's feasible tests | `sanitizers.yml` (miri (capi), miri (core-lib), miri (core-integration)) | every pull request, weekly, by hand |
 | ThreadSanitizer: threaded whole-file path, frame runs, soak, C interface | `sanitizers.yml` (tsan) | weekly, by hand |
+| Heap-flat, exact, with its positive control (a leak must fail it) | `crates/dsd2pcm/tests/heap_flat.rs`, `cargo test` | every pull request and push; by hand with `HEAP_FLAT_CONVERSIONS=100` before a release |
 | Soak test, one hour | by hand, before a release | results below |
 | Valgrind memcheck of the command-line tool | by hand, before a release | results below |
+
+## Heap-flat test
+
+`crates/dsd2pcm/tests/heap_flat.rs` counts the live heap (bytes allocated and not freed) with a
+global allocator. After one warm-up conversion, the heap read between conversions, when no
+worker thread is running, must be the same number of bytes after every conversion: equality
+is the condition, with no margin, so a leak of one byte per conversion fails it. It covers:
+
+- success, for every valid combination of filter (precise, fast, pysacd), rate, cutoff and
+  channel count (1, 2, 6), threaded and on one thread, 10 conversions each (a valid
+  combination is one the library accepts: no `wide` at 88.2 kHz, pysacd at 88.2 and
+  176.4 kHz with the standard cutoff only);
+- the failure paths, each on its own, at 176.4 kHz only, with 2 and 6 channels, for each
+  filter, threaded and on one thread, from a DSF and from a DFF file: cancelled from the
+  progress hook, truncated input, a corrupt header, and an output that fails.
+
+A control runs first: the same code with a deliberate leak (1 byte and 4 KiB per
+conversion) must fail the gate, so the gate is known to be able to fail.
+The counter sees what Rust code allocates through the global allocator: it does not see thread
+stacks, memory mapped or allocated by the system or a C library outside it, or leaked
+handles and threads (the soak below counts threads and the resident set).
+`HEAP_FLAT_CONVERSIONS` sets the conversions per failure-path case (30 by default). Run it by
+hand with 100 before a release: it is not yet a step of the release test plan. It does not
+replace the one-hour soak below, which judges the resident set and the thread count as well.
 
 ## Soak test
 
