@@ -10,7 +10,7 @@ and no undefined behaviour or data races. These checks cover that, on Linux.
 |---|---|---|
 | Soak test, short (1000 iterations), and its leak self-test | `crates/dsd2pcm/tests/soak.rs`, `ci.yml` (x86_64, aarch64) | every pull request and push |
 | C leak loop under AddressSanitizer, LeakSanitizer and UBSan | `crates/dsd2pcm-capi/tests/leakloop.c`, `ci.yml` (C library) | every pull request and push |
-| Miri: the C interface's tests and the core crate's feasible tests | `sanitizers.yml` (miri (capi), miri (core-lib), miri (core-integration)) | every pull request, weekly, by hand |
+| Miri: the C interface's tests and the core crate's feasible tests | `sanitizers.yml` (miri (capi), miri (core-lib), miri (core-containers), miri (core-flac-frames)) | every pull request, weekly, by hand |
 | ThreadSanitizer: threaded whole-file path, frame runs, soak, C interface | `sanitizers.yml` (tsan) | weekly, by hand |
 | Heap-flat, exact, with its positive control (a leak must fail it) | `crates/dsd2pcm/tests/heap_flat.rs`, `cargo test` | every pull request and push; by hand with `HEAP_FLAT_CONVERSIONS=100` before a release |
 | Soak test, one hour | by hand, before a release | results below |
@@ -183,10 +183,15 @@ are left out, each with its reason: `#[cfg_attr(miri, ignore = "...")]` in the t
 `--skip` in `.github/scripts/miri-core.sh` for the library's kernel proofs and one
 integration test.
 
-`sanitizers.yml` runs both on every pull request, as the jobs `miri (capi)` and
-`miri (core)`, side by side, and every week. Each takes under 20 minutes, so both can be
-required checks; until 0.2.0 Miri ran on pull requests only when they touched the C
-interface, and with 0.2.0's tests the core job hit its 150-minute limit.
+`sanitizers.yml` runs them on every pull request, as the jobs `miri (capi)`, `miri
+(core-lib)`, `miri (core-containers)` and `miri (core-flac-frames)`, side by side, and every
+week. `.github/scripts/miri-core.sh PART` (`lib`, `containers`, `flac-frames`, or no
+argument for all three) runs one part and prints how long each step took. The whole core
+run is too long for one job (66 minutes on one core of an Intel Core i9-13900H at 0.2.1, over
+the 45-minute limit), so it is split: `lib` took 35 minutes (its job has a 60-minute limit,
+for a slower runner), `containers` 18, `flac` 10 and `frames` 4 (the last two in one job).
+Until 0.2.0 Miri ran on pull requests only when they touched the C interface, and with
+0.2.0's tests the core job hit its 150-minute limit.
 
 At 0.2.0 on nightly-2026-11-01, no findings in the tests run; wall time with the build, on
 one core of a Ryzen AI Max+ 395:

@@ -26,16 +26,23 @@ env:
   RUST_NIGHTLY: nightly-2026-11-01  # Miri and the sanitizers need a nightly
 
 jobs:
-  # Miri, in two jobs that run side by side: the C interface, the core crate. Each takes
-  # under 20 minutes (docs/testing.md); the limit leaves room for a slower runner.
+  # Miri, in four jobs that run side by side: the C interface and three parts of the core
+  # crate (.github/scripts/miri-core.sh prints each part's time). Measured on one core of a
+  # fast desktop CPU at 0.2.1: lib 35 minutes, containers 18, flac and frames 13 together;
+  # the whole core run is 66 minutes, over the 45-minute limit of a job. A hosted runner may
+  # be slower than that core, so `lib` has 60 minutes (docs/testing.md).
   miri:
     name: miri (${{ matrix.part }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix:
-        part: [capi, core]
+        include:
+          - {part: capi, timeout: 45}
+          - {part: core-lib, timeout: 60}
+          - {part: core-containers, timeout: 45}
+          - {part: core-flac-frames, timeout: 45}
     container:
       # UBI 10 (ubi10/ubi 10.3), pinned by digest.
       image: registry.access.redhat.com/ubi10/ubi@sha256:1e9193f051ac70582821c8a941325c5053488c54c75cd0c31b577d871ac29dba
@@ -59,9 +66,11 @@ jobs:
       - name: C interface (dsd2pcm-capi)
         if: matrix.part == 'capi'
         run: cargo miri test --locked -p dsd2pcm-capi
-      - name: Core crate (.github/scripts/miri-core.sh)
-        if: matrix.part == 'core'
-        run: .github/scripts/miri-core.sh
+      - name: Core crate, one part (.github/scripts/miri-core.sh)
+        if: matrix.part != 'capi'
+        env:
+          PART: ${{ matrix.part }}
+        run: .github/scripts/miri-core.sh "${PART#core-}"
 
   tsan:
     name: tsan
